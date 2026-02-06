@@ -1,0 +1,411 @@
+package clientip
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+type mockMetrics struct {
+	mu             sync.Mutex
+	successCount   map[string]int
+	failureCount   map[string]int
+	securityEvents map[string]int
+}
+
+func newMockMetrics() *mockMetrics {
+	return &mockMetrics{
+		successCount:   make(map[string]int),
+		failureCount:   make(map[string]int),
+		securityEvents: make(map[string]int),
+	}
+}
+
+func (m *mockMetrics) RecordExtractionSuccess(source string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.successCount[source]++
+}
+
+func (m *mockMetrics) RecordExtractionFailure(source string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failureCount[source]++
+}
+
+func (m *mockMetrics) RecordSecurityEvent(event string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.securityEvents[event]++
+}
+
+func (m *mockMetrics) getSuccessCount(source string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.successCount[source]
+}
+
+func (m *mockMetrics) getFailureCount(source string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.failureCount[source]
+}
+
+func (m *mockMetrics) getSecurityEventCount(event string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.securityEvents[event]
+}
+
+func TestMetrics_ExtractionSuccess(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:12345",
+		Header:     make(http.Header),
+	}
+
+	result := extractor.ExtractIP(req)
+	if !result.Valid() {
+		t.Errorf("ExtractIP() failed: %v", result.Err)
+	}
+
+	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 1 {
+		t.Errorf("success count for %s = %d, want 1", SourceRemoteAddr, got)
+	}
+}
+
+func TestMetrics_ExtractionFailure(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Errorf("ExtractIP() should have failed for loopback IP")
+	}
+
+	if got := metrics.getFailureCount(SourceRemoteAddr); got != 1 {
+		t.Errorf("failure count for %s = %d, want 1", SourceRemoteAddr, got)
+	}
+}
+
+func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount("invalid_ip"); got != 1 {
+		t.Errorf("security event count for invalid_ip = %d, want 1", got)
+	}
+}
+
+func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		AllowPrivateIPs(false),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "192.168.1.1:8080",
+		Header:     make(http.Header),
+	}
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount("private_ip"); got != 1 {
+		t.Errorf("security event count for private_ip = %d, want 1", got)
+	}
+}
+
+func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Add("X-Forwarded-For", "8.8.8.8")
+	req.Header.Add("X-Forwarded-For", "1.1.1.1")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount("multiple_headers"); got != 1 {
+		t.Errorf("security event count for multiple_headers = %d, want 1", got)
+	}
+}
+
+func TestMetrics_SecurityEvent_ProxyCountOutOfRange(t *testing.T) {
+	metrics := newMockMetrics()
+	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	extractor, err := New(
+		TrustedProxies(cidrs, 2, 3),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "10.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount("proxy_count_out_of_range"); got != 1 {
+		t.Errorf("security event count for proxy_count_out_of_range = %d, want 1", got)
+	}
+}
+
+func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		MaxChainLength(5),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 5.5.5.5, 6.6.6.6")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount("chain_too_long"); got != 1 {
+		t.Errorf("security event count for chain_too_long = %d, want 1", got)
+	}
+}
+
+func TestMetrics_MultipleExtractions(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Successful extraction
+	req1 := &http.Request{
+		RemoteAddr: "1.1.1.1:12345",
+		Header:     make(http.Header),
+	}
+	extractor.ExtractIP(req1)
+
+	// Another successful extraction
+	req2 := &http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header:     make(http.Header),
+	}
+	extractor.ExtractIP(req2)
+
+	// Failed extraction
+	req3 := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	extractor.ExtractIP(req3)
+
+	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 2 {
+		t.Errorf("success count = %d, want 2", got)
+	}
+
+	if got := metrics.getFailureCount(SourceRemoteAddr); got != 1 {
+		t.Errorf("failure count = %d, want 1", got)
+	}
+}
+
+func TestMetrics_DifferentSources(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	// Success from X-Forwarded-For
+	req1 := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req1.Header.Set("X-Forwarded-For", "1.1.1.1")
+	extractor.ExtractIP(req1)
+
+	// Success from RemoteAddr
+	req2 := &http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header:     make(http.Header),
+	}
+	extractor.ExtractIP(req2)
+
+	if got := metrics.getSuccessCount(SourceXForwardedFor); got != 1 {
+		t.Errorf("XFF success count = %d, want 1", got)
+	}
+
+	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 1 {
+		t.Errorf("RemoteAddr success count = %d, want 1", got)
+	}
+}
+
+func TestMetrics_ConcurrentAccess(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	const goroutines = 50
+	done := make(chan bool, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			req := &http.Request{
+				RemoteAddr: "1.1.1.1:12345",
+				Header:     make(http.Header),
+			}
+			extractor.ExtractIP(req)
+			done <- true
+		}()
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	if got := metrics.getSuccessCount(SourceRemoteAddr); got != goroutines {
+		t.Errorf("success count = %d, want %d", got, goroutines)
+	}
+}
+
+func TestNoopMetrics(t *testing.T) {
+	noop := noopMetrics{}
+
+	// Should not panic
+	noop.RecordExtractionSuccess("test")
+	noop.RecordExtractionFailure("test")
+	noop.RecordSecurityEvent("test")
+}
+
+func TestPrometheusMetrics_Creation(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metricsA, err := NewPrometheusMetricsWithRegisterer(registry)
+	if err != nil {
+		t.Fatalf("NewPrometheusMetricsWithRegisterer() error = %v", err)
+	}
+
+	metricsB, err := NewPrometheusMetricsWithRegisterer(registry)
+	if err != nil {
+		t.Fatalf("second NewPrometheusMetricsWithRegisterer() error = %v", err)
+	}
+
+	if metricsA == nil || metricsB == nil {
+		t.Fatal("expected non-nil prometheus metrics instances")
+	}
+
+	metricsA.RecordExtractionSuccess(SourceRemoteAddr)
+	metricsB.RecordSecurityEvent("multiple_headers")
+}
+
+type failingRegisterer struct {
+	err error
+}
+
+func (r failingRegisterer) Register(prometheus.Collector) error {
+	return r.err
+}
+
+func (r failingRegisterer) MustRegister(...prometheus.Collector) {}
+
+func (r failingRegisterer) Unregister(prometheus.Collector) bool {
+	return false
+}
+
+func TestPrometheusMetrics_RegisterError(t *testing.T) {
+	registerErr := errors.New("register failed")
+
+	_, err := NewPrometheusMetricsWithRegisterer(failingRegisterer{err: registerErr})
+	if !errors.Is(err, registerErr) {
+		t.Fatalf("error = %v, want wrapped register error", err)
+	}
+}
+
+func TestPrometheusMetrics_IncompatibleCollectorType(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	gauge := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "ip_extraction_total",
+			Help: "Total number of IP extraction attempts by source (x-forwarded-for, x-real-ip, remote-addr) and result (success, invalid).",
+		},
+		[]string{"source", "result"},
+	)
+	if err := registry.Register(gauge); err != nil {
+		t.Fatalf("registry.Register() error = %v", err)
+	}
+
+	_, err := NewPrometheusMetricsWithRegisterer(registry)
+	if err == nil {
+		t.Fatal("expected error for incompatible existing collector type")
+	}
+	if !strings.Contains(err.Error(), "incompatible collector type") {
+		t.Fatalf("error = %q, want incompatible collector type message", err.Error())
+	}
+}
+
+func TestWithPrometheusMetricsRegisterer_OptionError(t *testing.T) {
+	registerErr := errors.New("register failed")
+	cfg := defaultConfig()
+
+	err := WithPrometheusMetricsRegisterer(failingRegisterer{err: registerErr})(cfg)
+	if !errors.Is(err, registerErr) {
+		t.Fatalf("error = %v, want wrapped register error", err)
+	}
+}

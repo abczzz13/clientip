@@ -63,6 +63,38 @@ extractor, err := clientip.New(
 )
 ```
 
+### Security mode (strict vs lax)
+
+```go
+// Strict is default and fails closed on security errors.
+strictExtractor, _ := clientip.New(
+    clientip.WithSecurityMode(clientip.SecurityModeStrict),
+)
+
+// Lax mode allows fallback to lower-priority sources.
+laxExtractor, _ := clientip.New(
+    clientip.WithSecurityMode(clientip.SecurityModeLax),
+)
+```
+
+### Prometheus metrics (simple setup)
+
+```go
+extractor, err := clientip.New(
+    clientip.WithPrometheusMetrics(),
+)
+```
+
+### Prometheus metrics (custom registerer)
+
+```go
+registry := prometheus.NewRegistry()
+
+extractor, err := clientip.New(
+    clientip.WithPrometheusMetricsRegisterer(registry),
+)
+```
+
 ## Options
 
 - `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max proxy counts
@@ -72,9 +104,14 @@ extractor, err := clientip.New(
 - `MaxChainLength(int)` limit `X-Forwarded-For` chain length (default 100)
 - `XFFStrategy(Strategy)` choose `RightmostIP` (default) or `LeftmostIP`
 - `Priority(...string)` set source order; built-ins: `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`
+- `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(*slog.Logger)` inject logger
-- `WithMetrics(Metrics)` inject metrics (Prometheus helper: `NewPrometheusMetrics`)
+- `WithPrometheusMetrics()` enable Prometheus metrics with default registerer
+- `WithPrometheusMetricsRegisterer(prometheus.Registerer)` enable Prometheus metrics with custom registerer
+- `WithMetrics(Metrics)` inject custom metrics implementation directly
 - `WithDebugInfo(bool)` include chain analysis in `Result.DebugInfo`
+
+Options are applied in order. If multiple metrics options are provided, the last one wins.
 
 ## Result
 
@@ -118,6 +155,8 @@ if !result.Valid() {
 - Rejects multiple `X-Forwarded-For` headers (spoofing defense)
 - Enforces proxy count bounds and chain length
 - Filters implausible IPs (loopback, multicast, reserved); optional private IP allowlist
+- Strict fail-closed behavior is the default (`SecurityModeStrict`)
+- Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
 
 ## Performance
 

@@ -1,0 +1,545 @@
+package clientip
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/netip"
+	"testing"
+)
+
+func TestForwardedForSource_Extract(t *testing.T) {
+	extractor, _ := New()
+	source := &forwardedForSource{extractor: extractor}
+
+	tests := []struct {
+		name        string
+		xffHeaders  []string
+		wantValid   bool
+		wantIP      string
+		wantErr     error
+		wantErrType any
+	}{
+		{
+			name:       "single valid IP",
+			xffHeaders: []string{"1.1.1.1"},
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+		},
+		{
+			name:       "multiple IPs in chain",
+			xffHeaders: []string{"1.1.1.1, 8.8.8.8"},
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+		},
+		{
+			name:        "no XFF header",
+			xffHeaders:  []string{},
+			wantValid:   false,
+			wantErrType: &ExtractionError{},
+		},
+		{
+			name:        "multiple XFF headers",
+			xffHeaders:  []string{"1.1.1.1", "8.8.8.8"},
+			wantValid:   false,
+			wantErr:     ErrMultipleXFFHeaders,
+			wantErrType: &MultipleHeadersError{},
+		},
+		{
+			name:       "invalid IP in chain",
+			xffHeaders: []string{"not-an-ip"},
+			wantValid:  false,
+		},
+		{
+			name:       "private IP rejected",
+			xffHeaders: []string{"192.168.1.1"},
+			wantValid:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				Header: make(http.Header),
+			}
+			for _, h := range tt.xffHeaders {
+				req.Header.Add("X-Forwarded-For", h)
+			}
+
+			result, err := source.Extract(context.Background(), req)
+
+			if tt.wantValid {
+				if err != nil {
+					t.Errorf("Extract() error = %v, want nil", err)
+				}
+				want := netip.MustParseAddr(tt.wantIP)
+				if result.IP != want {
+					t.Errorf("Extract() IP = %v, want %v", result.IP, want)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Extract() error = nil, want non-nil")
+				}
+			}
+
+			if tt.wantErrType != nil {
+				if !errorIsType(err, tt.wantErrType) {
+					t.Errorf("Extract() error type = %T, want %T", err, tt.wantErrType)
+				}
+			}
+
+			if tt.wantErr != nil {
+				if !errorContains(err, tt.wantErr) {
+					t.Errorf("Extract() error does not contain expected error: %v", tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestForwardedForSource_Name(t *testing.T) {
+	extractor, _ := New()
+	source := &forwardedForSource{extractor: extractor}
+
+	if source.Name() != SourceXForwardedFor {
+		t.Errorf("Name() = %q, want %q", source.Name(), SourceXForwardedFor)
+	}
+}
+
+func TestSingleHeaderSource_Extract(t *testing.T) {
+	extractor, _ := New()
+
+	tests := []struct {
+		name        string
+		headerName  string
+		headerValue string
+		wantValid   bool
+		wantIP      string
+	}{
+		{
+			name:        "valid IP",
+			headerName:  "X-Real-IP",
+			headerValue: "1.1.1.1",
+			wantValid:   true,
+			wantIP:      "1.1.1.1",
+		},
+		{
+			name:        "IPv6",
+			headerName:  "X-Real-IP",
+			headerValue: "2606:4700:4700::1",
+			wantValid:   true,
+			wantIP:      "2606:4700:4700::1",
+		},
+		{
+			name:        "empty header",
+			headerName:  "X-Real-IP",
+			headerValue: "",
+			wantValid:   false,
+		},
+		{
+			name:        "invalid IP",
+			headerName:  "X-Real-IP",
+			headerValue: "not-an-ip",
+			wantValid:   false,
+		},
+		{
+			name:        "private IP rejected",
+			headerName:  "X-Real-IP",
+			headerValue: "192.168.1.1",
+			wantValid:   false,
+		},
+		{
+			name:        "custom header name",
+			headerName:  "CF-Connecting-IP",
+			headerValue: "1.1.1.1",
+			wantValid:   true,
+			wantIP:      "1.1.1.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &singleHeaderSource{
+				extractor:  extractor,
+				headerName: tt.headerName,
+				sourceName: NormalizeSourceName(tt.headerName),
+			}
+
+			req := &http.Request{
+				Header: make(http.Header),
+			}
+			if tt.headerValue != "" {
+				req.Header.Set(tt.headerName, tt.headerValue)
+			}
+
+			result, err := source.Extract(context.Background(), req)
+
+			if tt.wantValid {
+				if err != nil {
+					t.Errorf("Extract() error = %v, want nil", err)
+				}
+				want := netip.MustParseAddr(tt.wantIP)
+				if result.IP != want {
+					t.Errorf("Extract() IP = %v, want %v", result.IP, want)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Extract() error = nil, want non-nil")
+				}
+			}
+		})
+	}
+}
+
+func TestSingleHeaderSource_Name(t *testing.T) {
+	extractor, _ := New()
+
+	tests := []struct {
+		headerName string
+		wantName   string
+	}{
+		{
+			headerName: "X-Real-IP",
+			wantName:   "x_real_ip",
+		},
+		{
+			headerName: "CF-Connecting-IP",
+			wantName:   "cf_connecting_ip",
+		},
+		{
+			headerName: "X-Custom-Header",
+			wantName:   "x_custom_header",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.headerName, func(t *testing.T) {
+			source := &singleHeaderSource{
+				extractor:  extractor,
+				headerName: tt.headerName,
+				sourceName: NormalizeSourceName(tt.headerName),
+			}
+
+			if source.Name() != tt.wantName {
+				t.Errorf("Name() = %q, want %q", source.Name(), tt.wantName)
+			}
+		})
+	}
+}
+
+func TestRemoteAddrSource_Extract(t *testing.T) {
+	extractor, _ := New()
+	source := &remoteAddrSource{extractor: extractor}
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		wantValid  bool
+		wantIP     string
+	}{
+		{
+			name:       "valid IPv4 with port",
+			remoteAddr: "1.1.1.1:12345",
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+		},
+		{
+			name:       "valid IPv6 with port",
+			remoteAddr: "[2606:4700:4700::1]:8080",
+			wantValid:  true,
+			wantIP:     "2606:4700:4700::1",
+		},
+		{
+			name:       "empty RemoteAddr",
+			remoteAddr: "",
+			wantValid:  false,
+		},
+		{
+			name:       "loopback rejected",
+			remoteAddr: "127.0.0.1:8080",
+			wantValid:  false,
+		},
+		{
+			name:       "private IP rejected",
+			remoteAddr: "192.168.1.1:8080",
+			wantValid:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				RemoteAddr: tt.remoteAddr,
+			}
+
+			result, err := source.Extract(context.Background(), req)
+
+			if tt.wantValid {
+				if err != nil {
+					t.Errorf("Extract() error = %v, want nil", err)
+				}
+				want := netip.MustParseAddr(tt.wantIP)
+				if result.IP != want {
+					t.Errorf("Extract() IP = %v, want %v", result.IP, want)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Extract() error = nil, want non-nil")
+				}
+			}
+		})
+	}
+}
+
+func TestRemoteAddrSource_Name(t *testing.T) {
+	extractor, _ := New()
+	source := &remoteAddrSource{extractor: extractor}
+
+	if source.Name() != SourceRemoteAddr {
+		t.Errorf("Name() = %q, want %q", source.Name(), SourceRemoteAddr)
+	}
+}
+
+func TestChainedSource_Extract(t *testing.T) {
+	extractor, _ := New()
+
+	tests := []struct {
+		name       string
+		sources    []Source
+		remoteAddr string
+		xff        string
+		xRealIP    string
+		wantValid  bool
+		wantIP     string
+		wantSource string
+	}{
+		{
+			name: "first source succeeds",
+			sources: []Source{
+				&forwardedForSource{extractor: extractor},
+				&remoteAddrSource{extractor: extractor},
+			},
+			remoteAddr: "127.0.0.1:8080",
+			xff:        "1.1.1.1",
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+			wantSource: SourceXForwardedFor,
+		},
+		{
+			name: "fallback to second source",
+			sources: []Source{
+				&forwardedForSource{extractor: extractor},
+				&remoteAddrSource{extractor: extractor},
+			},
+			remoteAddr: "1.1.1.1:8080",
+			xff:        "",
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+			wantSource: SourceRemoteAddr,
+		},
+		{
+			name: "all sources fail",
+			sources: []Source{
+				&forwardedForSource{extractor: extractor},
+				&remoteAddrSource{extractor: extractor},
+			},
+			remoteAddr: "127.0.0.1:8080",
+			xff:        "",
+			wantValid:  false,
+		},
+		{
+			name: "custom priority order",
+			sources: []Source{
+				&singleHeaderSource{
+					extractor:  extractor,
+					headerName: "X-Real-IP",
+					sourceName: SourceXRealIP,
+				},
+				&forwardedForSource{extractor: extractor},
+				&remoteAddrSource{extractor: extractor},
+			},
+			remoteAddr: "127.0.0.1:8080",
+			xff:        "8.8.8.8",
+			xRealIP:    "1.1.1.1",
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
+			wantSource: SourceXRealIP,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chained := newChainedSource(extractor, tt.sources...)
+
+			req := &http.Request{
+				RemoteAddr: tt.remoteAddr,
+				Header:     make(http.Header),
+			}
+			if tt.xff != "" {
+				req.Header.Set("X-Forwarded-For", tt.xff)
+			}
+			if tt.xRealIP != "" {
+				req.Header.Set("X-Real-IP", tt.xRealIP)
+			}
+
+			result, err := chained.Extract(context.Background(), req)
+
+			if tt.wantValid {
+				if err != nil {
+					t.Errorf("Extract() error = %v, want nil", err)
+				}
+				want := netip.MustParseAddr(tt.wantIP)
+				if result.IP != want {
+					t.Errorf("Extract() IP = %v, want %v", result.IP, want)
+				}
+
+				if result.Source != tt.wantSource {
+					t.Errorf("result.Source = %q, want %q", result.Source, tt.wantSource)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Extract() error = nil, want non-nil")
+				}
+			}
+		})
+	}
+}
+
+func TestChainedSource_Name(t *testing.T) {
+	extractor, _ := New()
+	sources := []Source{
+		&forwardedForSource{extractor: extractor},
+		&singleHeaderSource{
+			extractor:  extractor,
+			headerName: "X-Real-IP",
+			sourceName: SourceXRealIP,
+		},
+		&remoteAddrSource{extractor: extractor},
+	}
+
+	chained := newChainedSource(extractor, sources...)
+	name := chained.Name()
+
+	expectedName := "chained[x_forwarded_for,x_real_ip,remote_addr]"
+	if name != expectedName {
+		t.Errorf("Name() = %q, want %q", name, expectedName)
+	}
+}
+
+func TestSourceFactories(t *testing.T) {
+	extractor, _ := New()
+
+	t.Run("XForwardedFor source", func(t *testing.T) {
+		source := newForwardedForSource(extractor)
+		if source.Name() != SourceXForwardedFor {
+			t.Errorf("newForwardedForSource() source name = %q, want %q", source.Name(), SourceXForwardedFor)
+		}
+	})
+
+	t.Run("XRealIP source", func(t *testing.T) {
+		source := newSingleHeaderSource(extractor, "X-Real-IP")
+		if source.Name() != SourceXRealIP {
+			t.Errorf("newSingleHeaderSource(X-Real-IP) source name = %q, want %q", source.Name(), SourceXRealIP)
+		}
+	})
+
+	t.Run("RemoteAddr source", func(t *testing.T) {
+		source := newRemoteAddrSource(extractor)
+		if source.Name() != SourceRemoteAddr {
+			t.Errorf("newRemoteAddrSource() source name = %q, want %q", source.Name(), SourceRemoteAddr)
+		}
+	})
+
+	t.Run("Custom header source", func(t *testing.T) {
+		source := newSingleHeaderSource(extractor, "X-Custom-Header")
+		if source.Name() != "x_custom_header" {
+			t.Errorf("newSingleHeaderSource() source name = %q, want %q", source.Name(), "x_custom_header")
+		}
+	})
+}
+
+func TestNormalizeSourceName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "X-Forwarded-For",
+			want:  "x_forwarded_for",
+		},
+		{
+			input: "X-Real-IP",
+			want:  "x_real_ip",
+		},
+		{
+			input: "CF-Connecting-IP",
+			want:  "cf_connecting_ip",
+		},
+		{
+			input: "UPPERCASE-HEADER",
+			want:  "uppercase_header",
+		},
+		{
+			input: "already_underscored",
+			want:  "already_underscored",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeSourceName(tt.input)
+			if got != tt.want {
+				t.Errorf("NormalizeSourceName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func errorIsType(err error, target any) bool {
+	if err == nil {
+		return false
+	}
+	switch target.(type) {
+	case *ExtractionError:
+		var e *ExtractionError
+		return asError(err, &e)
+	case *MultipleHeadersError:
+		var e *MultipleHeadersError
+		return asError(err, &e)
+	case *ProxyValidationError:
+		var e *ProxyValidationError
+		return asError(err, &e)
+	case *InvalidIPError:
+		var e *InvalidIPError
+		return asError(err, &e)
+	case *RemoteAddrError:
+		var e *RemoteAddrError
+		return asError(err, &e)
+	default:
+		return false
+	}
+}
+
+func asError(err error, target any) bool {
+	switch v := target.(type) {
+	case **ExtractionError:
+		return errors.As(err, v)
+	case **MultipleHeadersError:
+		return errors.As(err, v)
+	case **ProxyValidationError:
+		return errors.As(err, v)
+	case **InvalidIPError:
+		return errors.As(err, v)
+	case **RemoteAddrError:
+		return errors.As(err, v)
+	default:
+		return false
+	}
+}
+
+func errorContains(err, target error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, target)
+}
