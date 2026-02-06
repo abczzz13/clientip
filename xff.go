@@ -1,0 +1,274 @@
+package clientip
+
+import (
+	"net"
+	"net/netip"
+	"strings"
+)
+
+func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
+	if !ip.IsValid() {
+		return false
+	}
+
+	for _, cidr := range e.config.trustedProxyCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (e *Extractor) validateProxyCount(trustedCount int) error {
+	if e.config.minTrustedProxies > 0 && trustedCount < e.config.minTrustedProxies {
+		e.config.metrics.RecordSecurityEvent("proxy_count_out_of_range")
+		return ErrProxyCountOutOfRange
+	}
+
+	if e.config.maxTrustedProxies > 0 && trustedCount > e.config.maxTrustedProxies {
+		e.config.metrics.RecordSecurityEvent("proxy_count_out_of_range")
+		return ErrProxyCountOutOfRange
+	}
+
+	return nil
+}
+
+func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+
+	// Use a fixed reasonable capacity based on typical proxy chain lengths.
+	// Most deployments have 1-5 proxies. Allocating 8 avoids reallocation
+	// in the majority of cases while not wasting significant memory.
+	const typicalChainCapacity = 8
+	parts := make([]string, 0, typicalChainCapacity)
+	for _, v := range values {
+		for part := range strings.SplitSeq(v, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				if len(parts) >= e.config.maxChainLength {
+					e.config.metrics.RecordSecurityEvent("chain_too_long")
+					return nil, &ChainTooLongError{
+						ExtractionError: ExtractionError{
+							Err:    ErrChainTooLong,
+							Source: SourceXForwardedFor,
+						},
+						ChainLength: len(parts) + 1,
+						MaxLength:   e.config.maxChainLength,
+					}
+				}
+				parts = append(parts, trimmed)
+			}
+		}
+	}
+	return parts, nil
+}
+
+type chainAnalysis struct {
+	clientIndex    int
+	trustedCount   int
+	trustedIndices []int
+}
+
+func (e *Extractor) analyzeChain(parts []string) (chainAnalysis, error) {
+	if len(parts) == 0 {
+		return chainAnalysis{}, nil
+	}
+
+	if e.config.forwardedForStrategy == LeftmostIP {
+		return e.analyzeChainLeftmost(parts)
+	}
+	return e.analyzeChainRightmost(parts)
+}
+
+func (e *Extractor) analyzeChainRightmost(parts []string) (chainAnalysis, error) {
+	trustedCount := 0
+	clientIndex := 0
+	trustedIndices := make([]int, 0, len(parts))
+
+	hasCIDRs := len(e.config.trustedProxyCIDRs) > 0
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		if e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
+			clientIndex = i
+			break
+		}
+
+		ip := parseIP(parts[i])
+
+		if hasCIDRs && !e.isTrustedProxy(ip) {
+			clientIndex = i
+			break
+		}
+
+		trustedIndices = append(trustedIndices, i)
+		trustedCount++
+	}
+
+	if err := e.validateProxyCount(trustedCount); err != nil {
+		return chainAnalysis{
+			clientIndex:    clientIndex,
+			trustedCount:   trustedCount,
+			trustedIndices: trustedIndices,
+		}, err
+	}
+
+	return chainAnalysis{
+		clientIndex:    clientIndex,
+		trustedCount:   trustedCount,
+		trustedIndices: trustedIndices,
+	}, nil
+}
+
+func (e *Extractor) analyzeChainLeftmost(parts []string) (chainAnalysis, error) {
+	if len(e.config.trustedProxyCIDRs) == 0 {
+		return chainAnalysis{clientIndex: 0, trustedCount: 0}, nil
+	}
+
+	trustedCount := 0
+	trustedIndices := make([]int, 0, len(parts))
+
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := parseIP(parts[i])
+		if !e.isTrustedProxy(ip) {
+			break
+		}
+		trustedIndices = append(trustedIndices, i)
+		trustedCount++
+		if e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
+			break
+		}
+	}
+
+	if err := e.validateProxyCount(trustedCount); err != nil {
+		return chainAnalysis{
+			clientIndex:    0,
+			trustedCount:   trustedCount,
+			trustedIndices: trustedIndices,
+		}, err
+	}
+
+	clientIndex := e.selectLeftmostUntrustedIP(parts, trustedCount)
+	return chainAnalysis{
+		clientIndex:    clientIndex,
+		trustedCount:   trustedCount,
+		trustedIndices: trustedIndices,
+	}, nil
+}
+
+func (e *Extractor) selectLeftmostUntrustedIP(parts []string, trustedProxiesFromRight int) int {
+	untrustedPortionEnd := len(parts) - trustedProxiesFromRight
+
+	for i := 0; i < untrustedPortionEnd; i++ {
+		ip := parseIP(parts[i])
+		if !e.isTrustedProxy(ip) {
+			return i
+		}
+	}
+
+	clientIndex := untrustedPortionEnd - 1
+	if clientIndex < 0 {
+		clientIndex = 0
+	}
+	return clientIndex
+}
+
+func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
+	if !ip.IsValid() {
+		return false
+	}
+
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
+		e.config.metrics.RecordSecurityEvent("invalid_ip")
+		return false
+	}
+
+	// Check for reserved/special-use ranges that should never be client IPs
+	if isReservedIP(ip) {
+		e.config.metrics.RecordSecurityEvent("reserved_ip")
+		return false
+	}
+
+	if !e.config.allowPrivateIPs && ip.IsPrivate() {
+		e.config.metrics.RecordSecurityEvent("private_ip")
+		return false
+	}
+
+	return true
+}
+
+// isReservedIP checks if an IP is in a reserved or special-use range that
+// should never appear as a real client IP address.
+func isReservedIP(ip netip.Addr) bool {
+	if ip.Is4() {
+		// Carrier-Grade NAT (RFC 6598): 100.64.0.0/10
+		if ip.As4()[0] == 100 && (ip.As4()[1]&0xC0) == 64 {
+			return true
+		}
+
+		// Documentation/TEST-NET prefixes (RFC 5737):
+		// 192.0.2.0/24 (TEST-NET-1)
+		// 198.51.100.0/24 (TEST-NET-2)
+		// 203.0.113.0/24 (TEST-NET-3)
+		if ip.As4()[0] == 192 && ip.As4()[1] == 0 && ip.As4()[2] == 2 {
+			return true
+		}
+		if ip.As4()[0] == 198 && ip.As4()[1] == 51 && ip.As4()[2] == 100 {
+			return true
+		}
+		if ip.As4()[0] == 203 && ip.As4()[1] == 0 && ip.As4()[2] == 113 {
+			return true
+		}
+	} else {
+		// IPv6 documentation prefix (RFC 3849): 2001:db8::/32
+		addr16 := ip.As16()
+		if addr16[0] == 0x20 && addr16[1] == 0x01 && addr16[2] == 0x0d && addr16[3] == 0xb8 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseIP extracts an IP address from various formats found in proxy headers.
+// It handles:
+//   - Leading/trailing whitespace: "  192.168.1.1  "
+//   - Port suffixes: "192.168.1.1:8080" or "[::1]:8080"
+//   - Quoted values: "\"192.168.1.1\"" or "'192.168.1.1'"
+//   - IPv6 brackets: "[::1]"
+//
+// The function normalizes these common variations before calling netip.ParseAddr
+// for the actual parsing. This approach is lenient with formatting (trimming,
+// removing ports/quotes) but still relies on Go's standard IP validation.
+// Validation of whether the IP is plausible (not loopback, private, etc.) is
+// handled separately by isPlausibleClientIP.
+//
+// Returns an invalid netip.Addr (IsValid() == false) if parsing fails.
+func parseIP(s string) netip.Addr {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return netip.Addr{}
+	}
+
+	s = strings.Trim(s, "\"'")
+	if s == "" {
+		return netip.Addr{}
+	}
+
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+
+	s = strings.Trim(s, "[]")
+
+	ip, _ := netip.ParseAddr(s)
+	return ip
+}
+
+func normalizeIP(ip netip.Addr) netip.Addr {
+	if ip.Is4In6() {
+		return ip.Unmap()
+	}
+	return ip
+}
