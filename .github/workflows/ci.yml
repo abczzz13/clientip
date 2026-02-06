@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: extractions/setup-just@v2
+      - run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.57.2
+      - run: just test
+      - run: just race
+      - run: just coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+      - run: just tidy-check
+      - run: just lint
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: extractions/setup-just@v2
+      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
+      - run: just actionlint
