@@ -14,11 +14,13 @@ var (
 
 	ErrUntrustedProxy = errors.New("request from untrusted proxy")
 
+	ErrTooFewTrustedProxies = errors.New("too few trusted proxies in X-Forwarded-For chain")
+
+	ErrTooManyTrustedProxies = errors.New("too many trusted proxies in X-Forwarded-For chain")
+
 	ErrInvalidIP = errors.New("invalid or implausible IP address")
 
 	ErrChainTooLong = errors.New("X-Forwarded-For chain too long")
-
-	ErrProxyCountOutOfRange = errors.New("trusted proxy count outside configured range; consider adjusting MinProxies or MaxProxies options")
 )
 
 type ExtractionError struct {

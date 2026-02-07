@@ -139,57 +139,81 @@ func TestValidateProxyCount(t *testing.T) {
 		name         string
 		minProxies   int
 		maxProxies   int
+		trustedCIDRs []netip.Prefix
 		trustedCount int
-		wantErr      bool
+		wantErr      error
 	}{
 		{
 			name:         "within range",
 			minProxies:   1,
 			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 2,
-			wantErr:      false,
+			wantErr:      nil,
 		},
 		{
 			name:         "at minimum",
 			minProxies:   1,
 			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 1,
-			wantErr:      false,
+			wantErr:      nil,
 		},
 		{
 			name:         "at maximum",
 			minProxies:   1,
 			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 3,
-			wantErr:      false,
+			wantErr:      nil,
+		},
+		{
+			name:         "no trusted proxies allowed when minimum is zero",
+			minProxies:   0,
+			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+			trustedCount: 0,
+			wantErr:      nil,
+		},
+		{
+			name:         "no trusted proxies with minimum requirement",
+			minProxies:   1,
+			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+			trustedCount: 0,
+			wantErr:      ErrNoTrustedProxies,
 		},
 		{
 			name:         "below minimum",
 			minProxies:   2,
 			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 1,
-			wantErr:      true,
+			wantErr:      ErrTooFewTrustedProxies,
 		},
 		{
 			name:         "above maximum",
 			minProxies:   1,
 			maxProxies:   2,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 3,
-			wantErr:      true,
+			wantErr:      ErrTooManyTrustedProxies,
 		},
 		{
 			name:         "no minimum requirement",
 			minProxies:   0,
 			maxProxies:   3,
+			trustedCIDRs: []netip.Prefix{},
 			trustedCount: 0,
-			wantErr:      false,
+			wantErr:      nil,
 		},
 		{
 			name:         "no maximum limit",
 			minProxies:   1,
 			maxProxies:   0,
+			trustedCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
 			trustedCount: 100,
-			wantErr:      false,
+			wantErr:      nil,
 		},
 	}
 
@@ -199,13 +223,21 @@ func TestValidateProxyCount(t *testing.T) {
 				config: &Config{
 					minTrustedProxies: tt.minProxies,
 					maxTrustedProxies: tt.maxProxies,
+					trustedProxyCIDRs: tt.trustedCIDRs,
 					metrics:           noopMetrics{},
 				},
 			}
 
 			err := extractor.validateProxyCount(tt.trustedCount)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateProxyCount() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Errorf("validateProxyCount() error = %v, want nil", err)
+				}
+				return
+			}
+
+			if !errorContains(err, tt.wantErr) {
+				t.Errorf("validateProxyCount() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -285,7 +317,7 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 		maxProxies         int
 		wantClientIndex    int
 		wantTrustedCount   int
-		wantErr            bool
+		wantErr            error
 		wantTrustedIndices []int
 	}{
 		{
@@ -307,7 +339,7 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 			wantTrustedIndices: []int{2, 1},
 		},
 		{
-			name:               "no trusted proxies",
+			name:               "no trusted proxies allowed when minimum is zero",
 			parts:              []string{"1.1.1.1", "8.8.8.8"},
 			minProxies:         0,
 			maxProxies:         2,
@@ -316,20 +348,31 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 			wantTrustedIndices: []int{},
 		},
 		{
-			name:               "max proxies limit hit",
+			name:               "no trusted proxies with minimum requirement",
+			parts:              []string{"1.1.1.1", "8.8.8.8"},
+			minProxies:         1,
+			maxProxies:         2,
+			wantClientIndex:    1,
+			wantTrustedCount:   0,
+			wantErr:            ErrNoTrustedProxies,
+			wantTrustedIndices: []int{},
+		},
+		{
+			name:               "too many trusted proxies",
 			parts:              []string{"1.1.1.1", "10.0.0.1", "10.0.0.2", "10.0.0.3"},
 			minProxies:         0,
 			maxProxies:         2,
-			wantClientIndex:    1,
-			wantTrustedCount:   2,
-			wantTrustedIndices: []int{3, 2},
+			wantClientIndex:    0,
+			wantTrustedCount:   3,
+			wantErr:            ErrTooManyTrustedProxies,
+			wantTrustedIndices: []int{3, 2, 1},
 		},
 		{
 			name:             "below min proxies",
 			parts:            []string{"1.1.1.1", "10.0.0.1"},
 			minProxies:       2,
 			maxProxies:       3,
-			wantErr:          true,
+			wantErr:          ErrTooFewTrustedProxies,
 			wantClientIndex:  0,
 			wantTrustedCount: 1,
 		},
@@ -357,8 +400,12 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 
 			analysis, err := extractor.analyzeChainRightmost(tt.parts)
 
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("analyzeChainRightmost() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("analyzeChainRightmost() error = %v, want nil", err)
+				}
+			} else if !errorContains(err, tt.wantErr) {
+				t.Fatalf("analyzeChainRightmost() error = %v, want %v", err, tt.wantErr)
 			}
 
 			if analysis.clientIndex != tt.wantClientIndex {
@@ -369,7 +416,7 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 				t.Errorf("trustedCount = %d, want %d", analysis.trustedCount, tt.wantTrustedCount)
 			}
 
-			if !tt.wantErr && tt.wantTrustedIndices != nil {
+			if tt.wantErr == nil && tt.wantTrustedIndices != nil {
 				if len(analysis.trustedIndices) != len(tt.wantTrustedIndices) {
 					t.Errorf("trustedIndices length = %d, want %d", len(analysis.trustedIndices), len(tt.wantTrustedIndices))
 				} else {
@@ -394,7 +441,7 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 		maxProxies       int
 		wantClientIndex  int
 		wantTrustedCount int
-		wantErr          bool
+		wantErr          error
 	}{
 		{
 			name:             "one trusted proxy at end",
@@ -421,7 +468,7 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 			wantTrustedCount: 3,
 		},
 		{
-			name:             "no trusted proxies",
+			name:             "no trusted proxies allowed when minimum is zero",
 			parts:            []string{"1.1.1.1", "8.8.8.8"},
 			minProxies:       0,
 			maxProxies:       2,
@@ -429,12 +476,22 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 			wantTrustedCount: 0,
 		},
 		{
-			name:             "max proxies limit hit",
+			name:             "no trusted proxies with minimum requirement",
+			parts:            []string{"1.1.1.1", "8.8.8.8"},
+			minProxies:       1,
+			maxProxies:       2,
+			wantClientIndex:  0,
+			wantTrustedCount: 0,
+			wantErr:          ErrNoTrustedProxies,
+		},
+		{
+			name:             "too many trusted proxies",
 			parts:            []string{"1.1.1.1", "10.0.0.1", "10.0.0.2", "10.0.0.3"},
 			minProxies:       0,
 			maxProxies:       2,
 			wantClientIndex:  0,
-			wantTrustedCount: 2,
+			wantTrustedCount: 3,
+			wantErr:          ErrTooManyTrustedProxies,
 		},
 		{
 			name:             "below min proxies",
@@ -443,7 +500,7 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 			maxProxies:       3,
 			wantClientIndex:  0,
 			wantTrustedCount: 1,
-			wantErr:          true,
+			wantErr:          ErrTooFewTrustedProxies,
 		},
 	}
 
@@ -460,8 +517,12 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 
 			analysis, err := extractor.analyzeChainLeftmost(tt.parts)
 
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("analyzeChainLeftmost() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("analyzeChainLeftmost() error = %v, want nil", err)
+				}
+			} else if !errorContains(err, tt.wantErr) {
+				t.Fatalf("analyzeChainLeftmost() error = %v, want %v", err, tt.wantErr)
 			}
 
 			if analysis.clientIndex != tt.wantClientIndex {

@@ -121,8 +121,8 @@ func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
 
 	extractor.ExtractIP(req)
 
-	if got := metrics.getSecurityEventCount("invalid_ip"); got != 1 {
-		t.Errorf("security event count for invalid_ip = %d, want 1", got)
+	if got := metrics.getSecurityEventCount(securityEventInvalidIP); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventInvalidIP, got)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 
 	extractor.ExtractIP(req)
 
-	if got := metrics.getSecurityEventCount("private_ip"); got != 1 {
-		t.Errorf("security event count for private_ip = %d, want 1", got)
+	if got := metrics.getSecurityEventCount(securityEventPrivateIP); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventPrivateIP, got)
 	}
 }
 
@@ -166,12 +166,12 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 
 	extractor.ExtractIP(req)
 
-	if got := metrics.getSecurityEventCount("multiple_headers"); got != 1 {
-		t.Errorf("security event count for multiple_headers = %d, want 1", got)
+	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventMultipleHeaders, got)
 	}
 }
 
-func TestMetrics_SecurityEvent_ProxyCountOutOfRange(t *testing.T) {
+func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
@@ -190,8 +190,80 @@ func TestMetrics_SecurityEvent_ProxyCountOutOfRange(t *testing.T) {
 
 	extractor.ExtractIP(req)
 
-	if got := metrics.getSecurityEventCount("proxy_count_out_of_range"); got != 1 {
-		t.Errorf("security event count for proxy_count_out_of_range = %d, want 1", got)
+	if got := metrics.getSecurityEventCount(securityEventTooFewTrustedProxies); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventTooFewTrustedProxies, got)
+	}
+}
+
+func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
+	metrics := newMockMetrics()
+	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	extractor, err := New(
+		TrustedProxies(cidrs, 1, 3),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "10.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount(securityEventNoTrustedProxies); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventNoTrustedProxies, got)
+	}
+}
+
+func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
+	metrics := newMockMetrics()
+	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	extractor, err := New(
+		TrustedProxies(cidrs, 1, 1),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "10.0.0.2:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1, 10.0.0.2")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount(securityEventTooManyTrustedProxies); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventTooManyTrustedProxies, got)
+	}
+}
+
+func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
+	metrics := newMockMetrics()
+	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	extractor, err := New(
+		TrustedProxies(cidrs, 1, 3),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount(securityEventUntrustedProxy); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventUntrustedProxy, got)
 	}
 }
 
@@ -213,8 +285,8 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 
 	extractor.ExtractIP(req)
 
-	if got := metrics.getSecurityEventCount("chain_too_long"); got != 1 {
-		t.Errorf("security event count for chain_too_long = %d, want 1", got)
+	if got := metrics.getSecurityEventCount(securityEventChainTooLong); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventChainTooLong, got)
 	}
 }
 

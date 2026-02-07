@@ -6,6 +6,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- Logging now uses a bring-your-own `Logger` interface (`WithLogger(Logger)`) instead of a concrete `*slog.Logger` type.
+- Default logging remains disabled via a no-op logger; users can opt in with `WithLogger(...)`.
+- Proxy validation errors are now explicit and specific: `ErrUntrustedProxy`, `ErrNoTrustedProxies`, `ErrTooFewTrustedProxies`, and `ErrTooManyTrustedProxies`.
+- When trusted CIDRs are configured, `X-Forwarded-For` is only honored if the immediate proxy (`RemoteAddr`) is trusted.
+- `ErrNoTrustedProxies` is now emitted only when `minTrustedProxies > 0`; with `minTrustedProxies == 0`, client-only `X-Forwarded-For` chains are allowed.
+
+### Added
+
+- Additional security warning logs for `chain_too_long`, `untrusted_proxy`, `no_trusted_proxies`, `too_few_trusted_proxies`, and `too_many_trusted_proxies` events.
+
 ## [0.0.2] - 2026-02-07
 
 ### Changed

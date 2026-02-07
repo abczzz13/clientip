@@ -21,14 +21,19 @@ func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 }
 
 func (e *Extractor) validateProxyCount(trustedCount int) error {
+	if len(e.config.trustedProxyCIDRs) > 0 && e.config.minTrustedProxies > 0 && trustedCount == 0 {
+		e.config.metrics.RecordSecurityEvent(securityEventNoTrustedProxies)
+		return ErrNoTrustedProxies
+	}
+
 	if e.config.minTrustedProxies > 0 && trustedCount < e.config.minTrustedProxies {
-		e.config.metrics.RecordSecurityEvent("proxy_count_out_of_range")
-		return ErrProxyCountOutOfRange
+		e.config.metrics.RecordSecurityEvent(securityEventTooFewTrustedProxies)
+		return ErrTooFewTrustedProxies
 	}
 
 	if e.config.maxTrustedProxies > 0 && trustedCount > e.config.maxTrustedProxies {
-		e.config.metrics.RecordSecurityEvent("proxy_count_out_of_range")
-		return ErrProxyCountOutOfRange
+		e.config.metrics.RecordSecurityEvent(securityEventTooManyTrustedProxies)
+		return ErrTooManyTrustedProxies
 	}
 
 	return nil
@@ -48,7 +53,7 @@ func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
 		for part := range strings.SplitSeq(v, ",") {
 			if trimmed := strings.TrimSpace(part); trimmed != "" {
 				if len(parts) >= e.config.maxChainLength {
-					e.config.metrics.RecordSecurityEvent("chain_too_long")
+					e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
 					return nil, &ChainTooLongError{
 						ExtractionError: ExtractionError{
 							Err:    ErrChainTooLong,
@@ -90,7 +95,7 @@ func (e *Extractor) analyzeChainRightmost(parts []string) (chainAnalysis, error)
 	hasCIDRs := len(e.config.trustedProxyCIDRs) > 0
 
 	for i := len(parts) - 1; i >= 0; i-- {
-		if e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
+		if !hasCIDRs && e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
 			clientIndex = i
 			break
 		}
@@ -136,9 +141,6 @@ func (e *Extractor) analyzeChainLeftmost(parts []string) (chainAnalysis, error) 
 		}
 		trustedIndices = append(trustedIndices, i)
 		trustedCount++
-		if e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
-			break
-		}
 	}
 
 	if err := e.validateProxyCount(trustedCount); err != nil {
@@ -158,20 +160,15 @@ func (e *Extractor) analyzeChainLeftmost(parts []string) (chainAnalysis, error) 
 }
 
 func (e *Extractor) selectLeftmostUntrustedIP(parts []string, trustedProxiesFromRight int) int {
-	untrustedPortionEnd := len(parts) - trustedProxiesFromRight
+	untrustedPortionEnd := max(len(parts)-trustedProxiesFromRight, 0)
 
-	for i := 0; i < untrustedPortionEnd; i++ {
-		ip := parseIP(parts[i])
-		if !e.isTrustedProxy(ip) {
+	for i := range untrustedPortionEnd {
+		if !e.isTrustedProxy(parseIP(parts[i])) {
 			return i
 		}
 	}
 
-	clientIndex := untrustedPortionEnd - 1
-	if clientIndex < 0 {
-		clientIndex = 0
-	}
-	return clientIndex
+	return max(untrustedPortionEnd-1, 0)
 }
 
 func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
@@ -180,18 +177,18 @@ func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
 	}
 
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
-		e.config.metrics.RecordSecurityEvent("invalid_ip")
+		e.config.metrics.RecordSecurityEvent(securityEventInvalidIP)
 		return false
 	}
 
 	// Check for reserved/special-use ranges that should never be client IPs
 	if isReservedIP(ip) {
-		e.config.metrics.RecordSecurityEvent("reserved_ip")
+		e.config.metrics.RecordSecurityEvent(securityEventReservedIP)
 		return false
 	}
 
 	if !e.config.allowPrivateIPs && ip.IsPrivate() {
-		e.config.metrics.RecordSecurityEvent("private_ip")
+		e.config.metrics.RecordSecurityEvent(securityEventPrivateIP)
 		return false
 	}
 
