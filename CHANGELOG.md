@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-02-07
+
 ### Changed
 
 - Prometheus integration moved out of the root module into an optional adapter module: `github.com/abczzz13/clientip/prometheus`.
