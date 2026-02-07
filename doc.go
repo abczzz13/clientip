@@ -4,7 +4,7 @@
 // # Features
 //
 //   - Security-first design with protection against IP spoofing and header injection
-//   - Flexible proxy configuration with min/max proxy ranges
+//   - Flexible proxy configuration with min/max trusted proxy ranges in X-Forwarded-For
 //   - Multiple source support: X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
 //   - Optional observability with context-aware logging and pluggable metrics
 //   - Type-safe using modern Go netip.Addr
@@ -29,7 +29,7 @@
 //
 //	cidrs, _ := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
 //	extractor, err := clientip.New(
-//	    clientip.TrustedProxies(cidrs, 1, 2),  // Expect 1-2 trusted proxies
+//	    clientip.TrustedProxies(cidrs, 0, 2),  // Count trusted proxies present in X-Forwarded-For
 //	    clientip.AllowPrivateIPs(false),
 //	)
 //
@@ -54,7 +54,7 @@
 //	import clientipprom "github.com/abczzz13/clientip/prometheus"
 //
 //	extractor, err := clientip.New(
-//	    clientip.TrustedProxies(cidrs, 1, 3),
+//	    clientip.TrustedProxies(cidrs, 0, 3),
 //	    clientip.WithLogger(slog.Default()),
 //	    clientipprom.WithMetrics(),
 //	)

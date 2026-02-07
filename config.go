@@ -107,7 +107,7 @@ func (c *Config) validate() error {
 	if isNilLogger(c.logger) {
 		return fmt.Errorf("logger cannot be nil")
 	}
-	if c.metrics == nil {
+	if isNilMetrics(c.metrics) {
 		return fmt.Errorf("metrics cannot be nil")
 	}
 	if len(c.sourcePriority) == 0 {
@@ -117,14 +117,22 @@ func (c *Config) validate() error {
 }
 
 func isNilLogger(logger Logger) bool {
-	if logger == nil {
+	return isNilInterface(logger)
+}
+
+func isNilMetrics(metrics Metrics) bool {
+	return isNilInterface(metrics)
+}
+
+func isNilInterface(v any) bool {
+	if v == nil {
 		return true
 	}
 
-	v := reflect.ValueOf(logger)
-	switch v.Kind() {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return v.IsNil()
+		return rv.IsNil()
 	default:
 		return false
 	}

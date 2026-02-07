@@ -12,6 +12,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Default logging remains disabled via a no-op logger; users can opt in with `WithLogger(...)`.
 - Proxy validation errors are now explicit and specific: `ErrUntrustedProxy`, `ErrNoTrustedProxies`, `ErrTooFewTrustedProxies`, and `ErrTooManyTrustedProxies`.
 - When trusted CIDRs are configured, `X-Forwarded-For` is only honored if the immediate proxy (`RemoteAddr`) is trusted.
+- `ErrNoTrustedProxies` is now emitted only when `minTrustedProxies > 0`; with `minTrustedProxies == 0`, client-only `X-Forwarded-For` chains are allowed.
 
 ### Added
 

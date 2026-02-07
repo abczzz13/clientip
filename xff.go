@@ -21,7 +21,7 @@ func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 }
 
 func (e *Extractor) validateProxyCount(trustedCount int) error {
-	if len(e.config.trustedProxyCIDRs) > 0 && trustedCount == 0 {
+	if len(e.config.trustedProxyCIDRs) > 0 && e.config.minTrustedProxies > 0 && trustedCount == 0 {
 		e.config.metrics.RecordSecurityEvent(securityEventNoTrustedProxies)
 		return ErrNoTrustedProxies
 	}

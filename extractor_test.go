@@ -515,6 +515,41 @@ func TestExtractIP_WithTrustedProxies(t *testing.T) {
 	}
 }
 
+func TestExtractIP_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
+	cidrs, err := ParseCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("ParseCIDRs() error = %v", err)
+	}
+
+	extractor, err := New(
+		TrustedProxies(cidrs, 0, 2),
+		Priority(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "10.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if !result.Valid() {
+		t.Fatalf("expected extraction to succeed, got error: %v", result.Err)
+	}
+	if result.Source != SourceXForwardedFor {
+		t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+	}
+	if result.TrustedProxyCount != 0 {
+		t.Fatalf("TrustedProxyCount = %d, want 0", result.TrustedProxyCount)
+	}
+	if got, want := result.IP.String(), "1.1.1.1"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
+	}
+}
+
 func TestExtractIP_AllowPrivateIPs(t *testing.T) {
 	extractor, err := New(
 		AllowPrivateIPs(true),

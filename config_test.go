@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+type testTypedNilMetrics struct{}
+
+func (*testTypedNilMetrics) RecordExtractionSuccess(string) {}
+
+func (*testTypedNilMetrics) RecordExtractionFailure(string) {}
+
+func (*testTypedNilMetrics) RecordSecurityEvent(string) {}
+
 func TestNew_Success(t *testing.T) {
 	tests := []struct {
 		name string
@@ -173,6 +181,13 @@ func TestNew_Errors(t *testing.T) {
 			name: "nil metrics",
 			opts: []Option{
 				WithMetrics(nil),
+			},
+			wantErrText: "metrics cannot be nil",
+		},
+		{
+			name: "typed nil metrics",
+			opts: []Option{
+				WithMetrics((*testTypedNilMetrics)(nil)),
 			},
 			wantErrText: "metrics cannot be nil",
 		},
@@ -434,6 +449,15 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: func() *Config {
 				c := defaultConfig()
 				c.metrics = nil
+				return c
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "typed nil metrics should fail",
+			cfg: func() *Config {
+				c := defaultConfig()
+				c.metrics = (*testTypedNilMetrics)(nil)
 				return c
 			}(),
 			wantErr: true,

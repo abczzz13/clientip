@@ -50,6 +50,38 @@ func (s *forwardedForSource) logSecurityWarning(ctx context.Context, r *http.Req
 	s.extractor.config.logger.WarnContext(ctx, msg, baseAttrs...)
 }
 
+func proxyValidationWarningDetails(err error) (event, msg string, ok bool) {
+	switch {
+	case errors.Is(err, ErrNoTrustedProxies):
+		return securityEventNoTrustedProxies, "no trusted proxies found in request chain", true
+	case errors.Is(err, ErrTooFewTrustedProxies):
+		return securityEventTooFewTrustedProxies, "trusted proxy count below configured minimum", true
+	case errors.Is(err, ErrTooManyTrustedProxies):
+		return securityEventTooManyTrustedProxies, "trusted proxy count exceeds configured maximum", true
+	default:
+		return "", "", false
+	}
+}
+
+func (s *forwardedForSource) logProxyValidationWarning(ctx context.Context, r *http.Request, err error) {
+	event, msg, ok := proxyValidationWarningDetails(err)
+	if !ok {
+		return
+	}
+
+	var proxyErr *ProxyValidationError
+	if errors.As(err, &proxyErr) {
+		s.logSecurityWarning(ctx, r, event, msg,
+			"trusted_proxy_count", proxyErr.TrustedProxyCount,
+			"min_trusted_proxies", proxyErr.MinTrustedProxies,
+			"max_trusted_proxies", proxyErr.MaxTrustedProxies,
+		)
+		return
+	}
+
+	s.logSecurityWarning(ctx, r, event, msg)
+}
+
 func (s *forwardedForSource) Name() string {
 	return SourceXForwardedFor
 }
@@ -117,44 +149,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 
 	ip, trustedCount, debugInfo, err := s.clientIPFromXFFWithDebug(parts)
 	if err != nil {
-		if errors.Is(err, ErrNoTrustedProxies) {
-			var proxyErr *ProxyValidationError
-			if errors.As(err, &proxyErr) {
-				s.logSecurityWarning(ctx, r, securityEventNoTrustedProxies, "no trusted proxies found in request chain",
-					"trusted_proxy_count", proxyErr.TrustedProxyCount,
-					"min_trusted_proxies", proxyErr.MinTrustedProxies,
-					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
-				)
-			} else {
-				s.logSecurityWarning(ctx, r, securityEventNoTrustedProxies, "no trusted proxies found in request chain")
-			}
-		}
-
-		if errors.Is(err, ErrTooFewTrustedProxies) {
-			var proxyErr *ProxyValidationError
-			if errors.As(err, &proxyErr) {
-				s.logSecurityWarning(ctx, r, securityEventTooFewTrustedProxies, "trusted proxy count below configured minimum",
-					"trusted_proxy_count", proxyErr.TrustedProxyCount,
-					"min_trusted_proxies", proxyErr.MinTrustedProxies,
-					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
-				)
-			} else {
-				s.logSecurityWarning(ctx, r, securityEventTooFewTrustedProxies, "trusted proxy count below configured minimum")
-			}
-		}
-
-		if errors.Is(err, ErrTooManyTrustedProxies) {
-			var proxyErr *ProxyValidationError
-			if errors.As(err, &proxyErr) {
-				s.logSecurityWarning(ctx, r, securityEventTooManyTrustedProxies, "trusted proxy count exceeds configured maximum",
-					"trusted_proxy_count", proxyErr.TrustedProxyCount,
-					"min_trusted_proxies", proxyErr.MinTrustedProxies,
-					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
-				)
-			} else {
-				s.logSecurityWarning(ctx, r, securityEventTooManyTrustedProxies, "trusted proxy count exceeds configured maximum")
-			}
-		}
+		s.logProxyValidationWarning(ctx, r, err)
 
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return ExtractionResult{}, err

@@ -68,7 +68,7 @@ func NewWithRegisterer(registerer prom.Registerer) (*PrometheusMetrics, error) {
 	securityEventsCollector := prom.NewCounterVec(
 		prom.CounterOpts{
 			Name: "ip_extraction_security_events_total",
-			Help: "Security-related events during IP extraction: untrusted_proxy, multiple_headers, no_trusted_proxies, too_few_trusted_proxies, too_many_trusted_proxies, invalid_ip, private_ip, chain_too_long.",
+			Help: "Security-related events during IP extraction, labeled by event.",
 		},
 		[]string{"event"},
 	)

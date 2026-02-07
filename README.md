@@ -6,6 +6,11 @@
 
 Secure client IP extraction for `net/http` requests with trusted proxy validation, configurable source priority, and optional logging/metrics.
 
+## Stability
+
+This project is pre-`v1.0.0` and still before `v0.1.0`, so public APIs may change as the package evolves.
+Any breaking changes will be called out in `CHANGELOG.md`.
+
 ## Install
 
 ```bash
@@ -49,7 +54,9 @@ if err != nil {
 }
 
 extractor, err := clientip.New(
-    clientip.TrustedProxies(cidrs, 1, 3),
+    // min=0 allows requests where XFF contains only the client IP
+    // (trusted RemoteAddr is validated separately).
+    clientip.TrustedProxies(cidrs, 0, 3),
     clientip.XFFStrategy(clientip.RightmostIP),
 )
 if err != nil {
@@ -200,7 +207,7 @@ extractor, err := clientip.New(
 
 ## Options
 
-- `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max proxy counts
+- `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in the XFF chain
 - `TrustedCIDRs(...string)` parse CIDR strings in-place
 - `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
 - `AllowPrivateIPs(bool)` allow private client IPs
@@ -218,6 +225,9 @@ Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
 - `WithRegisterer(prometheus.Registerer)` enable Prometheus metrics with custom registerer
 
 Options are applied in order. If multiple metrics options are provided, the last one wins.
+
+Proxy count bounds (`min`/`max`) apply only to trusted proxies present in `X-Forwarded-For`.
+The immediate proxy (`RemoteAddr`) is validated for trust separately.
 
 ## Result
 
