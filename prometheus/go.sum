@@ -1,9 +1,10 @@
-github.com/abczzz13/clientip v0.0.1 h1:5c7KvtmGcPL/Ezdqr8Ik/mCfSjpNpJKPoiNnIlAcQMA=
-github.com/abczzz13/clientip v0.0.1/go.mod h1:eUOWqG9go8Rjol2/SH9XeEgjqEEP2QfoR35IBXk2jKc=
+github.com/abczzz13/clientip v0.0.3 h1:4XQvI8fmmRw02c1BDduDQA3VlGc/UxGQoqdEOiOImQA=
+github.com/abczzz13/clientip v0.0.3/go.mod h1:fdrS5s8ksGqBuXfM35HsufH31YCqyAMp5icq6Z8BdDc=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
