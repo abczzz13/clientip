@@ -31,6 +31,25 @@ type forwardedForSource struct {
 	extractor *Extractor
 }
 
+func requestPath(r *http.Request) string {
+	if r.URL == nil {
+		return ""
+	}
+	return r.URL.Path
+}
+
+func (s *forwardedForSource) logSecurityWarning(ctx context.Context, r *http.Request, event, msg string, attrs ...any) {
+	baseAttrs := []any{
+		"event", event,
+		"source", s.Name(),
+		"path", requestPath(r),
+		"remote_addr", r.RemoteAddr,
+	}
+
+	baseAttrs = append(baseAttrs, attrs...)
+	s.extractor.config.logger.WarnContext(ctx, msg, baseAttrs...)
+}
+
 func (s *forwardedForSource) Name() string {
 	return SourceXForwardedFor
 }
@@ -46,15 +65,10 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 	}
 
 	if len(xffValues) > 1 {
-		s.extractor.config.metrics.RecordSecurityEvent("multiple_headers")
-		path := ""
-		if r.URL != nil {
-			path = r.URL.Path
-		}
-		s.extractor.config.logger.WarnContext(ctx, "multiple X-Forwarded-For headers received - possible spoofing attempt",
+		s.extractor.config.metrics.RecordSecurityEvent(securityEventMultipleHeaders)
+		s.logSecurityWarning(ctx, r, securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
 			"header_count", len(xffValues),
-			"path", path,
-			"remote_addr", r.RemoteAddr)
+		)
 		return ExtractionResult{}, &MultipleHeadersError{
 			ExtractionError: ExtractionError{
 				Err:    ErrMultipleXFFHeaders,
@@ -65,14 +79,83 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 		}
 	}
 
+	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
+		remoteIP := parseIP(r.RemoteAddr)
+		if !s.extractor.isTrustedProxy(remoteIP) {
+			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
+			s.logSecurityWarning(ctx, r, securityEventUntrustedProxy, "request received from untrusted proxy while X-Forwarded-For is present")
+			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+			return ExtractionResult{}, &ProxyValidationError{
+				ExtractionError: ExtractionError{
+					Err:    ErrUntrustedProxy,
+					Source: s.Name(),
+				},
+				XFF:               xffValues[0],
+				TrustedProxyCount: 0,
+				MinTrustedProxies: s.extractor.config.minTrustedProxies,
+				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
+			}
+		}
+	}
+
 	parts, err := s.extractor.parseXFFValues(xffValues)
 	if err != nil {
+		if errors.Is(err, ErrChainTooLong) {
+			var chainErr *ChainTooLongError
+			if errors.As(err, &chainErr) {
+				s.logSecurityWarning(ctx, r, securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length",
+					"chain_length", chainErr.ChainLength,
+					"max_length", chainErr.MaxLength,
+				)
+			} else {
+				s.logSecurityWarning(ctx, r, securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length")
+			}
+		}
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return ExtractionResult{}, err
 	}
 
 	ip, trustedCount, debugInfo, err := s.clientIPFromXFFWithDebug(parts)
 	if err != nil {
+		if errors.Is(err, ErrNoTrustedProxies) {
+			var proxyErr *ProxyValidationError
+			if errors.As(err, &proxyErr) {
+				s.logSecurityWarning(ctx, r, securityEventNoTrustedProxies, "no trusted proxies found in request chain",
+					"trusted_proxy_count", proxyErr.TrustedProxyCount,
+					"min_trusted_proxies", proxyErr.MinTrustedProxies,
+					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
+				)
+			} else {
+				s.logSecurityWarning(ctx, r, securityEventNoTrustedProxies, "no trusted proxies found in request chain")
+			}
+		}
+
+		if errors.Is(err, ErrTooFewTrustedProxies) {
+			var proxyErr *ProxyValidationError
+			if errors.As(err, &proxyErr) {
+				s.logSecurityWarning(ctx, r, securityEventTooFewTrustedProxies, "trusted proxy count below configured minimum",
+					"trusted_proxy_count", proxyErr.TrustedProxyCount,
+					"min_trusted_proxies", proxyErr.MinTrustedProxies,
+					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
+				)
+			} else {
+				s.logSecurityWarning(ctx, r, securityEventTooFewTrustedProxies, "trusted proxy count below configured minimum")
+			}
+		}
+
+		if errors.Is(err, ErrTooManyTrustedProxies) {
+			var proxyErr *ProxyValidationError
+			if errors.As(err, &proxyErr) {
+				s.logSecurityWarning(ctx, r, securityEventTooManyTrustedProxies, "trusted proxy count exceeds configured maximum",
+					"trusted_proxy_count", proxyErr.TrustedProxyCount,
+					"min_trusted_proxies", proxyErr.MinTrustedProxies,
+					"max_trusted_proxies", proxyErr.MaxTrustedProxies,
+				)
+			} else {
+				s.logSecurityWarning(ctx, r, securityEventTooManyTrustedProxies, "trusted proxy count exceeds configured maximum")
+			}
+		}
+
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return ExtractionResult{}, err
 	}
@@ -279,10 +362,11 @@ func (c *chainedSource) isTerminalError(err error) bool {
 	}
 
 	return errors.Is(err, ErrMultipleXFFHeaders) ||
-		errors.Is(err, ErrProxyCountOutOfRange) ||
-		errors.Is(err, ErrChainTooLong) ||
 		errors.Is(err, ErrUntrustedProxy) ||
-		errors.Is(err, ErrNoTrustedProxies)
+		errors.Is(err, ErrNoTrustedProxies) ||
+		errors.Is(err, ErrTooFewTrustedProxies) ||
+		errors.Is(err, ErrTooManyTrustedProxies) ||
+		errors.Is(err, ErrChainTooLong)
 }
 
 func (c *chainedSource) Name() string {

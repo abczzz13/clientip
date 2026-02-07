@@ -163,6 +163,13 @@ func TestNew_Errors(t *testing.T) {
 			wantErrText: "logger cannot be nil",
 		},
 		{
+			name: "typed nil logger",
+			opts: []Option{
+				WithLogger((*slog.Logger)(nil)),
+			},
+			wantErrText: "logger cannot be nil",
+		},
+		{
 			name: "nil metrics",
 			opts: []Option{
 				WithMetrics(nil),
@@ -409,6 +416,15 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: func() *Config {
 				c := defaultConfig()
 				c.logger = nil
+				return c
+			}(),
+			wantErr: true,
+		},
+		{
+			name: "typed nil logger should fail",
+			cfg: func() *Config {
+				c := defaultConfig()
+				c.logger = (*slog.Logger)(nil)
 				return c
 			}(),
 			wantErr: true,

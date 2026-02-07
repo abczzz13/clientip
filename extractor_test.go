@@ -274,6 +274,69 @@ func TestExtractIP_ChainTooLong_IsTerminalByDefault(t *testing.T) {
 	}
 }
 
+func TestExtractIP_StrictMode_UntrustedProxy_IsTerminal(t *testing.T) {
+	cidrs, err := ParseCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("ParseCIDRs() error = %v", err)
+	}
+
+	extractor, err := New(
+		TrustedProxies(cidrs, 1, 3),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Fatal("expected extraction to fail on untrusted proxy in strict mode")
+	}
+	if !errors.Is(result.Err, ErrUntrustedProxy) {
+		t.Fatalf("error = %v, want ErrUntrustedProxy", result.Err)
+	}
+	if result.Source != SourceXForwardedFor {
+		t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+	}
+}
+
+func TestExtractIP_SecurityModeLax_AllowsFallbackOnUntrustedProxy(t *testing.T) {
+	cidrs, err := ParseCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("ParseCIDRs() error = %v", err)
+	}
+
+	extractor, err := New(
+		TrustedProxies(cidrs, 1, 3),
+		WithSecurityMode(SecurityModeLax),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
+
+	result := extractor.ExtractIP(req)
+	if !result.Valid() {
+		t.Fatalf("expected SecurityModeLax fallback success, got error: %v", result.Err)
+	}
+	if result.Source != SourceRemoteAddr {
+		t.Fatalf("source = %q, want %q", result.Source, SourceRemoteAddr)
+	}
+	if got, want := result.IP.String(), "8.8.8.8"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
+	}
+}
+
 func TestExtractIP_XRealIP(t *testing.T) {
 	extractor, err := New(
 		Priority(
@@ -372,13 +435,13 @@ func TestExtractIP_WithTrustedProxies(t *testing.T) {
 	}
 
 	tests := []struct {
-		name              string
-		remoteAddr        string
-		xff               string
-		want              string
-		wantValid         bool
-		wantProxyCount    int
-		wantErrorContains string
+		name           string
+		remoteAddr     string
+		xff            string
+		want           string
+		wantValid      bool
+		wantProxyCount int
+		wantErr        error
 	}{
 		{
 			name:           "one trusted proxy",
@@ -397,19 +460,25 @@ func TestExtractIP_WithTrustedProxies(t *testing.T) {
 			wantProxyCount: 2,
 		},
 		{
-			name:              "no trusted proxies - fails min requirement",
-			remoteAddr:        "127.0.0.1:8080",
-			xff:               "8.8.8.8, 1.1.1.1",
-			wantValid:         false,
-			wantErrorContains: "proxy count",
+			name:       "untrusted immediate proxy",
+			remoteAddr: "127.0.0.1:8080",
+			xff:        "1.1.1.1, 10.0.0.1",
+			wantValid:  false,
+			wantErr:    ErrUntrustedProxy,
 		},
 		{
-			name:           "exactly max proxies",
-			remoteAddr:     "127.0.0.1:8080",
-			xff:            "1.1.1.1, 10.0.0.1, 10.0.0.2",
-			want:           "1.1.1.1",
-			wantValid:      true,
-			wantProxyCount: 2,
+			name:       "trusted remote but no trusted proxies in XFF chain",
+			remoteAddr: "10.0.0.1:8080",
+			xff:        "1.1.1.1",
+			wantValid:  false,
+			wantErr:    ErrNoTrustedProxies,
+		},
+		{
+			name:       "too many trusted proxies",
+			remoteAddr: "10.0.0.3:8080",
+			xff:        "1.1.1.1, 10.0.0.1, 10.0.0.2, 10.0.0.3",
+			wantValid:  false,
+			wantErr:    ErrTooManyTrustedProxies,
 		},
 	}
 
@@ -437,11 +506,9 @@ func TestExtractIP_WithTrustedProxies(t *testing.T) {
 				}
 			}
 
-			if tt.wantErrorContains != "" {
-				if result.Err == nil {
-					t.Errorf("expected error containing %q, got nil", tt.wantErrorContains)
-				} else if !contains(result.Err.Error(), tt.wantErrorContains) {
-					t.Errorf("error = %q, want to contain %q", result.Err.Error(), tt.wantErrorContains)
+			if tt.wantErr != nil {
+				if !errors.Is(result.Err, tt.wantErr) {
+					t.Errorf("error = %v, want %v", result.Err, tt.wantErr)
 				}
 			}
 		})
@@ -587,12 +654,15 @@ func TestExtractIP_ErrorTypes(t *testing.T) {
 		)
 
 		req := &http.Request{
-			RemoteAddr: "127.0.0.1:8080",
+			RemoteAddr: "10.0.0.1:8080",
 			Header:     make(http.Header),
 		}
 		req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
 		result := extractor.ExtractIP(req)
+		if !errors.Is(result.Err, ErrTooFewTrustedProxies) {
+			t.Errorf("Expected error to wrap ErrTooFewTrustedProxies, got %v", result.Err)
+		}
 
 		var proxyValidationErr *ProxyValidationError
 		if !errors.As(result.Err, &proxyValidationErr) {

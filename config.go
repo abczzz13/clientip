@@ -2,9 +2,8 @@ package clientip
 
 import (
 	"fmt"
-	"io"
-	"log/slog"
 	"net/netip"
+	"reflect"
 )
 
 const (
@@ -74,7 +73,7 @@ type Config struct {
 
 	sourcePriority []string
 
-	logger  *slog.Logger
+	logger  Logger
 	metrics Metrics
 }
 
@@ -105,7 +104,7 @@ func (c *Config) validate() error {
 	if c.forwardedForStrategy == LeftmostIP && len(c.trustedProxyCIDRs) == 0 {
 		return fmt.Errorf("LeftmostIP strategy requires trustedProxyCIDRs to be configured; without CIDR validation, this strategy provides no security benefit over RightmostIP")
 	}
-	if c.logger == nil {
+	if isNilLogger(c.logger) {
 		return fmt.Errorf("logger cannot be nil")
 	}
 	if c.metrics == nil {
@@ -117,6 +116,20 @@ func (c *Config) validate() error {
 	return nil
 }
 
+func isNilLogger(logger Logger) bool {
+	if logger == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(logger)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
 func defaultConfig() *Config {
 	return &Config{
 		minTrustedProxies:    0,
@@ -125,7 +138,7 @@ func defaultConfig() *Config {
 		maxChainLength:       DefaultMaxChainLength,
 		forwardedForStrategy: RightmostIP,
 		securityMode:         SecurityModeStrict,
-		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:               noopLogger{},
 		metrics:              noopMetrics{},
 		sourcePriority: []string{
 			SourceXForwardedFor,
@@ -183,7 +196,7 @@ func MaxChainLength(max int) Option {
 	}
 }
 
-func WithLogger(logger *slog.Logger) Option {
+func WithLogger(logger Logger) Option {
 	return func(c *Config) error {
 		c.logger = logger
 		return nil
