@@ -6,7 +6,7 @@
 //   - Security-first design with protection against IP spoofing and header injection
 //   - Flexible proxy configuration with min/max proxy ranges
 //   - Multiple source support: X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
-//   - Optional observability with logging and Prometheus metrics
+//   - Optional observability with logging and pluggable metrics
 //   - Type-safe using modern Go netip.Addr
 //
 // # Basic Usage
@@ -48,11 +48,14 @@
 // # Observability
 //
 // Add logging and metrics for production monitoring:
+// (Prometheus adapter package: github.com/abczzz13/clientip/prometheus)
+//
+//	import clientipprom "github.com/abczzz13/clientip/prometheus"
 //
 //	extractor, err := clientip.New(
 //	    clientip.TrustedProxies(cidrs, 1, 3),
 //	    clientip.WithLogger(slog.Default()),
-//	    clientip.WithPrometheusMetrics(),
+//	    clientipprom.WithMetrics(),
 //	)
 //
 // # Security Considerations

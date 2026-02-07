@@ -2,7 +2,7 @@
 - 
 
 ## Testing
-- [ ] `go test ./...`
+- [ ] `go test ./...` and `GOWORK=off go -C prometheus test ./...`
 - [ ] `go vet ./...`
 - [ ] `golangci-lint run`
 - [ ] `govulncheck ./...`

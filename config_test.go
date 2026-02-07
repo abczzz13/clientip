@@ -3,10 +3,9 @@ package clientip
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"testing"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestNew_Success(t *testing.T) {
@@ -46,12 +45,6 @@ func TestNew_Success(t *testing.T) {
 			name: "with metrics",
 			opts: []Option{
 				WithMetrics(newMockMetrics()),
-			},
-		},
-		{
-			name: "with prometheus metrics",
-			opts: []Option{
-				WithPrometheusMetricsRegisterer(prometheus.NewRegistry()),
 			},
 		},
 		{
@@ -676,62 +669,33 @@ func TestWithMetrics_Option(t *testing.T) {
 	}
 }
 
-func TestWithPrometheusMetricsRegisterer_Option(t *testing.T) {
-	cfg := defaultConfig()
-	opt := WithPrometheusMetricsRegisterer(prometheus.NewRegistry())
-
-	if err := opt(cfg); err != nil {
-		t.Fatalf("WithPrometheusMetricsRegisterer() error = %v", err)
-	}
-
-	if _, ok := cfg.metrics.(*PrometheusMetrics); !ok {
-		t.Fatalf("metrics type = %T, want *PrometheusMetrics", cfg.metrics)
-	}
-}
-
-func TestWithPrometheusMetrics_Option(t *testing.T) {
-	cfg := defaultConfig()
-	opt := WithPrometheusMetrics()
-
-	if err := opt(cfg); err != nil {
-		t.Fatalf("WithPrometheusMetrics() error = %v", err)
-	}
-
-	if _, ok := cfg.metrics.(*PrometheusMetrics); !ok {
-		t.Fatalf("metrics type = %T, want *PrometheusMetrics", cfg.metrics)
-	}
-}
-
 func TestMetricsOptions_Precedence_LastWins(t *testing.T) {
-	t.Run("with metrics after prometheus", func(t *testing.T) {
-		customMetrics := newMockMetrics()
+	t.Run("last WithMetrics option wins", func(t *testing.T) {
+		first := newMockMetrics()
+		second := newMockMetrics()
 
 		extractor, err := New(
-			WithPrometheusMetricsRegisterer(prometheus.NewRegistry()),
-			WithMetrics(customMetrics),
+			WithMetrics(first),
+			WithMetrics(second),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
 
-		if extractor.config.metrics != customMetrics {
-			t.Fatalf("metrics type = %T, want custom metrics", extractor.config.metrics)
+		req := &http.Request{
+			RemoteAddr: "1.1.1.1:12345",
+			Header:     make(http.Header),
 		}
-	})
-
-	t.Run("with prometheus after metrics", func(t *testing.T) {
-		customMetrics := newMockMetrics()
-
-		extractor, err := New(
-			WithMetrics(customMetrics),
-			WithPrometheusMetricsRegisterer(prometheus.NewRegistry()),
-		)
-		if err != nil {
-			t.Fatalf("New() error = %v", err)
+		result := extractor.ExtractIP(req)
+		if !result.Valid() {
+			t.Fatalf("ExtractIP() error = %v", result.Err)
 		}
 
-		if _, ok := extractor.config.metrics.(*PrometheusMetrics); !ok {
-			t.Fatalf("metrics type = %T, want *PrometheusMetrics", extractor.config.metrics)
+		if got := first.getSuccessCount(SourceRemoteAddr); got != 0 {
+			t.Fatalf("first metrics success count = %d, want 0", got)
+		}
+		if got := second.getSuccessCount(SourceRemoteAddr); got != 1 {
+			t.Fatalf("second metrics success count = %d, want 1", got)
 		}
 	})
 }
