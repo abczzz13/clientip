@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-02-07
+
 ### Changed
 
 - Logging now uses a bring-your-own `Logger` interface (`WithLogger(Logger)`) instead of a concrete `*slog.Logger` type.
