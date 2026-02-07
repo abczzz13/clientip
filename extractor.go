@@ -29,8 +29,11 @@ func New(opts ...Option) (*Extractor, error) {
 
 	sources := make([]Source, 0, len(cfg.sourcePriority))
 	for _, sourceName := range cfg.sourcePriority {
+		resolvedSourceName := canonicalSourceName(sourceName)
 		var source Source
-		switch sourceName {
+		switch resolvedSourceName {
+		case SourceForwarded:
+			source = newForwardedSource(extractor)
 		case SourceXForwardedFor:
 			source = newForwardedForSource(extractor)
 		case SourceXRealIP:
@@ -47,6 +50,21 @@ func New(opts ...Option) (*Extractor, error) {
 	extractor.source = newChainedSource(extractor, sources...)
 
 	return extractor, nil
+}
+
+func canonicalSourceName(sourceName string) string {
+	switch NormalizeSourceName(sourceName) {
+	case SourceForwarded:
+		return SourceForwarded
+	case SourceXForwardedFor:
+		return SourceXForwardedFor
+	case SourceXRealIP:
+		return SourceXRealIP
+	case SourceRemoteAddr:
+		return SourceRemoteAddr
+	default:
+		return sourceName
+	}
 }
 
 func (e *Extractor) ExtractIP(r *http.Request) Result {

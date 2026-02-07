@@ -290,6 +290,53 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 	}
 }
 
+func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("Forwarded", "for=\"1.1.1.1")
+
+	extractor.ExtractIP(req)
+
+	if got := metrics.getSecurityEventCount(securityEventMalformedForwarded); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventMalformedForwarded, got)
+	}
+}
+
+func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("Forwarded", "for=1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if !result.Valid() {
+		t.Fatalf("ExtractIP() failed: %v", result.Err)
+	}
+
+	if got := metrics.getSuccessCount(SourceForwarded); got != 1 {
+		t.Errorf("success count for %s = %d, want 1", SourceForwarded, got)
+	}
+}
+
 func TestMetrics_MultipleExtractions(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(

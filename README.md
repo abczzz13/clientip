@@ -54,7 +54,7 @@ if err != nil {
 }
 
 extractor, err := clientip.New(
-    // min=0 allows requests where XFF contains only the client IP
+    // min=0 allows requests where proxy headers contain only the client IP
     // (trusted RemoteAddr is validated separately).
     clientip.TrustedProxies(cidrs, 0, 3),
     clientip.XFFStrategy(clientip.RightmostIP),
@@ -70,6 +70,7 @@ if err != nil {
 extractor, err := clientip.New(
     clientip.Priority(
         "CF-Connecting-IP",
+        clientip.SourceForwarded,
         clientip.SourceXForwardedFor,
         clientip.SourceRemoteAddr,
     ),
@@ -79,12 +80,13 @@ extractor, err := clientip.New(
 ### Security mode (strict vs lax)
 
 ```go
-// Strict is default and fails closed on security errors.
+// Strict is default and fails closed on security errors
+// (including malformed Forwarded headers).
 strictExtractor, _ := clientip.New(
     clientip.WithSecurityMode(clientip.SecurityModeStrict),
 )
 
-// Lax mode allows fallback to lower-priority sources.
+// Lax mode allows fallback to lower-priority sources after security errors.
 laxExtractor, _ := clientip.New(
     clientip.WithSecurityMode(clientip.SecurityModeLax),
 )
@@ -112,8 +114,8 @@ Structured log attributes are passed as alternating key/value pairs, matching
 the style used by `slog`.
 
 When configured, the extractor emits warning logs for security-significant
-conditions such as `multiple_headers`, `chain_too_long`, `untrusted_proxy`,
-`no_trusted_proxies`, `too_few_trusted_proxies`, and `too_many_trusted_proxies`.
+conditions such as `multiple_headers`, `malformed_forwarded`, `chain_too_long`,
+`untrusted_proxy`, `no_trusted_proxies`, `too_few_trusted_proxies`, and `too_many_trusted_proxies`.
 
 ```go
 extractor, err := clientip.New(
@@ -207,17 +209,19 @@ extractor, err := clientip.New(
 
 ## Options
 
-- `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in the XFF chain
+- `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in proxy header chains
 - `TrustedCIDRs(...string)` parse CIDR strings in-place
 - `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
 - `AllowPrivateIPs(bool)` allow private client IPs
-- `MaxChainLength(int)` limit `X-Forwarded-For` chain length (default 100)
+- `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
 - `XFFStrategy(Strategy)` choose `RightmostIP` (default) or `LeftmostIP`
-- `Priority(...string)` set source order; built-ins: `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`
+- `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`)
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(Logger)` inject logger implementation
 - `WithMetrics(Metrics)` inject custom metrics implementation directly
 - `WithDebugInfo(bool)` include chain analysis in `Result.DebugInfo`
+
+Default source order is `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`.
 
 Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
 
@@ -226,15 +230,15 @@ Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
 
 Options are applied in order. If multiple metrics options are provided, the last one wins.
 
-Proxy count bounds (`min`/`max`) apply only to trusted proxies present in `X-Forwarded-For`.
-The immediate proxy (`RemoteAddr`) is validated for trust separately.
+Proxy count bounds (`min`/`max`) apply to trusted proxies present in `Forwarded` (from `for=` values) and `X-Forwarded-For`.
+The immediate proxy (`RemoteAddr`) is validated for trust separately before either header is trusted.
 
 ## Result
 
 ```go
 type Result struct {
     IP                netip.Addr
-    Source            string // "x_forwarded_for", "x_real_ip", "remote_addr", or normalized custom header
+    Source            string // "forwarded", "x_forwarded_for", "x_real_ip", "remote_addr", or normalized custom header
     Err               error
     TrustedProxyCount int
     DebugInfo         *ChainDebugInfo
@@ -253,8 +257,10 @@ if !result.Valid() {
     switch {
     case errors.Is(result.Err, clientip.ErrMultipleXFFHeaders):
         // Possible spoofing attempt
+    case errors.Is(result.Err, clientip.ErrInvalidForwardedHeader):
+        // Malformed Forwarded header
     case errors.Is(result.Err, clientip.ErrUntrustedProxy):
-        // XFF came from an untrusted immediate proxy
+        // Forwarded/XFF came from an untrusted immediate proxy
     case errors.Is(result.Err, clientip.ErrNoTrustedProxies):
         // No trusted proxies found in the chain
     case errors.Is(result.Err, clientip.ErrTooFewTrustedProxies):
@@ -272,13 +278,19 @@ if !result.Valid() {
 }
 ```
 
+Typed chain-related errors expose additional context:
+
+- `ProxyValidationError`: `Chain`, `TrustedProxyCount`, `MinTrustedProxies`, `MaxTrustedProxies`
+- `InvalidIPError`: `Chain`, `ExtractedIP`, `Index`, `TrustedProxies`
+
 ## Security notes
 
+- Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
 - Rejects multiple `X-Forwarded-For` headers (spoofing defense)
-- Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `X-Forwarded-For` (when trusted CIDRs are configured)
+- Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted CIDRs are configured)
 - Enforces trusted proxy count bounds and chain length
 - Filters implausible IPs (loopback, multicast, reserved); optional private IP allowlist
-- Strict fail-closed behavior is the default (`SecurityModeStrict`)
+- Strict fail-closed behavior is the default (`SecurityModeStrict`), including malformed `Forwarded` headers
 - Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
 
 ## Performance

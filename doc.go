@@ -4,8 +4,8 @@
 // # Features
 //
 //   - Security-first design with protection against IP spoofing and header injection
-//   - Flexible proxy configuration with min/max trusted proxy ranges in X-Forwarded-For
-//   - Multiple source support: X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
+//   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
+//   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
 //   - Optional observability with context-aware logging and pluggable metrics
 //   - Type-safe using modern Go netip.Addr
 //
@@ -29,7 +29,7 @@
 //
 //	cidrs, _ := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
 //	extractor, err := clientip.New(
-//	    clientip.TrustedProxies(cidrs, 0, 2),  // Count trusted proxies present in X-Forwarded-For
+//	    clientip.TrustedProxies(cidrs, 0, 2),  // Count trusted proxies present in proxy headers
 //	    clientip.AllowPrivateIPs(false),
 //	)
 //
@@ -40,6 +40,7 @@
 //	extractor, _ := clientip.New(
 //	    clientip.Priority(
 //	        "CF-Connecting-IP",                   // Cloudflare
+//	        clientip.SourceForwarded,
 //	        clientip.SourceXForwardedFor,
 //	        clientip.SourceRemoteAddr,
 //	    ),
@@ -63,8 +64,8 @@
 //
 // The package includes several security features:
 //
-//   - Detection of multiple X-Forwarded-For headers (possible spoofing)
-//   - Immediate proxy trust enforcement before honoring X-Forwarded-For
+//   - Detection of malformed Forwarded headers and multiple X-Forwarded-For headers
+//   - Immediate proxy trust enforcement before honoring Forwarded/X-Forwarded-For
 //   - Validation of proxy counts (min/max enforcement)
 //   - Chain length limits to prevent DoS
 //   - Rejection of invalid/implausible IPs (loopback, multicast, etc.)
@@ -75,7 +76,7 @@
 //
 // Security behavior can be configured per extractor:
 //
-//   - SecurityModeStrict (default): fail closed on security-significant errors.
+//   - SecurityModeStrict (default): fail closed on security-significant errors, including malformed Forwarded headers.
 //   - SecurityModeLax: allow fallback to lower-priority sources.
 //
 // Example:

@@ -8,19 +8,21 @@ import (
 )
 
 var (
-	ErrNoTrustedProxies = errors.New("no trusted proxies found in X-Forwarded-For chain")
+	ErrNoTrustedProxies = errors.New("no trusted proxies found in proxy chain")
 
 	ErrMultipleXFFHeaders = errors.New("multiple X-Forwarded-For headers received")
 
 	ErrUntrustedProxy = errors.New("request from untrusted proxy")
 
-	ErrTooFewTrustedProxies = errors.New("too few trusted proxies in X-Forwarded-For chain")
+	ErrTooFewTrustedProxies = errors.New("too few trusted proxies in proxy chain")
 
-	ErrTooManyTrustedProxies = errors.New("too many trusted proxies in X-Forwarded-For chain")
+	ErrTooManyTrustedProxies = errors.New("too many trusted proxies in proxy chain")
 
 	ErrInvalidIP = errors.New("invalid or implausible IP address")
 
-	ErrChainTooLong = errors.New("X-Forwarded-For chain too long")
+	ErrChainTooLong = errors.New("proxy chain too long")
+
+	ErrInvalidForwardedHeader = errors.New("invalid Forwarded header")
 )
 
 type ExtractionError struct {
@@ -53,29 +55,29 @@ func (e *MultipleHeadersError) Error() string {
 
 type ProxyValidationError struct {
 	ExtractionError
-	XFF               string
+	Chain             string
 	TrustedProxyCount int
 	MinTrustedProxies int
 	MaxTrustedProxies int
 }
 
 func (e *ProxyValidationError) Error() string {
-	return fmt.Sprintf("%s: %v (xff=%q, trusted_count=%d, min=%d, max=%d)",
-		e.Source, e.Err, e.XFF, e.TrustedProxyCount, e.MinTrustedProxies, e.MaxTrustedProxies)
+	return fmt.Sprintf("%s: %v (chain=%q, trusted_count=%d, min=%d, max=%d)",
+		e.Source, e.Err, e.Chain, e.TrustedProxyCount, e.MinTrustedProxies, e.MaxTrustedProxies)
 }
 
 type InvalidIPError struct {
 	ExtractionError
-	XFF            string
+	Chain          string
 	ExtractedIP    string
 	Index          int
 	TrustedProxies int
 }
 
 func (e *InvalidIPError) Error() string {
-	if e.XFF != "" {
-		return fmt.Sprintf("%s: %v (xff=%q, extracted_ip=%q, index=%d, trusted_proxies=%d)",
-			e.Source, e.Err, e.XFF, e.ExtractedIP, e.Index, e.TrustedProxies)
+	if e.Chain != "" {
+		return fmt.Sprintf("%s: %v (chain=%q, extracted_ip=%q, index=%d, trusted_proxies=%d)",
+			e.Source, e.Err, e.Chain, e.ExtractedIP, e.Index, e.TrustedProxies)
 	}
 	if e.ExtractedIP != "" {
 		return fmt.Sprintf("%s: %v (ip=%q)", e.Source, e.Err, e.ExtractedIP)

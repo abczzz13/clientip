@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- First-class RFC7239 `Forwarded` header support (`for=` chain parsing) with built-in source constant `SourceForwarded`.
+- New malformed-header error sentinel: `ErrInvalidForwardedHeader`.
+
+### Changed
+
+- Default source priority now prefers `Forwarded` before `X-Forwarded-For`, `X-Real-IP`, and `RemoteAddr`.
+- Proxy-chain extraction, trust validation, and chain limits now apply consistently to `Forwarded` and `X-Forwarded-For`.
+- In `SecurityModeStrict` (default), malformed `Forwarded` headers (`ErrInvalidForwardedHeader`) are now terminal (fail closed); `SecurityModeLax` still allows fallback.
+- `ProxyValidationError` and `InvalidIPError` now expose `Chain` instead of `XFF`.
+- `Priority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
+
 ## [0.0.3] - 2026-02-07
 
 ### Changed

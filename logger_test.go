@@ -364,3 +364,48 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 		"8.8.8.8:8080",
 	)
 }
+
+func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
+	logger := &capturedLogger{}
+
+	extractor, err := New(
+		WithLogger(logger),
+		Priority(SourceForwarded, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:8080",
+		Header:     make(http.Header),
+		URL:        &url.URL{Path: "/test/malformed-forwarded"},
+	}
+	req.Header.Set("Forwarded", "for=\"1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Fatal("expected extraction to fail closed on malformed Forwarded")
+	}
+	if !errors.Is(result.Err, ErrInvalidForwardedHeader) {
+		t.Fatalf("error = %v, want ErrInvalidForwardedHeader", result.Err)
+	}
+	if result.Source != SourceForwarded {
+		t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
+	}
+
+	entries := logger.snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("logged entries = %d, want 1", len(entries))
+	}
+
+	entry := entries[0]
+	assertCommonSecurityWarningAttrs(
+		t,
+		entry.attrs,
+		securityEventMalformedForwarded,
+		SourceForwarded,
+		"/test/malformed-forwarded",
+		"1.1.1.1:8080",
+	)
+}

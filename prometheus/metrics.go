@@ -61,7 +61,7 @@ func NewWithRegisterer(registerer prom.Registerer) (*PrometheusMetrics, error) {
 	extractionTotalCollector := prom.NewCounterVec(
 		prom.CounterOpts{
 			Name: "ip_extraction_total",
-			Help: "Total number of IP extraction attempts by source (x-forwarded-for, x-real-ip, remote-addr) and result (success, invalid).",
+			Help: "Total number of IP extraction attempts by source (forwarded, x-forwarded-for, x-real-ip, remote-addr) and result (success, invalid).",
 		},
 		[]string{"source", "result"},
 	)

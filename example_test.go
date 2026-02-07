@@ -28,6 +28,22 @@ func ExampleNew_simple() {
 	}
 }
 
+func ExampleNew_forwarded() {
+	extractor, _ := clientip.New()
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("Forwarded", "for=1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		fmt.Println(result.IP, result.Source)
+	}
+	// Output: 1.1.1.1 forwarded
+}
+
 func ExampleNew_withOptions() {
 	cidrs, _ := netip.ParsePrefix("10.0.0.0/8")
 

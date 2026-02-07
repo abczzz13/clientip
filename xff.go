@@ -76,6 +76,59 @@ type chainAnalysis struct {
 	trustedIndices []int
 }
 
+func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
+	if len(parts) == 0 {
+		return netip.Addr{}, 0, nil, &ExtractionError{
+			Err:    ErrInvalidIP,
+			Source: sourceName,
+		}
+	}
+
+	analysis, err := e.analyzeChain(parts)
+
+	var debugInfo *ChainDebugInfo
+	if e.config.debugMode {
+		debugInfo = &ChainDebugInfo{
+			FullChain:      parts,
+			ClientIndex:    analysis.clientIndex,
+			TrustedIndices: analysis.trustedIndices,
+		}
+	}
+
+	if err != nil {
+		chain := strings.Join(parts, ", ")
+		return netip.Addr{}, analysis.trustedCount, debugInfo, &ProxyValidationError{
+			ExtractionError: ExtractionError{
+				Err:    err,
+				Source: sourceName,
+			},
+			Chain:             chain,
+			TrustedProxyCount: analysis.trustedCount,
+			MinTrustedProxies: e.config.minTrustedProxies,
+			MaxTrustedProxies: e.config.maxTrustedProxies,
+		}
+	}
+
+	clientIPStr := parts[analysis.clientIndex]
+	clientIP := parseIP(clientIPStr)
+
+	if !e.isPlausibleClientIP(clientIP) {
+		chain := strings.Join(parts, ", ")
+		return netip.Addr{}, analysis.trustedCount, debugInfo, &InvalidIPError{
+			ExtractionError: ExtractionError{
+				Err:    ErrInvalidIP,
+				Source: sourceName,
+			},
+			Chain:          chain,
+			ExtractedIP:    clientIPStr,
+			Index:          analysis.clientIndex,
+			TrustedProxies: analysis.trustedCount,
+		}
+	}
+
+	return normalizeIP(clientIP), analysis.trustedCount, debugInfo, nil
+}
+
 func (e *Extractor) analyzeChain(parts []string) (chainAnalysis, error) {
 	if len(parts) == 0 {
 		return chainAnalysis{}, nil

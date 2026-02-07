@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/netip"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 type testTypedNilMetrics struct{}
@@ -770,6 +772,23 @@ func TestPriority_Option(t *testing.T) {
 			t.Errorf("sourcePriority length = %d, want 2", len(cfg.sourcePriority))
 		}
 	})
+
+	t.Run("canonicalizes built-in aliases", func(t *testing.T) {
+		cfg := defaultConfig()
+		opt := Priority("Forwarded", "X-Forwarded-For", "X_Real_IP", "Remote-Addr", "CF-Connecting-IP")
+		_ = opt(cfg)
+
+		want := []string{
+			SourceForwarded,
+			SourceXForwardedFor,
+			SourceXRealIP,
+			SourceRemoteAddr,
+			"CF-Connecting-IP",
+		}
+		if diff := cmp.Diff(want, cfg.sourcePriority); diff != "" {
+			t.Errorf("sourcePriority mismatch (-want +got):\n%s", diff)
+		}
+	})
 }
 
 func TestDefaultConfig(t *testing.T) {
@@ -800,8 +819,9 @@ func TestDefaultConfig(t *testing.T) {
 		if cfg.metrics == nil {
 			t.Error("metrics is nil")
 		}
-		if len(cfg.sourcePriority) != 3 {
-			t.Errorf("sourcePriority length = %d, want 3", len(cfg.sourcePriority))
+		wantSourcePriority := []string{SourceForwarded, SourceXForwardedFor, SourceXRealIP, SourceRemoteAddr}
+		if diff := cmp.Diff(wantSourcePriority, cfg.sourcePriority); diff != "" {
+			t.Errorf("sourcePriority mismatch (-want +got):\n%s", diff)
 		}
 	})
 

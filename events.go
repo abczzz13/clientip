@@ -10,4 +10,5 @@ const (
 	securityEventInvalidIP             = "invalid_ip"
 	securityEventReservedIP            = "reserved_ip"
 	securityEventPrivateIP             = "private_ip"
+	securityEventMalformedForwarded    = "malformed_forwarded"
 )

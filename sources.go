@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	SourceForwarded     = "forwarded"
 	SourceXForwardedFor = "x_forwarded_for"
 	SourceXRealIP       = "x_real_ip"
 	SourceRemoteAddr    = "remote_addr"
@@ -31,6 +32,10 @@ type forwardedForSource struct {
 	extractor *Extractor
 }
 
+type forwardedSource struct {
+	extractor *Extractor
+}
+
 func requestPath(r *http.Request) string {
 	if r.URL == nil {
 		return ""
@@ -38,16 +43,16 @@ func requestPath(r *http.Request) string {
 	return r.URL.Path
 }
 
-func (s *forwardedForSource) logSecurityWarning(ctx context.Context, r *http.Request, event, msg string, attrs ...any) {
+func (e *Extractor) logSecurityWarning(ctx context.Context, r *http.Request, sourceName, event, msg string, attrs ...any) {
 	baseAttrs := []any{
 		"event", event,
-		"source", s.Name(),
+		"source", sourceName,
 		"path", requestPath(r),
 		"remote_addr", r.RemoteAddr,
 	}
 
 	baseAttrs = append(baseAttrs, attrs...)
-	s.extractor.config.logger.WarnContext(ctx, msg, baseAttrs...)
+	e.config.logger.WarnContext(ctx, msg, baseAttrs...)
 }
 
 func proxyValidationWarningDetails(err error) (event, msg string, ok bool) {
@@ -63,7 +68,7 @@ func proxyValidationWarningDetails(err error) (event, msg string, ok bool) {
 	}
 }
 
-func (s *forwardedForSource) logProxyValidationWarning(ctx context.Context, r *http.Request, err error) {
+func (e *Extractor) logProxyValidationWarning(ctx context.Context, r *http.Request, sourceName string, err error) {
 	event, msg, ok := proxyValidationWarningDetails(err)
 	if !ok {
 		return
@@ -71,7 +76,7 @@ func (s *forwardedForSource) logProxyValidationWarning(ctx context.Context, r *h
 
 	var proxyErr *ProxyValidationError
 	if errors.As(err, &proxyErr) {
-		s.logSecurityWarning(ctx, r, event, msg,
+		e.logSecurityWarning(ctx, r, sourceName, event, msg,
 			"trusted_proxy_count", proxyErr.TrustedProxyCount,
 			"min_trusted_proxies", proxyErr.MinTrustedProxies,
 			"max_trusted_proxies", proxyErr.MaxTrustedProxies,
@@ -79,11 +84,90 @@ func (s *forwardedForSource) logProxyValidationWarning(ctx context.Context, r *h
 		return
 	}
 
-	s.logSecurityWarning(ctx, r, event, msg)
+	e.logSecurityWarning(ctx, r, sourceName, event, msg)
 }
 
 func (s *forwardedForSource) Name() string {
 	return SourceXForwardedFor
+}
+
+func (s *forwardedSource) Name() string {
+	return SourceForwarded
+}
+
+func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+	forwardedValues := r.Header.Values("Forwarded")
+
+	if len(forwardedValues) == 0 {
+		return ExtractionResult{}, &ExtractionError{
+			Err:    ErrInvalidIP,
+			Source: s.Name(),
+		}
+	}
+
+	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
+		remoteIP := parseIP(r.RemoteAddr)
+		if !s.extractor.isTrustedProxy(remoteIP) {
+			chain := strings.Join(forwardedValues, ", ")
+			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
+			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while Forwarded is present")
+			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+			return ExtractionResult{}, &ProxyValidationError{
+				ExtractionError: ExtractionError{
+					Err:    ErrUntrustedProxy,
+					Source: s.Name(),
+				},
+				Chain:             chain,
+				TrustedProxyCount: 0,
+				MinTrustedProxies: s.extractor.config.minTrustedProxies,
+				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
+			}
+		}
+	}
+
+	parts, err := s.extractor.parseForwardedValues(forwardedValues)
+	if err != nil {
+		if errors.Is(err, ErrChainTooLong) {
+			var chainErr *ChainTooLongError
+			if errors.As(err, &chainErr) {
+				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "Forwarded chain exceeds configured maximum length",
+					"chain_length", chainErr.ChainLength,
+					"max_length", chainErr.MaxLength,
+				)
+			} else {
+				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "Forwarded chain exceeds configured maximum length")
+			}
+		}
+
+		if errors.Is(err, ErrInvalidForwardedHeader) {
+			s.extractor.config.metrics.RecordSecurityEvent(securityEventMalformedForwarded)
+			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
+		}
+
+		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+		return ExtractionResult{}, err
+	}
+
+	ip, trustedCount, debugInfo, err := s.extractor.clientIPFromChainWithDebug(s.Name(), parts)
+	if err != nil {
+		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
+
+		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+		return ExtractionResult{}, err
+	}
+
+	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
+	result := ExtractionResult{
+		IP:                ip,
+		TrustedProxyCount: trustedCount,
+		Source:            s.Name(),
+	}
+
+	if s.extractor.config.debugMode {
+		result.DebugInfo = debugInfo
+	}
+
+	return result, nil
 }
 
 func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
@@ -98,7 +182,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 
 	if len(xffValues) > 1 {
 		s.extractor.config.metrics.RecordSecurityEvent(securityEventMultipleHeaders)
-		s.logSecurityWarning(ctx, r, securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
+		s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
 			"header_count", len(xffValues),
 		)
 		return ExtractionResult{}, &MultipleHeadersError{
@@ -114,15 +198,16 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
 		remoteIP := parseIP(r.RemoteAddr)
 		if !s.extractor.isTrustedProxy(remoteIP) {
+			chain := xffValues[0]
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
-			s.logSecurityWarning(ctx, r, securityEventUntrustedProxy, "request received from untrusted proxy while X-Forwarded-For is present")
+			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while X-Forwarded-For is present")
 			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 			return ExtractionResult{}, &ProxyValidationError{
 				ExtractionError: ExtractionError{
 					Err:    ErrUntrustedProxy,
 					Source: s.Name(),
 				},
-				XFF:               xffValues[0],
+				Chain:             chain,
 				TrustedProxyCount: 0,
 				MinTrustedProxies: s.extractor.config.minTrustedProxies,
 				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
@@ -135,12 +220,12 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 		if errors.Is(err, ErrChainTooLong) {
 			var chainErr *ChainTooLongError
 			if errors.As(err, &chainErr) {
-				s.logSecurityWarning(ctx, r, securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length",
+				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length",
 					"chain_length", chainErr.ChainLength,
 					"max_length", chainErr.MaxLength,
 				)
 			} else {
-				s.logSecurityWarning(ctx, r, securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length")
+				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length")
 			}
 		}
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
@@ -149,7 +234,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 
 	ip, trustedCount, debugInfo, err := s.clientIPFromXFFWithDebug(parts)
 	if err != nil {
-		s.logProxyValidationWarning(ctx, r, err)
+		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
 
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return ExtractionResult{}, err
@@ -170,55 +255,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 }
 
 func (s *forwardedForSource) clientIPFromXFFWithDebug(parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
-	if len(parts) == 0 {
-		return netip.Addr{}, 0, nil, &ExtractionError{
-			Err:    ErrInvalidIP,
-			Source: s.Name(),
-		}
-	}
-
-	analysis, err := s.extractor.analyzeChain(parts)
-
-	// Only allocate debug info if debug mode is enabled
-	var debugInfo *ChainDebugInfo
-	if s.extractor.config.debugMode {
-		debugInfo = &ChainDebugInfo{
-			FullChain:      parts,
-			ClientIndex:    analysis.clientIndex,
-			TrustedIndices: analysis.trustedIndices,
-		}
-	}
-
-	if err != nil {
-		return netip.Addr{}, analysis.trustedCount, debugInfo, &ProxyValidationError{
-			ExtractionError: ExtractionError{
-				Err:    err,
-				Source: s.Name(),
-			},
-			XFF:               strings.Join(parts, ", "),
-			TrustedProxyCount: analysis.trustedCount,
-			MinTrustedProxies: s.extractor.config.minTrustedProxies,
-			MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
-		}
-	}
-
-	clientIPStr := parts[analysis.clientIndex]
-	clientIP := parseIP(clientIPStr)
-
-	if !s.extractor.isPlausibleClientIP(clientIP) {
-		return netip.Addr{}, analysis.trustedCount, debugInfo, &InvalidIPError{
-			ExtractionError: ExtractionError{
-				Err:    ErrInvalidIP,
-				Source: s.Name(),
-			},
-			XFF:            strings.Join(parts, ", "),
-			ExtractedIP:    clientIPStr,
-			Index:          analysis.clientIndex,
-			TrustedProxies: analysis.trustedCount,
-		}
-	}
-
-	return normalizeIP(clientIP), analysis.trustedCount, debugInfo, nil
+	return s.extractor.clientIPFromChainWithDebug(s.Name(), parts)
 }
 
 type singleHeaderSource struct {
@@ -310,6 +347,10 @@ func newForwardedForSource(extractor *Extractor) Source {
 	return &forwardedForSource{extractor: extractor}
 }
 
+func newForwardedSource(extractor *Extractor) Source {
+	return &forwardedSource{extractor: extractor}
+}
+
 func newSingleHeaderSource(extractor *Extractor, headerName string) Source {
 	return &singleHeaderSource{
 		extractor:  extractor,
@@ -361,7 +402,8 @@ func (c *chainedSource) isTerminalError(err error) bool {
 		errors.Is(err, ErrNoTrustedProxies) ||
 		errors.Is(err, ErrTooFewTrustedProxies) ||
 		errors.Is(err, ErrTooManyTrustedProxies) ||
-		errors.Is(err, ErrChainTooLong)
+		errors.Is(err, ErrChainTooLong) ||
+		errors.Is(err, ErrInvalidForwardedHeader)
 }
 
 func (c *chainedSource) Name() string {

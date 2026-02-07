@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/netip"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestForwardedForSource_Extract(t *testing.T) {
@@ -103,6 +105,104 @@ func TestForwardedForSource_Name(t *testing.T) {
 
 	if source.Name() != SourceXForwardedFor {
 		t.Errorf("Name() = %q, want %q", source.Name(), SourceXForwardedFor)
+	}
+}
+
+func TestForwardedSource_Extract(t *testing.T) {
+	extractor, _ := New()
+	source := &forwardedSource{extractor: extractor}
+
+	tests := []struct {
+		name        string
+		forwarded   []string
+		wantValid   bool
+		wantIP      string
+		wantErr     error
+		wantErrType any
+	}{
+		{
+			name:      "single valid for value",
+			forwarded: []string{"for=1.1.1.1"},
+			wantValid: true,
+			wantIP:    "1.1.1.1",
+		},
+		{
+			name:      "quoted IPv6 with port",
+			forwarded: []string{"for=\"[2606:4700:4700::1]:8080\""},
+			wantValid: true,
+			wantIP:    "2606:4700:4700::1",
+		},
+		{
+			name:        "no Forwarded header",
+			forwarded:   nil,
+			wantValid:   false,
+			wantErrType: &ExtractionError{},
+		},
+		{
+			name:        "malformed Forwarded header",
+			forwarded:   []string{"for=\"1.1.1.1"},
+			wantValid:   false,
+			wantErr:     ErrInvalidForwardedHeader,
+			wantErrType: &ExtractionError{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				Header: make(http.Header),
+			}
+			for _, h := range tt.forwarded {
+				req.Header.Add("Forwarded", h)
+			}
+
+			result, err := source.Extract(context.Background(), req)
+
+			got := struct {
+				Valid bool
+				IP    string
+			}{
+				Valid: err == nil,
+			}
+			if err == nil {
+				got.IP = result.IP.String()
+			}
+
+			want := struct {
+				Valid bool
+				IP    string
+			}{
+				Valid: tt.wantValid,
+			}
+			if tt.wantValid {
+				want.IP = netip.MustParseAddr(tt.wantIP).String()
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("Extract() mismatch (-want +got):\n%s", diff)
+			}
+
+			if tt.wantErrType != nil {
+				if !errorIsType(err, tt.wantErrType) {
+					t.Errorf("Extract() error type = %T, want %T", err, tt.wantErrType)
+				}
+			}
+
+			if tt.wantErr != nil {
+				if !errorContains(err, tt.wantErr) {
+					t.Errorf("Extract() error does not contain expected error: %v", tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestForwardedSource_Name(t *testing.T) {
+	extractor, _ := New()
+	source := &forwardedSource{extractor: extractor}
+
+	if source.Name() != SourceForwarded {
+		t.Errorf("Name() = %q, want %q", source.Name(), SourceForwarded)
 	}
 }
 
@@ -429,6 +529,13 @@ func TestChainedSource_Name(t *testing.T) {
 func TestSourceFactories(t *testing.T) {
 	extractor, _ := New()
 
+	t.Run("Forwarded source", func(t *testing.T) {
+		source := newForwardedSource(extractor)
+		if source.Name() != SourceForwarded {
+			t.Errorf("newForwardedSource() source name = %q, want %q", source.Name(), SourceForwarded)
+		}
+	})
+
 	t.Run("XForwardedFor source", func(t *testing.T) {
 		source := newForwardedForSource(extractor)
 		if source.Name() != SourceXForwardedFor {
@@ -466,6 +573,10 @@ func TestNormalizeSourceName(t *testing.T) {
 		{
 			input: "X-Forwarded-For",
 			want:  "x_forwarded_for",
+		},
+		{
+			input: "Forwarded",
+			want:  "forwarded",
 		},
 		{
 			input: "X-Real-IP",

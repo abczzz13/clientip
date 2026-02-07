@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	// DefaultMaxChainLength is the maximum number of IPs allowed in an X-Forwarded-For chain.
+	// DefaultMaxChainLength is the maximum number of IPs allowed in a proxy chain.
 	// This prevents DoS attacks using extremely long header values that could cause excessive
 	// memory allocation or CPU usage during parsing. 100 is chosen as a reasonable upper bound
 	// that accommodates complex multi-region, multi-CDN setups while still providing protection.
@@ -149,6 +149,7 @@ func defaultConfig() *Config {
 		logger:               noopLogger{},
 		metrics:              noopMetrics{},
 		sourcePriority: []string{
+			SourceForwarded,
 			SourceXForwardedFor,
 			SourceXRealIP,
 			SourceRemoteAddr,
@@ -223,7 +224,13 @@ func Priority(sources ...string) Option {
 		if len(sources) == 0 {
 			return fmt.Errorf("at least one source required")
 		}
-		c.sourcePriority = sources
+
+		resolvedSources := make([]string, len(sources))
+		for i, source := range sources {
+			resolvedSources[i] = canonicalSourceName(source)
+		}
+
+		c.sourcePriority = resolvedSources
 		return nil
 	}
 }
