@@ -1,13 +1,9 @@
 package clientip
 
 import (
-	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type mockMetrics struct {
@@ -333,79 +329,4 @@ func TestNoopMetrics(t *testing.T) {
 	noop.RecordExtractionSuccess("test")
 	noop.RecordExtractionFailure("test")
 	noop.RecordSecurityEvent("test")
-}
-
-func TestPrometheusMetrics_Creation(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	metricsA, err := NewPrometheusMetricsWithRegisterer(registry)
-	if err != nil {
-		t.Fatalf("NewPrometheusMetricsWithRegisterer() error = %v", err)
-	}
-
-	metricsB, err := NewPrometheusMetricsWithRegisterer(registry)
-	if err != nil {
-		t.Fatalf("second NewPrometheusMetricsWithRegisterer() error = %v", err)
-	}
-
-	if metricsA == nil || metricsB == nil {
-		t.Fatal("expected non-nil prometheus metrics instances")
-	}
-
-	metricsA.RecordExtractionSuccess(SourceRemoteAddr)
-	metricsB.RecordSecurityEvent("multiple_headers")
-}
-
-type failingRegisterer struct {
-	err error
-}
-
-func (r failingRegisterer) Register(prometheus.Collector) error {
-	return r.err
-}
-
-func (r failingRegisterer) MustRegister(...prometheus.Collector) {}
-
-func (r failingRegisterer) Unregister(prometheus.Collector) bool {
-	return false
-}
-
-func TestPrometheusMetrics_RegisterError(t *testing.T) {
-	registerErr := errors.New("register failed")
-
-	_, err := NewPrometheusMetricsWithRegisterer(failingRegisterer{err: registerErr})
-	if !errors.Is(err, registerErr) {
-		t.Fatalf("error = %v, want wrapped register error", err)
-	}
-}
-
-func TestPrometheusMetrics_IncompatibleCollectorType(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	gauge := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "ip_extraction_total",
-			Help: "Total number of IP extraction attempts by source (x-forwarded-for, x-real-ip, remote-addr) and result (success, invalid).",
-		},
-		[]string{"source", "result"},
-	)
-	if err := registry.Register(gauge); err != nil {
-		t.Fatalf("registry.Register() error = %v", err)
-	}
-
-	_, err := NewPrometheusMetricsWithRegisterer(registry)
-	if err == nil {
-		t.Fatal("expected error for incompatible existing collector type")
-	}
-	if !strings.Contains(err.Error(), "incompatible collector type") {
-		t.Fatalf("error = %q, want incompatible collector type message", err.Error())
-	}
-}
-
-func TestWithPrometheusMetricsRegisterer_OptionError(t *testing.T) {
-	registerErr := errors.New("register failed")
-	cfg := defaultConfig()
-
-	err := WithPrometheusMetricsRegisterer(failingRegisterer{err: registerErr})(cfg)
-	if !errors.Is(err, registerErr) {
-		t.Fatalf("error = %v, want wrapped register error", err)
-	}
 }

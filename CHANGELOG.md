@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- Prometheus integration moved out of the root module into an optional adapter module: `github.com/abczzz13/clientip/prometheus`.
+- Root package now exposes only generic metrics wiring (`WithMetrics(Metrics)`), while Prometheus-specific APIs live only in the adapter module.
+- Adapter API is intentionally minimal: `prometheus.WithMetrics()`, `prometheus.WithRegisterer(prometheus.Registerer)`, `prometheus.New()`, and `prometheus.NewWithRegisterer(...)`.
+- Adapter module now validates against published root-module versions (no committed local `replace`), and adapter checks default to `GOWORK=off` (overridable locally via `CLIENTIP_ADAPTER_GOWORK`).
+
 ## [0.0.1] - 2026-02-06
 
 ### Added

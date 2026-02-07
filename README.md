@@ -12,6 +12,12 @@ Secure client IP extraction for `net/http` requests with trusted proxy validatio
 go get github.com/abczzz13/clientip
 ```
 
+Optional Prometheus adapter:
+
+```bash
+go get github.com/abczzz13/clientip/prometheus
+```
+
 ```go
 import "github.com/abczzz13/clientip"
 ```
@@ -80,18 +86,25 @@ laxExtractor, _ := clientip.New(
 ### Prometheus metrics (simple setup)
 
 ```go
+import clientipprom "github.com/abczzz13/clientip/prometheus"
+
 extractor, err := clientip.New(
-    clientip.WithPrometheusMetrics(),
+    clientipprom.WithMetrics(),
 )
 ```
 
 ### Prometheus metrics (custom registerer)
 
 ```go
+import (
+    clientipprom "github.com/abczzz13/clientip/prometheus"
+    "github.com/prometheus/client_golang/prometheus"
+)
+
 registry := prometheus.NewRegistry()
 
 extractor, err := clientip.New(
-    clientip.WithPrometheusMetricsRegisterer(registry),
+    clientipprom.WithRegisterer(registry),
 )
 ```
 
@@ -106,10 +119,13 @@ extractor, err := clientip.New(
 - `Priority(...string)` set source order; built-ins: `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(*slog.Logger)` inject logger
-- `WithPrometheusMetrics()` enable Prometheus metrics with default registerer
-- `WithPrometheusMetricsRegisterer(prometheus.Registerer)` enable Prometheus metrics with custom registerer
 - `WithMetrics(Metrics)` inject custom metrics implementation directly
 - `WithDebugInfo(bool)` include chain analysis in `Result.DebugInfo`
+
+Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
+
+- `WithMetrics()` enable Prometheus metrics with default registerer
+- `WithRegisterer(prometheus.Registerer)` enable Prometheus metrics with custom registerer
 
 Options are applied in order. If multiple metrics options are provided, the last one wins.
 
@@ -161,6 +177,14 @@ if !result.Valid() {
 ## Performance
 
 - O(n) in chain length; extractor is safe for concurrent reuse
+
+## Maintainer notes (multi-module)
+
+- `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.
+- For local co-development, create an uncommitted workspace with `go work init . ./prometheus`.
+- Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`.
+- `just` uses consumer mode for adapter checks by default; override locally with `CLIENTIP_ADAPTER_GOWORK=auto just <target>`.
+- Release in this order: tag root module `vX.Y.Z`, bump `prometheus/go.mod` to that version, then tag adapter module `prometheus/vX.Y.Z`.
 
 ## License
 
