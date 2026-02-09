@@ -5,6 +5,14 @@ import (
 	"strings"
 )
 
+// parseForwardedValues extracts the Forwarded for= chain from one or more
+// Forwarded header values.
+//
+// Header values and elements are processed in wire order. Elements without a
+// for parameter are ignored. Any parse failure is converted to an
+// ErrInvalidForwardedHeader extraction error with SourceForwarded.
+//
+// The returned chain is bounded by the configured maxChainLength.
 func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 	if len(values) == 0 {
 		return nil, nil
@@ -52,6 +60,8 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 	return parts, nil
 }
 
+// invalidForwardedHeaderError wraps low-level parse errors as an extraction
+// error tagged with ErrInvalidForwardedHeader and SourceForwarded.
 func invalidForwardedHeaderError(err error) error {
 	return &ExtractionError{
 		Err:    fmt.Errorf("%w: %w", ErrInvalidForwardedHeader, err),
@@ -59,6 +69,12 @@ func invalidForwardedHeaderError(err error) error {
 	}
 }
 
+// parseForwardedElement parses a single Forwarded element and returns its for
+// parameter value when present.
+//
+// It allows arbitrary additional parameters, treats the parameter name
+// case-insensitively, and rejects duplicate for parameters in the same
+// element.
 func parseForwardedElement(element string) (forwardedFor string, hasFor bool, err error) {
 	params, err := splitForwardedHeaderValue(element, ';')
 	if err != nil {
@@ -105,6 +121,10 @@ func parseForwardedElement(element string) (forwardedFor string, hasFor bool, er
 	return forwardedFor, hasFor, nil
 }
 
+// parseForwardedForValue parses a Forwarded for parameter value.
+//
+// The value may be an unquoted token or a quoted string. For quoted strings,
+// escaping is handled by unquoteForwardedValue.
 func parseForwardedForValue(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -126,6 +146,8 @@ func parseForwardedForValue(value string) (string, error) {
 	return value, nil
 }
 
+// unquoteForwardedValue removes surrounding quotes from a Forwarded quoted
+// string and resolves backslash escapes.
 func unquoteForwardedValue(value string) (string, error) {
 	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
 		return "", fmt.Errorf("invalid quoted string %q", value)
@@ -162,6 +184,8 @@ func unquoteForwardedValue(value string) (string, error) {
 	return b.String(), nil
 }
 
+// splitForwardedHeaderValue splits value by delimiter while respecting quoted
+// segments and escape sequences inside quoted strings.
 func splitForwardedHeaderValue(value string, delimiter byte) ([]string, error) {
 	segments := make([]string, 0, 4)
 	start := 0
