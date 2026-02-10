@@ -31,6 +31,24 @@ import "github.com/abczzz13/clientip"
 
 By default, `New()` extracts from `RemoteAddr` only.
 
+### Presets (recommended)
+
+Use these when you want setup by deployment type instead of low-level options:
+
+- `PresetDirectConnection()` app receives traffic directly (no trusted proxy headers)
+- `PresetLoopbackReverseProxy()` reverse proxy on same host (`127.0.0.1` / `::1`)
+- `PresetVMReverseProxy()` typical VM/private-network reverse proxy setup
+- `PresetPreferredHeaderThenXFFLax("X-Frontend-IP")` prefer custom header, then `X-Forwarded-For`, then `RemoteAddr` (lax fallback)
+
+#### Which preset should I use?
+
+| If your setup looks like... | Start with... |
+| --- | --- |
+| App is directly internet-facing (no reverse proxy) | `PresetDirectConnection()` |
+| NGINX/Caddy runs on the same host and proxies to your app | `PresetLoopbackReverseProxy()` |
+| App runs on a VM/private network behind one or more internal proxies | `PresetVMReverseProxy()` |
+| You have a best-effort custom header and want fallback to XFF | `PresetPreferredHeaderThenXFFLax("X-Frontend-IP")` |
+
 ### Simple (no proxy configuration)
 
 ```go
@@ -222,6 +240,10 @@ extractor, err := clientip.New(
 - `TrustPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
 - `TrustLocalProxyDefaults()` trust loopback + private proxy ranges
 - `TrustProxyIP(string)` trust a single upstream proxy IP (exact host prefix)
+- `PresetDirectConnection()` remote-address only extraction preset
+- `PresetLoopbackReverseProxy()` loopback reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
+- `PresetVMReverseProxy()` VM/private-network reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
+- `PresetPreferredHeaderThenXFFLax(string)` preferred-header fallback preset in lax mode
 - `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
 - `AllowPrivateIPs(bool)` allow private client IPs
 - `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)

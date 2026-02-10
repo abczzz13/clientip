@@ -7,6 +7,7 @@
 //   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
 //   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
 //   - Safe defaults: RemoteAddr-only unless header sources are explicitly configured
+//   - Deployment presets for common topologies (direct, loopback proxy, VM proxy)
 //   - Optional observability with context-aware logging and pluggable metrics
 //   - Type-safe using modern Go netip.Addr
 //
@@ -51,6 +52,10 @@
 // Header sources require trusted upstream proxy ranges. Use TrustedCIDRs,
 // TrustedProxies, or helper options like TrustLoopbackProxy,
 // TrustPrivateProxyRanges, or TrustProxyIP.
+//
+// Presets are available for common setups:
+//
+//	extractor, _ := clientip.New(clientip.PresetVMReverseProxy())
 //
 // # Observability
 //

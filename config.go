@@ -8,18 +8,20 @@ import (
 )
 
 const (
-	// DefaultMaxChainLength is the maximum number of IPs allowed in a proxy chain.
-	// This prevents DoS attacks using extremely long header values that could cause excessive
-	// memory allocation or CPU usage during parsing. 100 is chosen as a reasonable upper bound
-	// that accommodates complex multi-region, multi-CDN setups while still providing protection.
-	// Typical proxy chains rarely exceed 5-10 entries.
+	// DefaultMaxChainLength is the maximum number of IPs allowed in a proxy
+	// chain. This prevents DoS attacks using extremely long header values that
+	// could cause excessive memory allocation or CPU usage during parsing. 100
+	// is chosen as a reasonable upper bound that accommodates complex
+	// multi-region, multi-CDN setups while still providing protection. Typical
+	// proxy chains rarely exceed 5-10 entries.
 	DefaultMaxChainLength = 100
 )
 
 type Strategy int
 
 const (
-	// Start at 1 to avoid zero-value confusion and make invalid strategies explicit
+	// Start at 1 to avoid zero-value confusion and make invalid strategies
+	// explicit
 	RightmostIP Strategy = iota + 1
 	LeftmostIP
 )
@@ -80,12 +82,26 @@ type Config struct {
 
 type Option func(*Config) error
 
+func applyOptions(c *Config, opts ...Option) error {
+	for _, opt := range opts {
+		if err := opt(c); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 var (
+	// loopbackProxyCIDRs contains loopback networks used when the app sits
+	// behind a reverse proxy running on the same host.
 	loopbackProxyCIDRs = []netip.Prefix{
 		mustParsePrefix("127.0.0.0/8"),
 		mustParsePrefix("::1/128"),
 	}
 
+	// privateProxyCIDRs contains private-network ranges commonly used for
+	// trusted upstream proxies in VM and internal network deployments.
 	privateProxyCIDRs = []netip.Prefix{
 		mustParsePrefix("10.0.0.0/8"),
 		mustParsePrefix("172.16.0.0/12"),
@@ -272,6 +288,9 @@ func TrustedCIDRs(cidrs ...string) Option {
 	}
 }
 
+// TrustLoopbackProxy adds loopback CIDRs to the trusted proxy list.
+//
+// It trusts 127.0.0.0/8 and ::1/128.
 func TrustLoopbackProxy() Option {
 	return func(c *Config) error {
 		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
@@ -279,6 +298,9 @@ func TrustLoopbackProxy() Option {
 	}
 }
 
+// TrustPrivateProxyRanges adds private network CIDRs to the trusted proxy list.
+//
+// It trusts 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and fc00::/7.
 func TrustPrivateProxyRanges() Option {
 	return func(c *Config) error {
 		appendTrustedProxyCIDRs(c, privateProxyCIDRs...)
@@ -286,6 +308,7 @@ func TrustPrivateProxyRanges() Option {
 	}
 }
 
+// TrustLocalProxyDefaults adds loopback and private CIDRs to the trusted proxy list.
 func TrustLocalProxyDefaults() Option {
 	return func(c *Config) error {
 		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
@@ -294,6 +317,9 @@ func TrustLocalProxyDefaults() Option {
 	}
 }
 
+// TrustProxyIP adds a single proxy host IP to the trusted proxy list.
+//
+// The IP is normalized and added as an exact host prefix (/32 for IPv4, /128 for IPv6).
 func TrustProxyIP(ip string) Option {
 	return func(c *Config) error {
 		parsedIP := parseIP(ip)

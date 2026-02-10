@@ -28,6 +28,40 @@ func ExampleNew_simple() {
 	}
 }
 
+func ExamplePresetVMReverseProxy() {
+	extractor, _ := clientip.New(
+		clientip.PresetVMReverseProxy(),
+	)
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	fmt.Println(result.IP, result.Source)
+	// Output: 1.1.1.1 x_forwarded_for
+}
+
+func ExamplePresetPreferredHeaderThenXFFLax() {
+	extractor, _ := clientip.New(
+		clientip.TrustLoopbackProxy(),
+		clientip.PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
+	)
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Frontend-IP", "not-an-ip")
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+
+	result := extractor.ExtractIP(req)
+	fmt.Println(result.IP, result.Source)
+	// Output: 8.8.8.8 x_forwarded_for
+}
+
 func ExampleNew_forwarded() {
 	extractor, _ := clientip.New(
 		clientip.TrustLoopbackProxy(),

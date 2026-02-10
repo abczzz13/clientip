@@ -10,6 +10,7 @@ import (
 var (
 	ErrNoTrustedProxies = errors.New("no trusted proxies found in proxy chain")
 
+	// ErrSourceUnavailable indicates the selected source is not present on the request.
 	ErrSourceUnavailable = errors.New("source unavailable")
 
 	ErrMultipleXFFHeaders = errors.New("multiple X-Forwarded-For headers received")
