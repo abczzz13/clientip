@@ -49,6 +49,24 @@ Use these when you want setup by deployment type instead of low-level options:
 | App runs on a VM/private network behind one or more internal proxies | `PresetVMReverseProxy()` |
 | You have a best-effort custom header and want fallback to XFF | `PresetPreferredHeaderThenXFFLax("X-Frontend-IP")` |
 
+Preset examples:
+
+```go
+// Typical VM setup (reverse proxy + private networking)
+vmExtractor, err := clientip.New(
+    clientip.PresetVMReverseProxy(),
+)
+
+// Prefer a best-effort header, then fallback to XFF and RemoteAddr
+fallbackExtractor, err := clientip.New(
+    clientip.TrustLoopbackProxy(),
+    clientip.PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
+)
+
+_ = vmExtractor
+_ = fallbackExtractor
+```
+
 ### Simple (no proxy configuration)
 
 ```go
