@@ -100,7 +100,7 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (Extract
 
 	if len(forwardedValues) == 0 {
 		return ExtractionResult{}, &ExtractionError{
-			Err:    ErrInvalidIP,
+			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
 	}
@@ -175,7 +175,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 
 	if len(xffValues) == 0 {
 		return ExtractionResult{}, &ExtractionError{
-			Err:    ErrInvalidIP,
+			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
 	}
@@ -272,8 +272,29 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 	headerValue := r.Header.Get(s.headerName)
 	if headerValue == "" {
 		return ExtractionResult{}, &ExtractionError{
-			Err:    ErrInvalidIP,
+			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
+		}
+	}
+
+	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
+		remoteIP := parseIP(r.RemoteAddr)
+		if !s.extractor.isTrustedProxy(remoteIP) {
+			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
+			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while single-header source is present",
+				"header", s.headerName,
+			)
+			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+			return ExtractionResult{}, &ProxyValidationError{
+				ExtractionError: ExtractionError{
+					Err:    ErrUntrustedProxy,
+					Source: s.Name(),
+				},
+				Chain:             headerValue,
+				TrustedProxyCount: 0,
+				MinTrustedProxies: s.extractor.config.minTrustedProxies,
+				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
+			}
 		}
 	}
 
@@ -304,7 +325,7 @@ func (s *remoteAddrSource) Name() string {
 func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
 	if r.RemoteAddr == "" {
 		return ExtractionResult{}, &ExtractionError{
-			Err:    ErrInvalidIP,
+			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
 	}
@@ -389,15 +410,20 @@ func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (Extractio
 }
 
 func (c *chainedSource) isTerminalError(err error) bool {
-	if c.extractor.config.securityMode == SecurityModeLax {
-		return false
-	}
-
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 
-	return errors.Is(err, ErrMultipleXFFHeaders) ||
+	if errors.Is(err, ErrSourceUnavailable) {
+		return false
+	}
+
+	if c.extractor.config.securityMode == SecurityModeLax {
+		return false
+	}
+
+	return errors.Is(err, ErrInvalidIP) ||
+		errors.Is(err, ErrMultipleXFFHeaders) ||
 		errors.Is(err, ErrUntrustedProxy) ||
 		errors.Is(err, ErrNoTrustedProxies) ||
 		errors.Is(err, ErrTooFewTrustedProxies) ||

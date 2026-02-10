@@ -29,7 +29,10 @@ func ExampleNew_simple() {
 }
 
 func ExampleNew_forwarded() {
-	extractor, _ := clientip.New()
+	extractor, _ := clientip.New(
+		clientip.TrustLoopbackProxy(),
+		clientip.Priority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
+	)
 
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
@@ -49,6 +52,7 @@ func ExampleNew_withOptions() {
 
 	extractor, err := clientip.New(
 		clientip.TrustedProxies([]netip.Prefix{cidrs}, 1, 2),
+		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.AllowPrivateIPs(false),
 		clientip.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
 	)
@@ -73,6 +77,7 @@ func ExampleNew_flexibleProxyRange() {
 
 	extractor, _ := clientip.New(
 		clientip.TrustedProxies([]netip.Prefix{cidrs}, 1, 3),
+		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 	)
 
 	req1 := &http.Request{
@@ -94,6 +99,7 @@ func ExampleNew_flexibleProxyRange() {
 
 func ExampleNew_cloudflare() {
 	extractor, _ := clientip.New(
+		clientip.TrustLoopbackProxy(),
 		clientip.Priority(
 			"CF-Connecting-IP",
 			clientip.SourceXForwardedFor,
@@ -115,6 +121,7 @@ func ExampleNew_cloudflare() {
 
 func ExampleHeader() {
 	extractor, _ := clientip.New(
+		clientip.TrustLoopbackProxy(),
 		clientip.Priority(
 			"X-Custom-IP",
 			clientip.SourceRemoteAddr,
@@ -138,6 +145,7 @@ func ExampleXFFStrategy_leftmost() {
 
 	extractor, _ := clientip.New(
 		clientip.TrustedProxies([]netip.Prefix{cloudflareCIDRs}, 1, 3),
+		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.XFFStrategy(clientip.LeftmostIP),
 	)
 
@@ -155,6 +163,8 @@ func ExampleXFFStrategy_leftmost() {
 
 func ExampleWithSecurityMode_strict() {
 	extractor, _ := clientip.New(
+		clientip.TrustProxyIP("1.1.1.1"),
+		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeStrict),
 	)
 
@@ -172,6 +182,8 @@ func ExampleWithSecurityMode_strict() {
 
 func ExampleWithSecurityMode_lax() {
 	extractor, _ := clientip.New(
+		clientip.TrustProxyIP("1.1.1.1"),
+		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeLax),
 	)
 

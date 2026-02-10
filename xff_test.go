@@ -717,7 +717,6 @@ func TestIsReservedIP(t *testing.T) {
 		ip       string
 		reserved bool
 	}{
-		// Carrier-Grade NAT (RFC 6598): 100.64.0.0/10
 		{
 			name:     "CGN start",
 			ip:       "100.64.0.0",
@@ -743,7 +742,21 @@ func TestIsReservedIP(t *testing.T) {
 			ip:       "100.128.0.0",
 			reserved: false,
 		},
-		// Documentation IPv4 (RFC 5737) - REJECTED
+		{
+			name:     "this-network reserved",
+			ip:       "0.1.2.3",
+			reserved: true,
+		},
+		{
+			name:     "IETF protocol assignments reserved",
+			ip:       "192.0.0.8",
+			reserved: true,
+		},
+		{
+			name:     "benchmarking reserved",
+			ip:       "198.18.0.1",
+			reserved: true,
+		},
 		{
 			name:     "TEST-NET-1",
 			ip:       "192.0.2.1",
@@ -759,15 +772,39 @@ func TestIsReservedIP(t *testing.T) {
 			ip:       "203.0.113.1",
 			reserved: true,
 		},
-		// Documentation IPv6 (RFC 3849) - REJECTED
+		{
+			name:     "future-use IPv4 reserved",
+			ip:       "240.0.0.1",
+			reserved: true,
+		},
 		{
 			name:     "IPv6 doc prefix",
 			ip:       "2001:db8::1",
 			reserved: true,
 		},
 		{
-			name:     "IPv6 doc prefix end",
-			ip:       "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff",
+			name:     "IPv6 benchmarking prefix",
+			ip:       "2001:2::1",
+			reserved: true,
+		},
+		{
+			name:     "IPv6 ORCHIDv2 prefix",
+			ip:       "2001:20::1",
+			reserved: true,
+		},
+		{
+			name:     "IPv6 NAT64 well-known prefix",
+			ip:       "64:ff9b::808:808",
+			reserved: true,
+		},
+		{
+			name:     "IPv6 NAT64 local-use prefix",
+			ip:       "64:ff9b:1::1",
+			reserved: true,
+		},
+		{
+			name:     "IPv6 discard-only prefix",
+			ip:       "100::1",
 			reserved: true,
 		},
 		{
@@ -775,7 +812,11 @@ func TestIsReservedIP(t *testing.T) {
 			ip:       "2001:db9::1",
 			reserved: false,
 		},
-		// Regular addresses should not be reserved
+		{
+			name:     "Not ORCHIDv2 - outside prefix",
+			ip:       "2001:30::1",
+			reserved: false,
+		},
 		{
 			name:     "Public IPv4",
 			ip:       "8.8.8.8",
@@ -790,6 +831,11 @@ func TestIsReservedIP(t *testing.T) {
 			name:     "Public IPv6",
 			ip:       "2001:4860:4860::8888",
 			reserved: false,
+		},
+		{
+			name:     "IPv4-mapped reserved IPv6",
+			ip:       "::ffff:198.51.100.1",
+			reserved: true,
 		},
 	}
 
@@ -823,6 +869,16 @@ func TestIsPlausibleClientIP_ReservedRanges(t *testing.T) {
 			wantOk: false,
 		},
 		{
+			name:   "benchmarking range rejected",
+			ip:     "198.18.1.1",
+			wantOk: false,
+		},
+		{
+			name:   "future-use IPv4 rejected",
+			ip:     "240.0.0.2",
+			wantOk: false,
+		},
+		{
 			name:   "TEST-NET-1 rejected",
 			ip:     "192.0.2.1",
 			wantOk: false,
@@ -840,6 +896,16 @@ func TestIsPlausibleClientIP_ReservedRanges(t *testing.T) {
 		{
 			name:   "IPv6 doc rejected",
 			ip:     "2001:db8::1",
+			wantOk: false,
+		},
+		{
+			name:   "IPv6 benchmarking rejected",
+			ip:     "2001:2::1",
+			wantOk: false,
+		},
+		{
+			name:   "IPv6 NAT64 well-known rejected",
+			ip:     "64:ff9b::808:808",
 			wantOk: false,
 		},
 		{

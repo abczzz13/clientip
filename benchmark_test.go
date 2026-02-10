@@ -23,7 +23,10 @@ func BenchmarkExtractIP_RemoteAddr(b *testing.B) {
 }
 
 func BenchmarkExtractIP_XForwardedFor_Simple(b *testing.B) {
-	extractor, _ := New()
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
+	)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -43,6 +46,7 @@ func BenchmarkExtractIP_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 2),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
@@ -63,6 +67,7 @@ func BenchmarkExtractIP_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 5),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.5:12345",
@@ -83,6 +88,7 @@ func BenchmarkExtractIP_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 2),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithDebugInfo(true),
 	)
 	req := &http.Request{
@@ -107,6 +113,7 @@ func BenchmarkExtractIP_LeftmostStrategy(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 3),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		XFFStrategy(LeftmostIP),
 	)
 	req := &http.Request{
@@ -126,6 +133,7 @@ func BenchmarkExtractIP_LeftmostStrategy(b *testing.B) {
 
 func BenchmarkExtractIP_CustomHeader(b *testing.B) {
 	extractor, _ := New(
+		TrustLoopbackProxy(),
 		Priority(
 			"CF-Connecting-IP",
 			SourceXForwardedFor,

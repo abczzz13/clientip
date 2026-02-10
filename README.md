@@ -29,6 +29,8 @@ import "github.com/abczzz13/clientip"
 
 ## Quick start
 
+By default, `New()` extracts from `RemoteAddr` only.
+
 ### Simple (no proxy configuration)
 
 ```go
@@ -57,6 +59,7 @@ extractor, err := clientip.New(
     // min=0 allows requests where proxy headers contain only the client IP
     // (trusted RemoteAddr is validated separately).
     clientip.TrustedProxies(cidrs, 0, 3),
+    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.XFFStrategy(clientip.RightmostIP),
 )
 if err != nil {
@@ -68,9 +71,9 @@ if err != nil {
 
 ```go
 extractor, err := clientip.New(
+    clientip.TrustPrivateProxyRanges(),
     clientip.Priority(
         "CF-Connecting-IP",
-        clientip.SourceForwarded,
         clientip.SourceXForwardedFor,
         clientip.SourceRemoteAddr,
     ),
@@ -81,13 +84,17 @@ extractor, err := clientip.New(
 
 ```go
 // Strict is default and fails closed on security errors
-// (including malformed Forwarded headers).
+// (including malformed Forwarded and invalid present source values).
 strictExtractor, _ := clientip.New(
+    clientip.TrustProxyIP("1.1.1.1"),
+    clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeStrict),
 )
 
-// Lax mode allows fallback to lower-priority sources after security errors.
+// Lax mode allows fallback to lower-priority sources after those errors.
 laxExtractor, _ := clientip.New(
+    clientip.TrustProxyIP("1.1.1.1"),
+    clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeLax),
 )
 ```
@@ -211,17 +218,23 @@ extractor, err := clientip.New(
 
 - `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in proxy header chains
 - `TrustedCIDRs(...string)` parse CIDR strings in-place
+- `TrustLoopbackProxy()` trust loopback upstream proxies (`127.0.0.0/8`, `::1/128`)
+- `TrustPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
+- `TrustLocalProxyDefaults()` trust loopback + private proxy ranges
+- `TrustProxyIP(string)` trust a single upstream proxy IP (exact host prefix)
 - `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
 - `AllowPrivateIPs(bool)` allow private client IPs
 - `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
 - `XFFStrategy(Strategy)` choose `RightmostIP` (default) or `LeftmostIP`
-- `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`)
+- `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`), with at most one chain header source (`SourceForwarded` or `SourceXForwardedFor`) per extractor
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(Logger)` inject logger implementation
 - `WithMetrics(Metrics)` inject custom metrics implementation directly
 - `WithDebugInfo(bool)` include chain analysis in `Result.DebugInfo`
 
-Default source order is `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`.
+Default source order is `SourceRemoteAddr`.
+
+Any header-based source requires trusted upstream proxy ranges (`TrustedCIDRs`, `TrustedProxies`, or one of the trust helpers).
 
 Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
 
@@ -269,6 +282,8 @@ if !result.Valid() {
         // Trusted proxy count exceeds configured maximum
     case errors.Is(result.Err, clientip.ErrInvalidIP):
         // Invalid or implausible client IP
+    case errors.Is(result.Err, clientip.ErrSourceUnavailable):
+        // Requested source was not present on this request
     }
 
     var mh *clientip.MultipleHeadersError
@@ -288,9 +303,11 @@ Typed chain-related errors expose additional context:
 - Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
 - Rejects multiple `X-Forwarded-For` headers (spoofing defense)
 - Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted CIDRs are configured)
+- Requires trusted proxy CIDRs for any header-based source
+- Allows at most one chain-header source (`Forwarded` or `X-Forwarded-For`) per extractor configuration
 - Enforces trusted proxy count bounds and chain length
 - Filters implausible IPs (loopback, multicast, reserved); optional private IP allowlist
-- Strict fail-closed behavior is the default (`SecurityModeStrict`), including malformed `Forwarded` headers
+- Strict fail-closed behavior is the default (`SecurityModeStrict`) for security-significant errors and invalid present source values
 - Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
 
 ## Performance

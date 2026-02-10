@@ -79,6 +79,7 @@ func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
+		TrustProxyIP("1.1.1.1"),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -128,6 +129,7 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
+		TrustProxyIP("1.1.1.1"),
 		Priority(SourceXForwardedFor),
 		MaxChainLength(2),
 	)
@@ -370,6 +372,7 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
+		TrustProxyIP("1.1.1.1"),
 		Priority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {

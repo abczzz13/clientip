@@ -10,6 +10,8 @@ import (
 var (
 	ErrNoTrustedProxies = errors.New("no trusted proxies found in proxy chain")
 
+	ErrSourceUnavailable = errors.New("source unavailable")
+
 	ErrMultipleXFFHeaders = errors.New("multiple X-Forwarded-For headers received")
 
 	ErrUntrustedProxy = errors.New("request from untrusted proxy")

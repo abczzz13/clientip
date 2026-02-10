@@ -10,14 +10,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - First-class RFC7239 `Forwarded` header support (`for=` chain parsing) with built-in source constant `SourceForwarded`.
 - New malformed-header error sentinel: `ErrInvalidForwardedHeader`.
+- New source-absence sentinel: `ErrSourceUnavailable`.
+- Trust helper options for common deployments: `TrustLoopbackProxy()`, `TrustPrivateProxyRanges()`, `TrustLocalProxyDefaults()`, and `TrustProxyIP(string)`.
 
 ### Changed
 
-- Default source priority now prefers `Forwarded` before `X-Forwarded-For`, `X-Real-IP`, and `RemoteAddr`.
+- Default source priority is now `RemoteAddr` only (safe-by-default, no implicit header trust).
+- Header-based sources now require trusted upstream proxy CIDRs (`TrustedCIDRs`, `TrustedProxies`, or trust helpers).
+- `Priority(...)` now allows at most one chain-header source per extractor (`SourceForwarded` or `SourceXForwardedFor`).
 - Proxy-chain extraction, trust validation, and chain limits now apply consistently to `Forwarded` and `X-Forwarded-For`.
-- In `SecurityModeStrict` (default), malformed `Forwarded` headers (`ErrInvalidForwardedHeader`) are now terminal (fail closed); `SecurityModeLax` still allows fallback.
+- In `SecurityModeStrict` (default), malformed `Forwarded` and invalid present source values are terminal (fail closed); `SecurityModeLax` allows fallback.
 - `ProxyValidationError` and `InvalidIPError` now expose `Chain` instead of `XFF`.
 - `Priority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
+- Reserved/special-use client IP filtering now covers additional RFC ranges (for example benchmarking, NAT64, ORCHIDv2, and future-use ranges).
 
 ## [0.0.3] - 2026-02-07
 

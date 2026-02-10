@@ -6,6 +6,28 @@ import (
 	"strings"
 )
 
+var (
+	reservedClientIPv4Prefixes = []netip.Prefix{
+		mustParsePrefix("0.0.0.0/8"),
+		mustParsePrefix("100.64.0.0/10"),
+		mustParsePrefix("192.0.0.0/24"),
+		mustParsePrefix("192.0.2.0/24"),
+		mustParsePrefix("198.18.0.0/15"),
+		mustParsePrefix("198.51.100.0/24"),
+		mustParsePrefix("203.0.113.0/24"),
+		mustParsePrefix("240.0.0.0/4"),
+	}
+
+	reservedClientIPv6Prefixes = []netip.Prefix{
+		mustParsePrefix("64:ff9b::/96"),
+		mustParsePrefix("64:ff9b:1::/48"),
+		mustParsePrefix("100::/64"),
+		mustParsePrefix("2001:2::/48"),
+		mustParsePrefix("2001:db8::/32"),
+		mustParsePrefix("2001:20::/28"),
+	}
+)
+
 func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 	if !ip.IsValid() {
 		return false
@@ -251,29 +273,19 @@ func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
 // isReservedIP checks if an IP is in a reserved or special-use range that
 // should never appear as a real client IP address.
 func isReservedIP(ip netip.Addr) bool {
-	if ip.Is4() {
-		// Carrier-Grade NAT (RFC 6598): 100.64.0.0/10
-		if ip.As4()[0] == 100 && (ip.As4()[1]&0xC0) == 64 {
-			return true
-		}
+	if !ip.IsValid() {
+		return false
+	}
 
-		// Documentation/TEST-NET prefixes (RFC 5737):
-		// 192.0.2.0/24 (TEST-NET-1)
-		// 198.51.100.0/24 (TEST-NET-2)
-		// 203.0.113.0/24 (TEST-NET-3)
-		if ip.As4()[0] == 192 && ip.As4()[1] == 0 && ip.As4()[2] == 2 {
-			return true
-		}
-		if ip.As4()[0] == 198 && ip.As4()[1] == 51 && ip.As4()[2] == 100 {
-			return true
-		}
-		if ip.As4()[0] == 203 && ip.As4()[1] == 0 && ip.As4()[2] == 113 {
-			return true
-		}
-	} else {
-		// IPv6 documentation prefix (RFC 3849): 2001:db8::/32
-		addr16 := ip.As16()
-		if addr16[0] == 0x20 && addr16[1] == 0x01 && addr16[2] == 0x0d && addr16[3] == 0xb8 {
+	ip = normalizeIP(ip)
+
+	prefixes := reservedClientIPv6Prefixes
+	if ip.Is4() {
+		prefixes = reservedClientIPv4Prefixes
+	}
+
+	for _, prefix := range prefixes {
+		if prefix.Contains(ip) {
 			return true
 		}
 	}

@@ -152,6 +152,8 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
+		TrustProxyIP("1.1.1.1"),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -177,6 +179,7 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	extractor, err := New(
 		TrustedProxies(cidrs, 2, 3),
 		WithMetrics(metrics),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -201,6 +204,7 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	extractor, err := New(
 		TrustedProxies(cidrs, 1, 3),
 		WithMetrics(metrics),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -225,6 +229,7 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	extractor, err := New(
 		TrustedProxies(cidrs, 1, 1),
 		WithMetrics(metrics),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -249,6 +254,7 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	extractor, err := New(
 		TrustedProxies(cidrs, 1, 3),
 		WithMetrics(metrics),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -272,6 +278,8 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 	extractor, err := New(
 		MaxChainLength(5),
 		WithMetrics(metrics),
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -294,6 +302,8 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
+		TrustProxyIP("1.1.1.1"),
+		Priority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -316,6 +326,8 @@ func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
+		TrustLoopbackProxy(),
+		Priority(SourceForwarded),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -341,6 +353,8 @@ func TestMetrics_MultipleExtractions(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -380,6 +394,8 @@ func TestMetrics_DifferentSources(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

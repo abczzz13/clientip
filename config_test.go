@@ -60,6 +60,7 @@ func TestNew_Success(t *testing.T) {
 		{
 			name: "with priority",
 			opts: []Option{
+				TrustLoopbackProxy(),
 				Priority(SourceXForwardedFor, SourceRemoteAddr),
 			},
 		},
@@ -217,9 +218,32 @@ func TestNew_Errors(t *testing.T) {
 		{
 			name: "leftmost without CIDRs",
 			opts: []Option{
+				Priority(SourceXForwardedFor),
 				XFFStrategy(LeftmostIP),
 			},
 			wantErrText: "LeftmostIP strategy requires trustedProxyCIDRs",
+		},
+		{
+			name: "header source without trusted proxy CIDRs",
+			opts: []Option{
+				Priority(SourceXForwardedFor),
+			},
+			wantErrText: "header-based sources require trusted proxy CIDRs",
+		},
+		{
+			name: "multiple chain sources in priority",
+			opts: []Option{
+				TrustedCIDRs("10.0.0.0/8"),
+				Priority(SourceForwarded, SourceXForwardedFor),
+			},
+			wantErrText: "priority cannot include both",
+		},
+		{
+			name: "duplicate sources in priority",
+			opts: []Option{
+				Priority(SourceRemoteAddr, "Remote-Addr"),
+			},
+			wantErrText: "duplicate source",
 		},
 		{
 			name: "invalid CIDR",
@@ -422,6 +446,7 @@ func TestConfig_Validate(t *testing.T) {
 			name: "leftmost without CIDRs should fail",
 			cfg: func() *Config {
 				c := defaultConfig()
+				c.sourcePriority = []string{SourceXForwardedFor}
 				c.forwardedForStrategy = LeftmostIP
 				c.trustedProxyCIDRs = []netip.Prefix{}
 				return c
@@ -567,6 +592,86 @@ func TestTrustedCIDRs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTrustLoopbackProxy(t *testing.T) {
+	cfg := defaultConfig()
+	if err := TrustLoopbackProxy()(cfg); err != nil {
+		t.Fatalf("TrustLoopbackProxy() error = %v", err)
+	}
+
+	for _, want := range []netip.Prefix{
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("::1/128"),
+	} {
+		found := false
+		for _, got := range cfg.trustedProxyCIDRs {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("trustedProxyCIDRs missing %s", want)
+		}
+	}
+}
+
+func TestTrustPrivateProxyRanges(t *testing.T) {
+	cfg := defaultConfig()
+	if err := TrustPrivateProxyRanges()(cfg); err != nil {
+		t.Fatalf("TrustPrivateProxyRanges() error = %v", err)
+	}
+
+	for _, want := range []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+		netip.MustParsePrefix("fc00::/7"),
+	} {
+		found := false
+		for _, got := range cfg.trustedProxyCIDRs {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("trustedProxyCIDRs missing %s", want)
+		}
+	}
+}
+
+func TestTrustLocalProxyDefaults(t *testing.T) {
+	cfg := defaultConfig()
+	if err := TrustLocalProxyDefaults()(cfg); err != nil {
+		t.Fatalf("TrustLocalProxyDefaults() error = %v", err)
+	}
+
+	if len(cfg.trustedProxyCIDRs) != 6 {
+		t.Fatalf("trustedProxyCIDRs length = %d, want 6", len(cfg.trustedProxyCIDRs))
+	}
+}
+
+func TestTrustProxyIP(t *testing.T) {
+	t.Run("adds exact host prefix", func(t *testing.T) {
+		cfg := defaultConfig()
+		if err := TrustProxyIP("192.168.1.50")(cfg); err != nil {
+			t.Fatalf("TrustProxyIP() error = %v", err)
+		}
+
+		want := netip.MustParsePrefix("192.168.1.50/32")
+		if len(cfg.trustedProxyCIDRs) != 1 || cfg.trustedProxyCIDRs[0] != want {
+			t.Fatalf("trustedProxyCIDRs = %v, want [%s]", cfg.trustedProxyCIDRs, want)
+		}
+	})
+
+	t.Run("rejects invalid input", func(t *testing.T) {
+		cfg := defaultConfig()
+		if err := TrustProxyIP("not-an-ip")(cfg); err == nil {
+			t.Fatal("TrustProxyIP() error = nil, want error")
+		}
+	})
 }
 
 func TestMinMaxProxies(t *testing.T) {
@@ -819,7 +924,7 @@ func TestDefaultConfig(t *testing.T) {
 		if cfg.metrics == nil {
 			t.Error("metrics is nil")
 		}
-		wantSourcePriority := []string{SourceForwarded, SourceXForwardedFor, SourceXRealIP, SourceRemoteAddr}
+		wantSourcePriority := []string{SourceRemoteAddr}
 		if diff := cmp.Diff(wantSourcePriority, cfg.sourcePriority); diff != "" {
 			t.Errorf("sourcePriority mismatch (-want +got):\n%s", diff)
 		}

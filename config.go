@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+	"strings"
 )
 
 const (
@@ -79,6 +80,55 @@ type Config struct {
 
 type Option func(*Config) error
 
+var (
+	loopbackProxyCIDRs = []netip.Prefix{
+		mustParsePrefix("127.0.0.0/8"),
+		mustParsePrefix("::1/128"),
+	}
+
+	privateProxyCIDRs = []netip.Prefix{
+		mustParsePrefix("10.0.0.0/8"),
+		mustParsePrefix("172.16.0.0/12"),
+		mustParsePrefix("192.168.0.0/16"),
+		mustParsePrefix("fc00::/7"),
+	}
+)
+
+func mustParsePrefix(cidr string) netip.Prefix {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		panic(fmt.Sprintf("invalid built-in CIDR %q: %v", cidr, err))
+	}
+	return prefix
+}
+
+func appendTrustedProxyCIDRs(c *Config, prefixes ...netip.Prefix) {
+	if len(prefixes) == 0 {
+		return
+	}
+
+	merged := make([]netip.Prefix, 0, len(c.trustedProxyCIDRs)+len(prefixes))
+	seen := make(map[netip.Prefix]struct{}, len(c.trustedProxyCIDRs)+len(prefixes))
+
+	for _, prefix := range c.trustedProxyCIDRs {
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		merged = append(merged, prefix)
+	}
+
+	for _, prefix := range prefixes {
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		merged = append(merged, prefix)
+	}
+
+	c.trustedProxyCIDRs = merged
+}
+
 func (c *Config) validate() error {
 	if c.minTrustedProxies < 0 {
 		return fmt.Errorf("minTrustedProxies must be >= 0, got %d", c.minTrustedProxies)
@@ -101,19 +151,67 @@ func (c *Config) validate() error {
 	if !c.securityMode.Valid() {
 		return fmt.Errorf("invalid security mode %d (must be SecurityModeStrict=1 or SecurityModeLax=2)", c.securityMode)
 	}
-	if c.forwardedForStrategy == LeftmostIP && len(c.trustedProxyCIDRs) == 0 {
+	if len(c.sourcePriority) == 0 {
+		return fmt.Errorf("at least one source required in priority list")
+	}
+
+	hasHeaderSource, hasChainSource, err := c.validateSourcePriority()
+	if err != nil {
+		return err
+	}
+
+	if hasChainSource && c.forwardedForStrategy == LeftmostIP && len(c.trustedProxyCIDRs) == 0 {
 		return fmt.Errorf("LeftmostIP strategy requires trustedProxyCIDRs to be configured; without CIDR validation, this strategy provides no security benefit over RightmostIP")
 	}
+
+	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
+		return fmt.Errorf("header-based sources require trusted proxy CIDRs; configure TrustedCIDRs/TrustedProxies or trust helpers such as TrustLoopbackProxy, TrustPrivateProxyRanges, or TrustProxyIP")
+	}
+
 	if isNilLogger(c.logger) {
 		return fmt.Errorf("logger cannot be nil")
 	}
 	if isNilMetrics(c.metrics) {
 		return fmt.Errorf("metrics cannot be nil")
 	}
-	if len(c.sourcePriority) == 0 {
-		return fmt.Errorf("at least one source required in priority list")
-	}
 	return nil
+}
+
+func (c *Config) validateSourcePriority() (hasHeaderSource, hasChainSource bool, err error) {
+	seen := make(map[string]struct{}, len(c.sourcePriority))
+	seenForwarded := false
+	seenXFF := false
+
+	for _, sourceName := range c.sourcePriority {
+		normalized := NormalizeSourceName(strings.TrimSpace(sourceName))
+		if normalized == "" {
+			return false, false, fmt.Errorf("source names cannot be empty")
+		}
+
+		if _, ok := seen[normalized]; ok {
+			return false, false, fmt.Errorf("duplicate source %q in priority list", sourceName)
+		}
+		seen[normalized] = struct{}{}
+
+		if normalized != SourceRemoteAddr {
+			hasHeaderSource = true
+		}
+
+		switch normalized {
+		case SourceForwarded:
+			seenForwarded = true
+			hasChainSource = true
+		case SourceXForwardedFor:
+			seenXFF = true
+			hasChainSource = true
+		}
+	}
+
+	if seenForwarded && seenXFF {
+		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", SourceForwarded, SourceXForwardedFor)
+	}
+
+	return hasHeaderSource, hasChainSource, nil
 }
 
 func isNilLogger(logger Logger) bool {
@@ -149,9 +247,6 @@ func defaultConfig() *Config {
 		logger:               noopLogger{},
 		metrics:              noopMetrics{},
 		sourcePriority: []string{
-			SourceForwarded,
-			SourceXForwardedFor,
-			SourceXRealIP,
 			SourceRemoteAddr,
 		},
 	}
@@ -173,6 +268,41 @@ func TrustedCIDRs(cidrs ...string) Option {
 			return err
 		}
 		c.trustedProxyCIDRs = prefixes
+		return nil
+	}
+}
+
+func TrustLoopbackProxy() Option {
+	return func(c *Config) error {
+		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
+		return nil
+	}
+}
+
+func TrustPrivateProxyRanges() Option {
+	return func(c *Config) error {
+		appendTrustedProxyCIDRs(c, privateProxyCIDRs...)
+		return nil
+	}
+}
+
+func TrustLocalProxyDefaults() Option {
+	return func(c *Config) error {
+		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
+		appendTrustedProxyCIDRs(c, privateProxyCIDRs...)
+		return nil
+	}
+}
+
+func TrustProxyIP(ip string) Option {
+	return func(c *Config) error {
+		parsedIP := parseIP(ip)
+		if !parsedIP.IsValid() {
+			return fmt.Errorf("invalid proxy IP %q", ip)
+		}
+
+		parsedIP = normalizeIP(parsedIP)
+		appendTrustedProxyCIDRs(c, netip.PrefixFrom(parsedIP, parsedIP.BitLen()))
 		return nil
 	}
 }
@@ -227,7 +357,11 @@ func Priority(sources ...string) Option {
 
 		resolvedSources := make([]string, len(sources))
 		for i, source := range sources {
-			resolvedSources[i] = canonicalSourceName(source)
+			trimmedSource := strings.TrimSpace(source)
+			if trimmedSource == "" {
+				return fmt.Errorf("source names cannot be empty")
+			}
+			resolvedSources[i] = canonicalSourceName(trimmedSource)
 		}
 
 		c.sourcePriority = resolvedSources

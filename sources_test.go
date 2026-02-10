@@ -606,6 +606,57 @@ func TestNormalizeSourceName(t *testing.T) {
 	}
 }
 
+func TestSourceUnavailableErrors(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	t.Run("forwarded_for_missing", func(t *testing.T) {
+		source := &forwardedForSource{extractor: extractor}
+		req := &http.Request{Header: make(http.Header)}
+
+		_, extractErr := source.Extract(context.Background(), req)
+		if !errors.Is(extractErr, ErrSourceUnavailable) {
+			t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+		}
+	})
+
+	t.Run("forwarded_missing", func(t *testing.T) {
+		source := &forwardedSource{extractor: extractor}
+		req := &http.Request{Header: make(http.Header)}
+
+		_, extractErr := source.Extract(context.Background(), req)
+		if !errors.Is(extractErr, ErrSourceUnavailable) {
+			t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+		}
+	})
+
+	t.Run("single_header_missing", func(t *testing.T) {
+		source := &singleHeaderSource{
+			extractor:  extractor,
+			headerName: "X-Real-IP",
+			sourceName: SourceXRealIP,
+		}
+		req := &http.Request{Header: make(http.Header)}
+
+		_, extractErr := source.Extract(context.Background(), req)
+		if !errors.Is(extractErr, ErrSourceUnavailable) {
+			t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+		}
+	})
+
+	t.Run("remote_addr_missing", func(t *testing.T) {
+		source := &remoteAddrSource{extractor: extractor}
+		req := &http.Request{Header: make(http.Header)}
+
+		_, extractErr := source.Extract(context.Background(), req)
+		if !errors.Is(extractErr, ErrSourceUnavailable) {
+			t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+		}
+	})
+}
+
 func errorIsType(err error, target any) bool {
 	if err == nil {
 		return false
