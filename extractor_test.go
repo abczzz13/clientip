@@ -830,6 +830,66 @@ func TestExtractIP_SecurityModeLax_AllowsFallbackOnInvalidPreferredSingleHeader(
 	}
 }
 
+func TestExtractIP_StrictMode_DuplicatePreferredSingleHeader_IsTerminal(t *testing.T) {
+	extractor, err := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithSecurityMode(SecurityModeStrict),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Add("X-Real-IP", "9.9.9.9")
+	req.Header.Add("X-Real-IP", "8.8.8.8")
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Fatal("expected strict-mode extraction to fail on duplicate single-IP headers")
+	}
+	if !errors.Is(result.Err, ErrMultipleSingleIPHeaders) {
+		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", result.Err)
+	}
+	if result.Source != SourceXRealIP {
+		t.Fatalf("source = %q, want %q", result.Source, SourceXRealIP)
+	}
+}
+
+func TestExtractIP_SecurityModeLax_AllowsFallbackOnDuplicatePreferredSingleHeader(t *testing.T) {
+	extractor, err := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithSecurityMode(SecurityModeLax),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Add("X-Real-IP", "9.9.9.9")
+	req.Header.Add("X-Real-IP", "8.8.8.8")
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	result := extractor.ExtractIP(req)
+	if !result.Valid() {
+		t.Fatalf("expected lax-mode fallback to succeed, got error: %v", result.Err)
+	}
+	if result.Source != SourceXForwardedFor {
+		t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+	}
+	if got, want := result.IP.String(), "1.1.1.1"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
+	}
+}
+
 func TestExtractIP_WithTrustedProxies(t *testing.T) {
 	cidrs, err := ParseCIDRs("10.0.0.0/8")
 	if err != nil {
@@ -1125,6 +1185,44 @@ func TestExtractIP_ErrorTypes(t *testing.T) {
 
 		if !errors.Is(result.Err, ErrMultipleXFFHeaders) {
 			t.Error("Expected error to wrap ErrMultipleXFFHeaders")
+		}
+	})
+
+	t.Run("MultipleSingleIPHeadersError", func(t *testing.T) {
+		extractor, err := New(
+			TrustLoopbackProxy(),
+			Priority(SourceXRealIP),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		req := &http.Request{
+			RemoteAddr: "127.0.0.1:8080",
+			Header:     make(http.Header),
+		}
+		req.Header.Add("X-Real-IP", "8.8.8.8")
+		req.Header.Add("X-Real-IP", "1.1.1.1")
+
+		result := extractor.ExtractIP(req)
+
+		if result.Valid() {
+			t.Error("Expected invalid result for multiple single-IP headers")
+		}
+
+		var multipleHeadersErr *MultipleHeadersError
+		if !errors.As(result.Err, &multipleHeadersErr) {
+			t.Errorf("Expected MultipleHeadersError, got %T", result.Err)
+		} else {
+			if multipleHeadersErr.HeaderCount != 2 {
+				t.Errorf("HeaderCount = %d, want 2", multipleHeadersErr.HeaderCount)
+			}
+			if multipleHeadersErr.HeaderName != "X-Real-IP" {
+				t.Errorf("HeaderName = %q, want %q", multipleHeadersErr.HeaderName, "X-Real-IP")
+			}
+		}
+
+		if !errors.Is(result.Err, ErrMultipleSingleIPHeaders) {
+			t.Error("Expected error to wrap ErrMultipleSingleIPHeaders")
 		}
 	})
 

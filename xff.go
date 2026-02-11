@@ -156,7 +156,7 @@ func (e *Extractor) analyzeChain(parts []string) (chainAnalysis, error) {
 		return chainAnalysis{}, nil
 	}
 
-	if e.config.forwardedForStrategy == LeftmostIP {
+	if e.config.chainSelection == LeftmostUntrustedIP {
 		return e.analyzeChainLeftmost(parts)
 	}
 	return e.analyzeChainRightmost(parts)
@@ -293,6 +293,28 @@ func isReservedIP(ip netip.Addr) bool {
 	return false
 }
 
+func trimMatchedEnds(s string, chars string) string {
+	if len(chars) != 1 && len(chars) != 2 {
+		panic("trimMatchedEnds chars must be length 1 or 2")
+	}
+
+	if len(s) < 2 {
+		return s
+	}
+
+	start := chars[0]
+	end := chars[0]
+	if len(chars) == 2 {
+		end = chars[1]
+	}
+
+	if s[0] != start || s[len(s)-1] != end {
+		return s
+	}
+
+	return s[1 : len(s)-1]
+}
+
 // parseIP extracts an IP address from various formats found in proxy headers.
 // It handles:
 //   - Leading/trailing whitespace: "  192.168.1.1  "
@@ -313,7 +335,8 @@ func parseIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	s = strings.Trim(s, "\"'")
+	s = trimMatchedEnds(s, `"`)
+	s = trimMatchedEnds(s, "'")
 	if s == "" {
 		return netip.Addr{}
 	}
@@ -322,7 +345,7 @@ func parseIP(s string) netip.Addr {
 		s = host
 	}
 
-	s = strings.Trim(s, "[]")
+	s = trimMatchedEnds(s, "[]")
 
 	ip, _ := netip.ParseAddr(s)
 	return ip

@@ -15,6 +15,8 @@ var (
 
 	ErrMultipleXFFHeaders = errors.New("multiple X-Forwarded-For headers received")
 
+	ErrMultipleSingleIPHeaders = errors.New("multiple single-IP headers received")
+
 	ErrUntrustedProxy = errors.New("request from untrusted proxy")
 
 	ErrTooFewTrustedProxies = errors.New("too few trusted proxies in proxy chain")
@@ -48,10 +50,16 @@ func (e *ExtractionError) SourceName() string {
 type MultipleHeadersError struct {
 	ExtractionError
 	HeaderCount int
+	HeaderName  string
 	RemoteAddr  string
 }
 
 func (e *MultipleHeadersError) Error() string {
+	if e.HeaderName != "" {
+		return fmt.Sprintf("%s: %v (header=%q, header_count=%d, remote_addr=%s)",
+			e.Source, e.Err, e.HeaderName, e.HeaderCount, e.RemoteAddr)
+	}
+
 	return fmt.Sprintf("%s: %v (header_count=%d, remote_addr=%s)",
 		e.Source, e.Err, e.HeaderCount, e.RemoteAddr)
 }

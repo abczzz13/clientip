@@ -124,6 +124,52 @@ func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
 	assertAttr(t, entry.attrs, "header_count", 2)
 }
 
+func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
+	logger := &capturedLogger{}
+
+	extractor, err := New(
+		WithLogger(logger),
+		TrustProxyIP("1.1.1.1"),
+		Priority(SourceXRealIP),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:8080",
+		Header:     make(http.Header),
+		URL:        &url.URL{Path: "/test/multiple-single-ip-headers"},
+	}
+	req.Header.Add("X-Real-IP", "8.8.8.8")
+	req.Header.Add("X-Real-IP", "9.9.9.9")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Fatal("expected extraction to fail for multiple single-IP headers")
+	}
+	if !errors.Is(result.Err, ErrMultipleSingleIPHeaders) {
+		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", result.Err)
+	}
+
+	entries := logger.snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("logged entries = %d, want 1", len(entries))
+	}
+
+	entry := entries[0]
+	assertCommonSecurityWarningAttrs(
+		t,
+		entry.attrs,
+		securityEventMultipleHeaders,
+		SourceXRealIP,
+		"/test/multiple-single-ip-headers",
+		"1.1.1.1:8080",
+	)
+	assertAttr(t, entry.attrs, "header", "X-Real-IP")
+	assertAttr(t, entry.attrs, "header_count", 2)
+}
+
 func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 

@@ -291,6 +291,48 @@ func TestSingleHeaderSource_Extract(t *testing.T) {
 	}
 }
 
+func TestSingleHeaderSource_Extract_MultipleHeaderValues(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	source := &singleHeaderSource{
+		extractor:  extractor,
+		headerName: "X-Real-IP",
+		sourceName: NormalizeSourceName("X-Real-IP"),
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Add("X-Real-IP", "1.1.1.1")
+	req.Header.Add("X-Real-IP", "8.8.8.8")
+
+	_, extractErr := source.Extract(context.Background(), req)
+	if extractErr == nil {
+		t.Fatal("Extract() error = nil, want error")
+	}
+
+	if !errors.Is(extractErr, ErrMultipleSingleIPHeaders) {
+		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", extractErr)
+	}
+
+	var multipleHeadersErr *MultipleHeadersError
+	if !errors.As(extractErr, &multipleHeadersErr) {
+		t.Fatalf("error type = %T, want *MultipleHeadersError", extractErr)
+	}
+
+	if multipleHeadersErr.HeaderCount != 2 {
+		t.Fatalf("HeaderCount = %d, want 2", multipleHeadersErr.HeaderCount)
+	}
+
+	if multipleHeadersErr.HeaderName != "X-Real-IP" {
+		t.Fatalf("HeaderName = %q, want %q", multipleHeadersErr.HeaderName, "X-Real-IP")
+	}
+}
+
 func TestSingleHeaderSource_Name(t *testing.T) {
 	extractor, _ := New()
 

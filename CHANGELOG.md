@@ -11,6 +11,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - First-class RFC7239 `Forwarded` header support (`for=` chain parsing) with built-in source constant `SourceForwarded`.
 - New malformed-header error sentinel: `ErrInvalidForwardedHeader`.
 - New source-absence sentinel: `ErrSourceUnavailable`.
+- New duplicate single-IP header error sentinel: `ErrMultipleSingleIPHeaders`.
 - Trust helper options for common deployments: `TrustLoopbackProxy()`, `TrustPrivateProxyRanges()`, `TrustLocalProxyDefaults()`, and `TrustProxyIP(string)`.
 - New deployment presets: `PresetDirectConnection()`, `PresetLoopbackReverseProxy()`, `PresetVMReverseProxy()`, and `PresetPreferredHeaderThenXFFLax(string)`.
 
@@ -21,6 +22,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `Priority(...)` now allows at most one chain-header source per extractor (`SourceForwarded` or `SourceXForwardedFor`).
 - Proxy-chain extraction, trust validation, and chain limits now apply consistently to `Forwarded` and `X-Forwarded-For`.
 - In `SecurityModeStrict` (default), malformed `Forwarded` and invalid present source values are terminal (fail closed); `SecurityModeLax` allows fallback.
+- Chain selection naming is now explicit: `WithChainSelection(ChainSelection)` with `RightmostUntrustedIP` (default) and `LeftmostUntrustedIP`.
+- Single-IP header sources now explicitly reject multiple header values and fail closed in strict mode.
+- `parseIP` now trims wrapping quotes/brackets only when delimiters are matched.
 - `ProxyValidationError` and `InvalidIPError` now expose `Chain` instead of `XFF`.
 - `Priority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
 - Reserved/special-use client IP filtering now covers additional RFC ranges (for example benchmarking, NAT64, ORCHIDv2, and future-use ranges).

@@ -96,7 +96,7 @@ extractor, err := clientip.New(
     // (trusted RemoteAddr is validated separately).
     clientip.TrustedProxies(cidrs, 0, 3),
     clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-    clientip.XFFStrategy(clientip.RightmostIP),
+    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
 )
 if err != nil {
     log.Fatal(err)
@@ -265,7 +265,7 @@ extractor, err := clientip.New(
 - `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
 - `AllowPrivateIPs(bool)` allow private client IPs
 - `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
-- `XFFStrategy(Strategy)` choose `RightmostIP` (default) or `LeftmostIP`
+- `WithChainSelection(ChainSelection)` choose `RightmostUntrustedIP` (default) or `LeftmostUntrustedIP`
 - `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`), with at most one chain header source (`SourceForwarded` or `SourceXForwardedFor`) per extractor
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(Logger)` inject logger implementation
@@ -310,6 +310,8 @@ if !result.Valid() {
     switch {
     case errors.Is(result.Err, clientip.ErrMultipleXFFHeaders):
         // Possible spoofing attempt
+    case errors.Is(result.Err, clientip.ErrMultipleSingleIPHeaders):
+        // Duplicate single-IP header values received
     case errors.Is(result.Err, clientip.ErrInvalidForwardedHeader):
         // Malformed Forwarded header
     case errors.Is(result.Err, clientip.ErrUntrustedProxy):
@@ -328,7 +330,7 @@ if !result.Valid() {
 
     var mh *clientip.MultipleHeadersError
     if errors.As(result.Err, &mh) {
-        // Inspect mh.HeaderCount or mh.RemoteAddr
+        // Inspect mh.HeaderName, mh.HeaderCount, or mh.RemoteAddr
     }
 }
 ```
@@ -342,6 +344,7 @@ Typed chain-related errors expose additional context:
 
 - Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
 - Rejects multiple `X-Forwarded-For` headers (spoofing defense)
+- Rejects multiple values for single-IP headers (for example repeated `X-Real-IP`)
 - Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted CIDRs are configured)
 - Requires trusted proxy CIDRs for any header-based source
 - Allows at most one chain-header source (`Forwarded` or `X-Forwarded-For`) per extractor configuration
@@ -349,6 +352,13 @@ Typed chain-related errors expose additional context:
 - Filters implausible IPs (loopback, multicast, reserved); optional private IP allowlist
 - Strict fail-closed behavior is the default (`SecurityModeStrict`) for security-significant errors and invalid present source values
 - Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
+
+## Security anti-patterns
+
+- Do not include multiple competing header-based sources in `Priority(...)` for security decisions (for example custom header + chain header fallback). Prefer one canonical trusted header plus `SourceRemoteAddr` fallback only when required.
+- Do not enable `SecurityModeLax` for security-enforcement decisions (ACLs, fraud/risk controls, authz). Use strict mode and fail closed.
+- Do not trust broad proxy CIDRs unless they are truly under your control. Keep trusted ranges minimal and explicit.
+- Do not treat a missing/invalid source as benign in critical paths; monitor and remediate extraction errors.
 
 ## Performance
 

@@ -109,12 +109,12 @@ func BenchmarkExtractIP_WithDebugInfo(b *testing.B) {
 	}
 }
 
-func BenchmarkExtractIP_LeftmostStrategy(b *testing.B) {
+func BenchmarkExtractIP_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 3),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
-		XFFStrategy(LeftmostIP),
+		WithChainSelection(LeftmostUntrustedIP),
 	)
 	req := &http.Request{
 		RemoteAddr: "173.245.48.5:443",
@@ -256,7 +256,7 @@ func BenchmarkChainAnalysis_Leftmost(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 3),
-		XFFStrategy(LeftmostIP),
+		WithChainSelection(LeftmostUntrustedIP),
 	)
 
 	parts := []string{"1.1.1.1", "8.8.8.8", "10.0.0.1", "10.0.0.2"}

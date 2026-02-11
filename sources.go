@@ -191,6 +191,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 				Source: s.Name(),
 			},
 			HeaderCount: len(xffValues),
+			HeaderName:  "X-Forwarded-For",
 			RemoteAddr:  r.RemoteAddr,
 		}
 	}
@@ -269,7 +270,33 @@ func (s *singleHeaderSource) Name() string {
 }
 
 func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
-	headerValue := r.Header.Get(s.headerName)
+	headerValues := r.Header.Values(s.headerName)
+	if len(headerValues) == 0 {
+		return ExtractionResult{}, &ExtractionError{
+			Err:    ErrSourceUnavailable,
+			Source: s.Name(),
+		}
+	}
+
+	if len(headerValues) > 1 {
+		s.extractor.config.metrics.RecordSecurityEvent(securityEventMultipleHeaders)
+		s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMultipleHeaders, "multiple single-IP headers received - possible spoofing attempt",
+			"header", s.headerName,
+			"header_count", len(headerValues),
+		)
+		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+		return ExtractionResult{}, &MultipleHeadersError{
+			ExtractionError: ExtractionError{
+				Err:    ErrMultipleSingleIPHeaders,
+				Source: s.Name(),
+			},
+			HeaderCount: len(headerValues),
+			HeaderName:  s.headerName,
+			RemoteAddr:  r.RemoteAddr,
+		}
+	}
+
+	headerValue := headerValues[0]
 	if headerValue == "" {
 		return ExtractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
@@ -424,6 +451,7 @@ func (c *chainedSource) isTerminalError(err error) bool {
 
 	return errors.Is(err, ErrInvalidIP) ||
 		errors.Is(err, ErrMultipleXFFHeaders) ||
+		errors.Is(err, ErrMultipleSingleIPHeaders) ||
 		errors.Is(err, ErrUntrustedProxy) ||
 		errors.Is(err, ErrNoTrustedProxies) ||
 		errors.Is(err, ErrTooFewTrustedProxies) ||

@@ -17,28 +17,33 @@ const (
 	DefaultMaxChainLength = 100
 )
 
-type Strategy int
+// ChainSelection controls how the client candidate is selected from a parsed
+// proxy chain after trusted proxy validation.
+type ChainSelection int
 
 const (
-	// Start at 1 to avoid zero-value confusion and make invalid strategies
+	// Start at 1 to avoid zero-value confusion and make invalid selections
 	// explicit
-	RightmostIP Strategy = iota + 1
-	LeftmostIP
+	//
+	// RightmostUntrustedIP selects the rightmost untrusted address in the chain.
+	RightmostUntrustedIP ChainSelection = iota + 1
+	// LeftmostUntrustedIP selects the leftmost untrusted address in the chain.
+	LeftmostUntrustedIP
 )
 
-func (s Strategy) String() string {
+func (s ChainSelection) String() string {
 	switch s {
-	case RightmostIP:
-		return "rightmost"
-	case LeftmostIP:
-		return "leftmost"
+	case RightmostUntrustedIP:
+		return "rightmost_untrusted"
+	case LeftmostUntrustedIP:
+		return "leftmost_untrusted"
 	default:
 		return "unknown"
 	}
 }
 
-func (s Strategy) Valid() bool {
-	return s == RightmostIP || s == LeftmostIP
+func (s ChainSelection) Valid() bool {
+	return s == RightmostUntrustedIP || s == LeftmostUntrustedIP
 }
 
 type SecurityMode int
@@ -68,11 +73,11 @@ type Config struct {
 	minTrustedProxies int
 	maxTrustedProxies int
 
-	allowPrivateIPs      bool
-	maxChainLength       int
-	forwardedForStrategy Strategy
-	securityMode         SecurityMode
-	debugMode            bool
+	allowPrivateIPs bool
+	maxChainLength  int
+	chainSelection  ChainSelection
+	securityMode    SecurityMode
+	debugMode       bool
 
 	sourcePriority []string
 
@@ -161,8 +166,8 @@ func (c *Config) validate() error {
 	if c.maxChainLength <= 0 {
 		return fmt.Errorf("maxChainLength must be > 0, got %d", c.maxChainLength)
 	}
-	if !c.forwardedForStrategy.Valid() {
-		return fmt.Errorf("invalid XFF strategy %d (must be RightmostIP=1 or LeftmostIP=2)", c.forwardedForStrategy)
+	if !c.chainSelection.Valid() {
+		return fmt.Errorf("invalid chain selection %d (must be RightmostUntrustedIP=1 or LeftmostUntrustedIP=2)", c.chainSelection)
 	}
 	if !c.securityMode.Valid() {
 		return fmt.Errorf("invalid security mode %d (must be SecurityModeStrict=1 or SecurityModeLax=2)", c.securityMode)
@@ -176,8 +181,8 @@ func (c *Config) validate() error {
 		return err
 	}
 
-	if hasChainSource && c.forwardedForStrategy == LeftmostIP && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("LeftmostIP strategy requires trustedProxyCIDRs to be configured; without CIDR validation, this strategy provides no security benefit over RightmostIP")
+	if hasChainSource && c.chainSelection == LeftmostUntrustedIP && len(c.trustedProxyCIDRs) == 0 {
+		return fmt.Errorf("LeftmostUntrustedIP selection requires trustedProxyCIDRs to be configured; without CIDR validation, this selection provides no security benefit over RightmostUntrustedIP")
 	}
 
 	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
@@ -254,14 +259,14 @@ func isNilInterface(v any) bool {
 
 func defaultConfig() *Config {
 	return &Config{
-		minTrustedProxies:    0,
-		maxTrustedProxies:    0,
-		allowPrivateIPs:      false,
-		maxChainLength:       DefaultMaxChainLength,
-		forwardedForStrategy: RightmostIP,
-		securityMode:         SecurityModeStrict,
-		logger:               noopLogger{},
-		metrics:              noopMetrics{},
+		minTrustedProxies: 0,
+		maxTrustedProxies: 0,
+		allowPrivateIPs:   false,
+		maxChainLength:    DefaultMaxChainLength,
+		chainSelection:    RightmostUntrustedIP,
+		securityMode:      SecurityModeStrict,
+		logger:            noopLogger{},
+		metrics:           noopMetrics{},
 		sourcePriority: []string{
 			SourceRemoteAddr,
 		},
@@ -395,9 +400,11 @@ func Priority(sources ...string) Option {
 	}
 }
 
-func XFFStrategy(strategy Strategy) Option {
+// WithChainSelection configures how to choose the client candidate from
+// Forwarded/X-Forwarded-For chains.
+func WithChainSelection(selection ChainSelection) Option {
 	return func(c *Config) error {
-		c.forwardedForStrategy = strategy
+		c.chainSelection = selection
 		return nil
 	}
 }

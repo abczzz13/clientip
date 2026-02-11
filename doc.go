@@ -33,6 +33,7 @@
 //	extractor, err := clientip.New(
 //	    clientip.TrustedProxies(cidrs, 0, 2),  // Count trusted proxies present in proxy headers
 //	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+//	    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
 //	    clientip.AllowPrivateIPs(false),
 //	)
 //
@@ -76,13 +77,19 @@
 //
 // The package includes several security features:
 //
-//   - Detection of malformed Forwarded headers and multiple X-Forwarded-For headers
+//   - Detection of malformed Forwarded headers and duplicate header values
 //   - Immediate proxy trust enforcement before honoring Forwarded/X-Forwarded-For
 //   - Validation of proxy counts (min/max enforcement)
 //   - Chain length limits to prevent DoS
 //   - Rejection of invalid/implausible IPs (loopback, multicast, etc.)
 //   - Optional private IP filtering
 //   - Strict fail-closed behavior by default (SecurityModeStrict)
+//
+// # Security Anti-Patterns
+//
+//   - Do not combine multiple competing header sources for security decisions.
+//   - Do not use SecurityModeLax for ACL/risk/authz enforcement paths.
+//   - Do not trust broad proxy CIDRs unless they are truly controlled by your edge.
 //
 // # Security Modes
 //

@@ -65,16 +65,16 @@ func TestNew_Success(t *testing.T) {
 			},
 		},
 		{
-			name: "with rightmost strategy",
+			name: "with rightmost untrusted selection",
 			opts: []Option{
-				XFFStrategy(RightmostIP),
+				WithChainSelection(RightmostUntrustedIP),
 			},
 		},
 		{
-			name: "with leftmost strategy",
+			name: "with leftmost untrusted selection",
 			opts: []Option{
 				TrustedCIDRs("10.0.0.0/8"),
-				XFFStrategy(LeftmostIP),
+				WithChainSelection(LeftmostUntrustedIP),
 			},
 		},
 		{
@@ -97,7 +97,7 @@ func TestNew_Success(t *testing.T) {
 				MaxProxies(3),
 				AllowPrivateIPs(false),
 				MaxChainLength(50),
-				XFFStrategy(RightmostIP),
+				WithChainSelection(RightmostUntrustedIP),
 				WithDebugInfo(true),
 			},
 		},
@@ -202,11 +202,11 @@ func TestNew_Errors(t *testing.T) {
 			wantErrText: "at least one source required",
 		},
 		{
-			name: "invalid strategy",
+			name: "invalid chain selection",
 			opts: []Option{
-				XFFStrategy(Strategy(999)),
+				WithChainSelection(ChainSelection(999)),
 			},
-			wantErrText: "invalid XFF strategy",
+			wantErrText: "invalid chain selection",
 		},
 		{
 			name: "invalid security mode",
@@ -219,9 +219,9 @@ func TestNew_Errors(t *testing.T) {
 			name: "leftmost without CIDRs",
 			opts: []Option{
 				Priority(SourceXForwardedFor),
-				XFFStrategy(LeftmostIP),
+				WithChainSelection(LeftmostUntrustedIP),
 			},
-			wantErrText: "LeftmostIP strategy requires trustedProxyCIDRs",
+			wantErrText: "LeftmostUntrustedIP selection requires trustedProxyCIDRs",
 		},
 		{
 			name: "header source without trusted proxy CIDRs",
@@ -266,21 +266,21 @@ func TestNew_Errors(t *testing.T) {
 	}
 }
 
-func TestStrategy_String(t *testing.T) {
+func TestChainSelection_String(t *testing.T) {
 	tests := []struct {
-		strategy Strategy
-		want     string
+		selection ChainSelection
+		want      string
 	}{
-		{RightmostIP, "rightmost"},
-		{LeftmostIP, "leftmost"},
-		{Strategy(999), "unknown"},
+		{RightmostUntrustedIP, "rightmost_untrusted"},
+		{LeftmostUntrustedIP, "leftmost_untrusted"},
+		{ChainSelection(999), "unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := tt.strategy.String()
+			got := tt.selection.String()
 			if got != tt.want {
-				t.Errorf("Strategy.String() = %v, want %v", got, tt.want)
+				t.Errorf("ChainSelection.String() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -425,10 +425,10 @@ func TestConfig_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid strategy should fail",
+			name: "invalid chain selection should fail",
 			cfg: func() *Config {
 				c := defaultConfig()
-				c.forwardedForStrategy = Strategy(999)
+				c.chainSelection = ChainSelection(999)
 				return c
 			}(),
 			wantErr: true,
@@ -447,7 +447,7 @@ func TestConfig_Validate(t *testing.T) {
 			cfg: func() *Config {
 				c := defaultConfig()
 				c.sourcePriority = []string{SourceXForwardedFor}
-				c.forwardedForStrategy = LeftmostIP
+				c.chainSelection = LeftmostUntrustedIP
 				c.trustedProxyCIDRs = []netip.Prefix{}
 				return c
 			}(),
@@ -728,23 +728,23 @@ func TestMaxChainLength_Option(t *testing.T) {
 	}
 }
 
-func TestXFFStrategy_Option(t *testing.T) {
+func TestWithChainSelection_Option(t *testing.T) {
 	tests := []struct {
-		name     string
-		strategy Strategy
+		name      string
+		selection ChainSelection
 	}{
-		{"rightmost", RightmostIP},
-		{"leftmost", LeftmostIP},
+		{"rightmost untrusted", RightmostUntrustedIP},
+		{"leftmost untrusted", LeftmostUntrustedIP},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := defaultConfig()
-			opt := XFFStrategy(tt.strategy)
+			opt := WithChainSelection(tt.selection)
 			_ = opt(cfg)
 
-			if cfg.forwardedForStrategy != tt.strategy {
-				t.Errorf("forwardedForStrategy = %v, want %v", cfg.forwardedForStrategy, tt.strategy)
+			if cfg.chainSelection != tt.selection {
+				t.Errorf("chainSelection = %v, want %v", cfg.chainSelection, tt.selection)
 			}
 		})
 	}
@@ -912,8 +912,8 @@ func TestDefaultConfig(t *testing.T) {
 		if cfg.maxChainLength != DefaultMaxChainLength {
 			t.Errorf("maxChainLength = %d, want %d", cfg.maxChainLength, DefaultMaxChainLength)
 		}
-		if cfg.forwardedForStrategy != RightmostIP {
-			t.Errorf("forwardedForStrategy = %v, want RightmostIP", cfg.forwardedForStrategy)
+		if cfg.chainSelection != RightmostUntrustedIP {
+			t.Errorf("chainSelection = %v, want RightmostUntrustedIP", cfg.chainSelection)
 		}
 		if cfg.securityMode != SecurityModeStrict {
 			t.Errorf("securityMode = %v, want SecurityModeStrict", cfg.securityMode)

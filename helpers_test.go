@@ -191,6 +191,26 @@ func TestParseIP(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "unmatched leading double quote",
+			input:   `"203.0.113.1`,
+			wantErr: true,
+		},
+		{
+			name:    "unmatched trailing double quote",
+			input:   `203.0.113.1"`,
+			wantErr: true,
+		},
+		{
+			name:    "unmatched leading single quote",
+			input:   `'203.0.113.1`,
+			wantErr: true,
+		},
+		{
+			name:    "unmatched trailing single quote",
+			input:   `203.0.113.1'`,
+			wantErr: true,
+		},
+		{
 			name:    "invalid IP",
 			input:   "not-an-ip",
 			wantErr: true,
@@ -208,6 +228,16 @@ func TestParseIP(t *testing.T) {
 		{
 			name:    "brackets only",
 			input:   "[]",
+			wantErr: true,
+		},
+		{
+			name:    "unmatched leading bracket",
+			input:   "[2001:db8::1",
+			wantErr: true,
+		},
+		{
+			name:    "unmatched trailing bracket",
+			input:   "2001:db8::1]",
 			wantErr: true,
 		},
 	}

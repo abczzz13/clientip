@@ -174,13 +174,13 @@ func ExampleHeader() {
 	}
 }
 
-func ExampleXFFStrategy_leftmost() {
+func ExampleWithChainSelection_leftmostUntrusted() {
 	cloudflareCIDRs, _ := netip.ParsePrefix("173.245.48.0/20")
 
 	extractor, _ := clientip.New(
 		clientip.TrustedProxies([]netip.Prefix{cloudflareCIDRs}, 1, 3),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-		clientip.XFFStrategy(clientip.LeftmostIP),
+		clientip.WithChainSelection(clientip.LeftmostUntrustedIP),
 	)
 
 	req := &http.Request{

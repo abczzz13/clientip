@@ -173,6 +173,38 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	}
 }
 
+func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+		TrustProxyIP("1.1.1.1"),
+		Priority(SourceXRealIP),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:8080",
+		Header:     make(http.Header),
+	}
+	req.Header.Add("X-Real-IP", "8.8.8.8")
+	req.Header.Add("X-Real-IP", "9.9.9.9")
+
+	result := extractor.ExtractIP(req)
+	if result.Valid() {
+		t.Fatal("expected extraction to fail for multiple single-IP headers")
+	}
+
+	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventMultipleHeaders, got)
+	}
+
+	if got := metrics.getFailureCount(SourceXRealIP); got != 1 {
+		t.Errorf("failure count for %s = %d, want 1", SourceXRealIP, got)
+	}
+}
+
 func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
