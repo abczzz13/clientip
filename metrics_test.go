@@ -71,9 +71,9 @@ func TestMetrics_ExtractionSuccess(t *testing.T) {
 		Header:     make(http.Header),
 	}
 
-	result := extractor.ExtractIP(req)
-	if !result.Valid() {
-		t.Errorf("ExtractIP() failed: %v", result.Err)
+	result, err := extractor.Extract(req)
+	if err != nil || !result.IP.IsValid() {
+		t.Errorf("Extract() failed: %v", err)
 	}
 
 	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 1 {
@@ -95,9 +95,9 @@ func TestMetrics_ExtractionFailure(t *testing.T) {
 		Header:     make(http.Header),
 	}
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
-		t.Errorf("ExtractIP() should have failed for loopback IP")
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
+		t.Errorf("Extract() should have failed for loopback IP")
 	}
 
 	if got := metrics.getFailureCount(SourceRemoteAddr); got != 1 {
@@ -119,7 +119,7 @@ func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
 		Header:     make(http.Header),
 	}
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventInvalidIP); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventInvalidIP, got)
@@ -141,7 +141,7 @@ func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 		Header:     make(http.Header),
 	}
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventPrivateIP); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventPrivateIP, got)
@@ -166,7 +166,7 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "1.1.1.1")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventMultipleHeaders, got)
@@ -191,8 +191,8 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 	req.Header.Add("X-Real-IP", "8.8.8.8")
 	req.Header.Add("X-Real-IP", "9.9.9.9")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for multiple single-IP headers")
 	}
 
@@ -223,7 +223,7 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventTooFewTrustedProxies); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventTooFewTrustedProxies, got)
@@ -248,7 +248,7 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventNoTrustedProxies); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventNoTrustedProxies, got)
@@ -273,7 +273,7 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1, 10.0.0.2")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventTooManyTrustedProxies); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventTooManyTrustedProxies, got)
@@ -298,7 +298,7 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventUntrustedProxy); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventUntrustedProxy, got)
@@ -323,7 +323,7 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 5.5.5.5, 6.6.6.6")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventChainTooLong); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventChainTooLong, got)
@@ -347,7 +347,7 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 	}
 	req.Header.Set("Forwarded", "for=\"1.1.1.1")
 
-	extractor.ExtractIP(req)
+	_, _ = extractor.Extract(req)
 
 	if got := metrics.getSecurityEventCount(securityEventMalformedForwarded); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventMalformedForwarded, got)
@@ -371,9 +371,9 @@ func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
 	}
 	req.Header.Set("Forwarded", "for=1.1.1.1")
 
-	result := extractor.ExtractIP(req)
-	if !result.Valid() {
-		t.Fatalf("ExtractIP() failed: %v", result.Err)
+	result, err := extractor.Extract(req)
+	if err != nil || !result.IP.IsValid() {
+		t.Fatalf("Extract() failed: %v", err)
 	}
 
 	if got := metrics.getSuccessCount(SourceForwarded); got != 1 {
@@ -397,21 +397,21 @@ func TestMetrics_MultipleExtractions(t *testing.T) {
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
 	}
-	extractor.ExtractIP(req1)
+	_, _ = extractor.Extract(req1)
 
 	// Another successful extraction
 	req2 := &http.Request{
 		RemoteAddr: "8.8.8.8:8080",
 		Header:     make(http.Header),
 	}
-	extractor.ExtractIP(req2)
+	_, _ = extractor.Extract(req2)
 
 	// Failed extraction
 	req3 := &http.Request{
 		RemoteAddr: "127.0.0.1:8080",
 		Header:     make(http.Header),
 	}
-	extractor.ExtractIP(req3)
+	_, _ = extractor.Extract(req3)
 
 	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 2 {
 		t.Errorf("success count = %d, want 2", got)
@@ -439,14 +439,14 @@ func TestMetrics_DifferentSources(t *testing.T) {
 		Header:     make(http.Header),
 	}
 	req1.Header.Set("X-Forwarded-For", "1.1.1.1")
-	extractor.ExtractIP(req1)
+	_, _ = extractor.Extract(req1)
 
 	// Success from RemoteAddr
 	req2 := &http.Request{
 		RemoteAddr: "8.8.8.8:8080",
 		Header:     make(http.Header),
 	}
-	extractor.ExtractIP(req2)
+	_, _ = extractor.Extract(req2)
 
 	if got := metrics.getSuccessCount(SourceXForwardedFor); got != 1 {
 		t.Errorf("XFF success count = %d, want 1", got)
@@ -475,7 +475,7 @@ func TestMetrics_ConcurrentAccess(t *testing.T) {
 				RemoteAddr: "1.1.1.1:12345",
 				Header:     make(http.Header),
 			}
-			extractor.ExtractIP(req)
+			_, _ = extractor.Extract(req)
 			done <- true
 		}()
 	}

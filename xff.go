@@ -293,7 +293,7 @@ func isReservedIP(ip netip.Addr) bool {
 	return false
 }
 
-func trimMatchedEnds(s string, chars string) string {
+func trimMatchedEnds(s, chars string) string {
 	if len(chars) != 1 && len(chars) != 2 {
 		panic("trimMatchedEnds chars must be length 1 or 2")
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func BenchmarkExtractIP_RemoteAddr(b *testing.B) {
+func BenchmarkExtract_RemoteAddr(b *testing.B) {
 	extractor, _ := New()
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
@@ -15,14 +15,14 @@ func BenchmarkExtractIP_RemoteAddr(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_XForwardedFor_Simple(b *testing.B) {
+func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 	extractor, _ := New(
 		TrustLoopbackProxy(),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
@@ -35,14 +35,14 @@ func BenchmarkExtractIP_XForwardedFor_Simple(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_XForwardedFor_WithTrustedProxies(b *testing.B) {
+func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 2),
@@ -56,14 +56,14 @@ func BenchmarkExtractIP_XForwardedFor_WithTrustedProxies(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_XForwardedFor_LongChain(b *testing.B) {
+func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 5),
@@ -77,14 +77,14 @@ func BenchmarkExtractIP_XForwardedFor_LongChain(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_WithDebugInfo(b *testing.B) {
+func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 2),
@@ -99,8 +99,8 @@ func BenchmarkExtractIP_WithDebugInfo(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 		if result.DebugInfo == nil {
@@ -109,7 +109,7 @@ func BenchmarkExtractIP_WithDebugInfo(b *testing.B) {
 	}
 }
 
-func BenchmarkExtractIP_LeftmostUntrustedSelection(b *testing.B) {
+func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
 	extractor, _ := New(
 		TrustedProxies(cidrs, 1, 3),
@@ -124,14 +124,14 @@ func BenchmarkExtractIP_LeftmostUntrustedSelection(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_CustomHeader(b *testing.B) {
+func BenchmarkExtract_CustomHeader(b *testing.B) {
 	extractor, _ := New(
 		TrustLoopbackProxy(),
 		Priority(
@@ -148,14 +148,14 @@ func BenchmarkExtractIP_CustomHeader(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := extractor.ExtractIP(req)
-		if !result.Valid() {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkExtractIP_Parallel(b *testing.B) {
+func BenchmarkExtract_Parallel(b *testing.B) {
 	extractor, _ := New()
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
@@ -165,8 +165,8 @@ func BenchmarkExtractIP_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			result := extractor.ExtractIP(req)
-			if !result.Valid() {
+			result, err := extractor.Extract(req)
+			if err != nil || !result.IP.IsValid() {
 				b.Fatal("extraction failed")
 			}
 		}
@@ -215,7 +215,7 @@ func BenchmarkParseCIDRs(b *testing.B) {
 func BenchmarkIsTrustedProxy(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 	extractor := &Extractor{
-		config: &Config{
+		config: &config{
 			trustedProxyCIDRs: cidrs,
 		},
 	}

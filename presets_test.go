@@ -2,103 +2,95 @@ package clientip
 
 import (
 	"net/http"
-	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestPresetDirectConnection(t *testing.T) {
-	cfg := defaultConfig()
-	if err := PresetDirectConnection()(cfg); err != nil {
-		t.Fatalf("PresetDirectConnection() error = %v", err)
+func TestPresets_Config(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        []Option
+		want        configSnapshot
+		wantErrText string
+	}{
+		{
+			name: "direct connection",
+			opts: []Option{PresetDirectConnection()},
+			want: configSnapshot{
+				TrustedProxyCIDRs: []string{},
+				MinTrustedProxies: 0,
+				MaxTrustedProxies: 0,
+				AllowPrivateIPs:   false,
+				MaxChainLength:    DefaultMaxChainLength,
+				ChainSelection:    RightmostUntrustedIP,
+				SecurityMode:      SecurityModeStrict,
+				DebugMode:         false,
+				SourcePriority:    []string{SourceRemoteAddr},
+			},
+		},
+		{
+			name: "loopback reverse proxy",
+			opts: []Option{PresetLoopbackReverseProxy()},
+			want: configSnapshot{
+				TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies: 0,
+				MaxTrustedProxies: 0,
+				AllowPrivateIPs:   false,
+				MaxChainLength:    DefaultMaxChainLength,
+				ChainSelection:    RightmostUntrustedIP,
+				SecurityMode:      SecurityModeStrict,
+				DebugMode:         false,
+				SourcePriority:    []string{SourceXForwardedFor, SourceRemoteAddr},
+			},
+		},
+		{
+			name: "vm reverse proxy",
+			opts: []Option{PresetVMReverseProxy()},
+			want: configSnapshot{
+				TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"},
+				MinTrustedProxies: 0,
+				MaxTrustedProxies: 0,
+				AllowPrivateIPs:   false,
+				MaxChainLength:    DefaultMaxChainLength,
+				ChainSelection:    RightmostUntrustedIP,
+				SecurityMode:      SecurityModeStrict,
+				DebugMode:         false,
+				SourcePriority:    []string{SourceXForwardedFor, SourceRemoteAddr},
+			},
+		},
+		{
+			name: "preferred header then xff lax invalid header",
+			opts: []Option{
+				TrustLoopbackProxy(),
+				PresetPreferredHeaderThenXFFLax("  "),
+			},
+			wantErrText: "source names cannot be empty",
+		},
 	}
 
-	want := []string{SourceRemoteAddr}
-	if diff := cmp.Diff(want, cfg.sourcePriority); diff != "" {
-		t.Fatalf("sourcePriority mismatch (-want +got):\n%s", diff)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extractor, err := New(tt.opts...)
+			if tt.wantErrText != "" {
+				if err == nil {
+					t.Fatalf("New() error = nil, want containing %q", tt.wantErrText)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Fatalf("New() error = %q, want containing %q", err.Error(), tt.wantErrText)
+				}
+				return
+			}
 
-func TestPresetLoopbackReverseProxy(t *testing.T) {
-	cfg := defaultConfig()
-	if err := PresetLoopbackReverseProxy()(cfg); err != nil {
-		t.Fatalf("PresetLoopbackReverseProxy() error = %v", err)
-	}
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
-	wantSources := []string{SourceXForwardedFor, SourceRemoteAddr}
-	if diff := cmp.Diff(wantSources, cfg.sourcePriority); diff != "" {
-		t.Fatalf("sourcePriority mismatch (-want +got):\n%s", diff)
-	}
-
-	for _, cidr := range []string{"127.0.0.0/8", "::1/128"} {
-		wantPrefix := netip.MustParsePrefix(cidr)
-		if !containsPrefix(cfg.trustedProxyCIDRs, wantPrefix) {
-			t.Fatalf("trustedProxyCIDRs missing %s", wantPrefix)
-		}
-	}
-}
-
-func TestPresetVMReverseProxy(t *testing.T) {
-	cfg := defaultConfig()
-	if err := PresetVMReverseProxy()(cfg); err != nil {
-		t.Fatalf("PresetVMReverseProxy() error = %v", err)
-	}
-
-	wantSources := []string{SourceXForwardedFor, SourceRemoteAddr}
-	if diff := cmp.Diff(wantSources, cfg.sourcePriority); diff != "" {
-		t.Fatalf("sourcePriority mismatch (-want +got):\n%s", diff)
-	}
-
-	for _, cidr := range []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"} {
-		wantPrefix := netip.MustParsePrefix(cidr)
-		if !containsPrefix(cfg.trustedProxyCIDRs, wantPrefix) {
-			t.Fatalf("trustedProxyCIDRs missing %s", wantPrefix)
-		}
-	}
-}
-
-func TestPresetPreferredHeaderThenXFFLax(t *testing.T) {
-	cfg := defaultConfig()
-	if err := PresetPreferredHeaderThenXFFLax("X-Frontend-IP")(cfg); err != nil {
-		t.Fatalf("PresetPreferredHeaderThenXFFLax() error = %v", err)
-	}
-
-	wantSources := []string{"X-Frontend-IP", SourceXForwardedFor, SourceRemoteAddr}
-	if diff := cmp.Diff(wantSources, cfg.sourcePriority); diff != "" {
-		t.Fatalf("sourcePriority mismatch (-want +got):\n%s", diff)
-	}
-
-	if cfg.securityMode != SecurityModeLax {
-		t.Fatalf("securityMode = %v, want %v", cfg.securityMode, SecurityModeLax)
-	}
-}
-
-func TestPresetPreferredHeaderThenXFFLax_InvalidHeader(t *testing.T) {
-	cfg := defaultConfig()
-	if err := PresetPreferredHeaderThenXFFLax("  ")(cfg); err == nil {
-		t.Fatal("PresetPreferredHeaderThenXFFLax() error = nil, want non-nil")
-	}
-}
-
-func TestPresetVMReverseProxy_EndToEnd(t *testing.T) {
-	extractor, err := New(PresetVMReverseProxy())
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
-	req.Header.Set("X-Forwarded-For", "1.1.1.1")
-
-	result := extractor.ExtractIP(req)
-	if !result.Valid() {
-		t.Fatalf("ExtractIP() error = %v", result.Err)
-	}
-	if got, want := result.Source, SourceXForwardedFor; got != want {
-		t.Fatalf("source = %q, want %q", got, want)
+			if diff := cmp.Diff(tt.want, snapshotConfig(extractor.config)); diff != "" {
+				t.Fatalf("preset config mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -118,24 +110,35 @@ func TestPresetPreferredHeaderThenXFFLax_EndToEnd(t *testing.T) {
 	req.Header.Set("X-Frontend-IP", "not-an-ip")
 	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
-	result := extractor.ExtractIP(req)
-	if !result.Valid() {
-		t.Fatalf("ExtractIP() error = %v", result.Err)
-	}
-	if got, want := result.Source, SourceXForwardedFor; got != want {
-		t.Fatalf("source = %q, want %q", got, want)
-	}
-	if got, want := result.IP, netip.MustParseAddr("8.8.8.8"); got != want {
-		t.Fatalf("ip = %v, want %v", got, want)
-	}
-}
-
-func containsPrefix(prefixes []netip.Prefix, want netip.Prefix) bool {
-	for _, prefix := range prefixes {
-		if prefix == want {
-			return true
-		}
+	extraction, err := extractor.Extract(req)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
 	}
 
-	return false
+	want := struct {
+		IP                string
+		Source            string
+		TrustedProxyCount int
+		HasDebugInfo      bool
+	}{
+		IP:                "8.8.8.8",
+		Source:            SourceXForwardedFor,
+		TrustedProxyCount: 0,
+		HasDebugInfo:      false,
+	}
+	got := struct {
+		IP                string
+		Source            string
+		TrustedProxyCount int
+		HasDebugInfo      bool
+	}{
+		IP:                extraction.IP.String(),
+		Source:            extraction.Source,
+		TrustedProxyCount: extraction.TrustedProxyCount,
+		HasDebugInfo:      extraction.DebugInfo != nil,
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
+	}
 }

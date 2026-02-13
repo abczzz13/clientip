@@ -447,7 +447,7 @@ func TestChainedSource_Extract(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		sources    []Source
+		sources    []sourceExtractor
 		remoteAddr string
 		xff        string
 		xRealIP    string
@@ -457,7 +457,7 @@ func TestChainedSource_Extract(t *testing.T) {
 	}{
 		{
 			name: "first source succeeds",
-			sources: []Source{
+			sources: []sourceExtractor{
 				&forwardedForSource{extractor: extractor},
 				&remoteAddrSource{extractor: extractor},
 			},
@@ -469,7 +469,7 @@ func TestChainedSource_Extract(t *testing.T) {
 		},
 		{
 			name: "fallback to second source",
-			sources: []Source{
+			sources: []sourceExtractor{
 				&forwardedForSource{extractor: extractor},
 				&remoteAddrSource{extractor: extractor},
 			},
@@ -481,7 +481,7 @@ func TestChainedSource_Extract(t *testing.T) {
 		},
 		{
 			name: "all sources fail",
-			sources: []Source{
+			sources: []sourceExtractor{
 				&forwardedForSource{extractor: extractor},
 				&remoteAddrSource{extractor: extractor},
 			},
@@ -491,7 +491,7 @@ func TestChainedSource_Extract(t *testing.T) {
 		},
 		{
 			name: "custom priority order",
-			sources: []Source{
+			sources: []sourceExtractor{
 				&singleHeaderSource{
 					extractor:  extractor,
 					headerName: "X-Real-IP",
@@ -549,7 +549,7 @@ func TestChainedSource_Extract(t *testing.T) {
 
 func TestChainedSource_Name(t *testing.T) {
 	extractor, _ := New()
-	sources := []Source{
+	sources := []sourceExtractor{
 		&forwardedForSource{extractor: extractor},
 		&singleHeaderSource{
 			extractor:  extractor,

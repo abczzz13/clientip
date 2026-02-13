@@ -14,6 +14,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - New duplicate single-IP header error sentinel: `ErrMultipleSingleIPHeaders`.
 - Trust helper options for common deployments: `TrustLoopbackProxy()`, `TrustPrivateProxyRanges()`, `TrustLocalProxyDefaults()`, and `TrustProxyIP(string)`.
 - New deployment presets: `PresetDirectConnection()`, `PresetLoopbackReverseProxy()`, `PresetVMReverseProxy()`, and `PresetPreferredHeaderThenXFFLax(string)`.
+- New extraction API: `Extract(req, overrides...)` and `ExtractAddr(req, overrides...)` returning `(value, error)`.
+- One-shot convenience helpers: `ExtractWithOptions(req, opts)` and `ExtractAddrWithOptions(req, opts)`.
+- Per-call policy override support via `OverrideOptions` and `Set(...)`.
 
 ### Changed
 
@@ -28,6 +31,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `ProxyValidationError` and `InvalidIPError` now expose `Chain` instead of `XFF`.
 - `Priority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
 - Reserved/special-use client IP filtering now covers additional RFC ranges (for example benchmarking, NAT64, ORCHIDv2, and future-use ranges).
+- Prometheus adapter supports both options fragments (`WithMetrics()`, `WithRegisterer(...)`) and explicit constructors (`New()`, `NewWithRegisterer(...)`).
+- Result handling is now centered around `Extraction` + error return values.
+- `New` now accepts option builders directly (`New(opts...)`) and no longer requires `OptionsFrom(...)` for composition.
+- `WithMetricsFactory(...)` now executes only after option validation and only for the final winning metrics option.
+- No-op per-call overrides now avoid unnecessary config cloning and source-chain rebuilding.
+- `Option` is now opaque (custom `func(*Config) error` option builders are no longer part of the public API).
+- `ChainSelection.Valid()`, `SecurityMode.Valid()`, `SetValue.IsSet()`, and `SetValue.Value()` are now internal helpers.
+- Prometheus adapter constructors now return `clientip.Metrics` (the concrete metrics type is no longer exported).
+- `just` and CI now validate the Prometheus adapter in consumer mode by default (`GOWORK=off`), with workspace-mode checks opt-in via `CLIENTIP_ADAPTER_GOWORK=auto`.
 
 ## [0.0.3] - 2026-02-07
 

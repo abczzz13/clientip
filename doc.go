@@ -20,10 +20,13 @@
 //	    log.Fatal(err)
 //	}
 //
-//	result := extractor.ExtractIP(req)
-//	if result.Valid() {
-//	    fmt.Printf("Client IP: %s from %s\n", result.IP, result.Source)
+//	extraction, err := extractor.Extract(req)
+//	if err != nil {
+//	    log.Printf("extract failed: %v", err)
+//	    return
 //	}
+//
+//	fmt.Printf("Client IP: %s from %s\n", extraction.IP, extraction.Source)
 //
 // # Behind Reverse Proxy
 //
@@ -66,11 +69,13 @@
 //
 //	import clientipprom "github.com/abczzz13/clientip/prometheus"
 //
+//	metrics, _ := clientipprom.New()
+//
 //	extractor, err := clientip.New(
 //	    clientip.TrustedProxies(cidrs, 0, 3),
 //	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 //	    clientip.WithLogger(slog.Default()),
-//	    clientipprom.WithMetrics(),
+//	    clientip.WithMetrics(metrics),
 //	)
 //
 // # Security Considerations

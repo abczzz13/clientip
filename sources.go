@@ -9,21 +9,25 @@ import (
 )
 
 const (
-	SourceForwarded     = "forwarded"
+	// SourceForwarded resolves from the RFC7239 Forwarded header.
+	SourceForwarded = "forwarded"
+	// SourceXForwardedFor resolves from the X-Forwarded-For header.
 	SourceXForwardedFor = "x_forwarded_for"
-	SourceXRealIP       = "x_real_ip"
-	SourceRemoteAddr    = "remote_addr"
+	// SourceXRealIP resolves from the X-Real-IP header.
+	SourceXRealIP = "x_real_ip"
+	// SourceRemoteAddr resolves from Request.RemoteAddr.
+	SourceRemoteAddr = "remote_addr"
 )
 
-type ExtractionResult struct {
+type extractionResult struct {
 	IP                netip.Addr
 	TrustedProxyCount int
 	DebugInfo         *ChainDebugInfo
 	Source            string
 }
 
-type Source interface {
-	Extract(ctx context.Context, r *http.Request) (ExtractionResult, error)
+type sourceExtractor interface {
+	Extract(ctx context.Context, r *http.Request) (extractionResult, error)
 
 	Name() string
 }
@@ -95,11 +99,11 @@ func (s *forwardedSource) Name() string {
 	return SourceForwarded
 }
 
-func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	forwardedValues := r.Header.Values("Forwarded")
 
 	if len(forwardedValues) == 0 {
-		return ExtractionResult{}, &ExtractionError{
+		return extractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
@@ -112,7 +116,7 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (Extract
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
 			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while Forwarded is present")
 			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-			return ExtractionResult{}, &ProxyValidationError{
+			return extractionResult{}, &ProxyValidationError{
 				ExtractionError: ExtractionError{
 					Err:    ErrUntrustedProxy,
 					Source: s.Name(),
@@ -145,7 +149,7 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (Extract
 		}
 
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, err
+		return extractionResult{}, err
 	}
 
 	ip, trustedCount, debugInfo, err := s.extractor.clientIPFromChainWithDebug(s.Name(), parts)
@@ -153,11 +157,11 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (Extract
 		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
 
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, err
+		return extractionResult{}, err
 	}
 
 	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	result := ExtractionResult{
+	result := extractionResult{
 		IP:                ip,
 		TrustedProxyCount: trustedCount,
 		Source:            s.Name(),
@@ -170,11 +174,11 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (Extract
 	return result, nil
 }
 
-func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	xffValues := r.Header.Values("X-Forwarded-For")
 
 	if len(xffValues) == 0 {
-		return ExtractionResult{}, &ExtractionError{
+		return extractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
@@ -185,7 +189,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 		s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
 			"header_count", len(xffValues),
 		)
-		return ExtractionResult{}, &MultipleHeadersError{
+		return extractionResult{}, &MultipleHeadersError{
 			ExtractionError: ExtractionError{
 				Err:    ErrMultipleXFFHeaders,
 				Source: s.Name(),
@@ -203,7 +207,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
 			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while X-Forwarded-For is present")
 			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-			return ExtractionResult{}, &ProxyValidationError{
+			return extractionResult{}, &ProxyValidationError{
 				ExtractionError: ExtractionError{
 					Err:    ErrUntrustedProxy,
 					Source: s.Name(),
@@ -230,7 +234,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 			}
 		}
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, err
+		return extractionResult{}, err
 	}
 
 	ip, trustedCount, debugInfo, err := s.clientIPFromXFFWithDebug(parts)
@@ -238,11 +242,11 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (Extr
 		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
 
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, err
+		return extractionResult{}, err
 	}
 
 	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	result := ExtractionResult{
+	result := extractionResult{
 		IP:                ip,
 		TrustedProxyCount: trustedCount,
 		Source:            s.Name(),
@@ -269,10 +273,10 @@ func (s *singleHeaderSource) Name() string {
 	return s.sourceName
 }
 
-func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	headerValues := r.Header.Values(s.headerName)
 	if len(headerValues) == 0 {
-		return ExtractionResult{}, &ExtractionError{
+		return extractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
@@ -285,7 +289,7 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 			"header_count", len(headerValues),
 		)
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, &MultipleHeadersError{
+		return extractionResult{}, &MultipleHeadersError{
 			ExtractionError: ExtractionError{
 				Err:    ErrMultipleSingleIPHeaders,
 				Source: s.Name(),
@@ -298,7 +302,7 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 
 	headerValue := headerValues[0]
 	if headerValue == "" {
-		return ExtractionResult{}, &ExtractionError{
+		return extractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
@@ -312,7 +316,7 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 				"header", s.headerName,
 			)
 			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-			return ExtractionResult{}, &ProxyValidationError{
+			return extractionResult{}, &ProxyValidationError{
 				ExtractionError: ExtractionError{
 					Err:    ErrUntrustedProxy,
 					Source: s.Name(),
@@ -328,7 +332,7 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 	ip := parseIP(headerValue)
 	if !s.extractor.isPlausibleClientIP(ip) {
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, &InvalidIPError{
+		return extractionResult{}, &InvalidIPError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
 				Source: s.Name(),
@@ -338,7 +342,7 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (Extr
 	}
 
 	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	return ExtractionResult{IP: normalizeIP(ip), Source: s.Name()}, nil
+	return extractionResult{IP: normalizeIP(ip), Source: s.Name()}, nil
 }
 
 type remoteAddrSource struct {
@@ -349,9 +353,9 @@ func (s *remoteAddrSource) Name() string {
 	return SourceRemoteAddr
 }
 
-func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	if r.RemoteAddr == "" {
-		return ExtractionResult{}, &ExtractionError{
+		return extractionResult{}, &ExtractionError{
 			Err:    ErrSourceUnavailable,
 			Source: s.Name(),
 		}
@@ -360,7 +364,7 @@ func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (Extrac
 	ip := parseIP(r.RemoteAddr)
 	if !s.extractor.isPlausibleClientIP(ip) {
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return ExtractionResult{}, &RemoteAddrError{
+		return extractionResult{}, &RemoteAddrError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
 				Source: s.Name(),
@@ -370,16 +374,16 @@ func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (Extrac
 	}
 
 	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	return ExtractionResult{IP: normalizeIP(ip), Source: s.Name()}, nil
+	return extractionResult{IP: normalizeIP(ip), Source: s.Name()}, nil
 }
 
 type chainedSource struct {
 	extractor *Extractor
-	sources   []Source
+	sources   []sourceExtractor
 	name      string
 }
 
-func newChainedSource(extractor *Extractor, sources ...Source) *chainedSource {
+func newChainedSource(extractor *Extractor, sources ...sourceExtractor) *chainedSource {
 	names := make([]string, len(sources))
 	for i, s := range sources {
 		names[i] = s.Name()
@@ -391,15 +395,15 @@ func newChainedSource(extractor *Extractor, sources ...Source) *chainedSource {
 	}
 }
 
-func newForwardedForSource(extractor *Extractor) Source {
+func newForwardedForSource(extractor *Extractor) sourceExtractor {
 	return &forwardedForSource{extractor: extractor}
 }
 
-func newForwardedSource(extractor *Extractor) Source {
+func newForwardedSource(extractor *Extractor) sourceExtractor {
 	return &forwardedSource{extractor: extractor}
 }
 
-func newSingleHeaderSource(extractor *Extractor, headerName string) Source {
+func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtractor {
 	return &singleHeaderSource{
 		extractor:  extractor,
 		headerName: headerName,
@@ -407,16 +411,16 @@ func newSingleHeaderSource(extractor *Extractor, headerName string) Source {
 	}
 }
 
-func newRemoteAddrSource(extractor *Extractor) Source {
+func newRemoteAddrSource(extractor *Extractor) sourceExtractor {
 	return &remoteAddrSource{extractor: extractor}
 }
 
-func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (ExtractionResult, error) {
+func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	var lastErr error
 	for _, source := range c.sources {
 		// Check if context has been cancelled before attempting next source
 		if ctx.Err() != nil {
-			return ExtractionResult{}, ctx.Err()
+			return extractionResult{}, ctx.Err()
 		}
 
 		result, err := source.Extract(ctx, r)
@@ -428,12 +432,12 @@ func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (Extractio
 		}
 
 		if c.isTerminalError(err) {
-			return ExtractionResult{}, err
+			return extractionResult{}, err
 		}
 
 		lastErr = err
 	}
-	return ExtractionResult{}, lastErr
+	return extractionResult{}, lastErr
 }
 
 func (c *chainedSource) isTerminalError(err error) bool {

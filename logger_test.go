@@ -95,12 +95,12 @@ func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "9.9.9.9")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for multiple X-Forwarded-For headers")
 	}
-	if !errors.Is(result.Err, ErrMultipleXFFHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleXFFHeaders", result.Err)
+	if !errors.Is(err, ErrMultipleXFFHeaders) {
+		t.Fatalf("error = %v, want ErrMultipleXFFHeaders", err)
 	}
 
 	entries := logger.snapshot()
@@ -144,12 +144,12 @@ func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 	req.Header.Add("X-Real-IP", "8.8.8.8")
 	req.Header.Add("X-Real-IP", "9.9.9.9")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for multiple single-IP headers")
 	}
-	if !errors.Is(result.Err, ErrMultipleSingleIPHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", result.Err)
+	if !errors.Is(err, ErrMultipleSingleIPHeaders) {
+		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", err)
 	}
 
 	entries := logger.snapshot()
@@ -190,12 +190,12 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "8.8.8.8, 9.9.9.9, 4.4.4.4")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for overlong X-Forwarded-For chain")
 	}
-	if !errors.Is(result.Err, ErrChainTooLong) {
-		t.Fatalf("error = %v, want ErrChainTooLong", result.Err)
+	if !errors.Is(err, ErrChainTooLong) {
+		t.Fatalf("error = %v, want ErrChainTooLong", err)
 	}
 
 	entries := logger.snapshot()
@@ -239,12 +239,12 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for too few trusted proxies")
 	}
-	if !errors.Is(result.Err, ErrTooFewTrustedProxies) {
-		t.Fatalf("error = %v, want ErrTooFewTrustedProxies", result.Err)
+	if !errors.Is(err, ErrTooFewTrustedProxies) {
+		t.Fatalf("error = %v, want ErrTooFewTrustedProxies", err)
 	}
 
 	entries := logger.snapshot()
@@ -289,12 +289,12 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail when no trusted proxies are present in XFF")
 	}
-	if !errors.Is(result.Err, ErrNoTrustedProxies) {
-		t.Fatalf("error = %v, want ErrNoTrustedProxies", result.Err)
+	if !errors.Is(err, ErrNoTrustedProxies) {
+		t.Fatalf("error = %v, want ErrNoTrustedProxies", err)
 	}
 
 	entries := logger.snapshot()
@@ -339,12 +339,12 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1, 10.0.0.2")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for too many trusted proxies")
 	}
-	if !errors.Is(result.Err, ErrTooManyTrustedProxies) {
-		t.Fatalf("error = %v, want ErrTooManyTrustedProxies", result.Err)
+	if !errors.Is(err, ErrTooManyTrustedProxies) {
+		t.Fatalf("error = %v, want ErrTooManyTrustedProxies", err)
 	}
 
 	entries := logger.snapshot()
@@ -389,12 +389,12 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail for untrusted proxy")
 	}
-	if !errors.Is(result.Err, ErrUntrustedProxy) {
-		t.Fatalf("error = %v, want ErrUntrustedProxy", result.Err)
+	if !errors.Is(err, ErrUntrustedProxy) {
+		t.Fatalf("error = %v, want ErrUntrustedProxy", err)
 	}
 
 	entries := logger.snapshot()
@@ -432,12 +432,12 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 	}
 	req.Header.Set("Forwarded", "for=\"1.1.1.1")
 
-	result := extractor.ExtractIP(req)
-	if result.Valid() {
+	result, err := extractor.Extract(req)
+	if err == nil && result.IP.IsValid() {
 		t.Fatal("expected extraction to fail closed on malformed Forwarded")
 	}
-	if !errors.Is(result.Err, ErrInvalidForwardedHeader) {
-		t.Fatalf("error = %v, want ErrInvalidForwardedHeader", result.Err)
+	if !errors.Is(err, ErrInvalidForwardedHeader) {
+		t.Fatalf("error = %v, want ErrInvalidForwardedHeader", err)
 	}
 	if result.Source != SourceForwarded {
 		t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)

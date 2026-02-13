@@ -86,7 +86,7 @@ func TestIsTrustedProxy(t *testing.T) {
 	}
 
 	extractor := &Extractor{
-		config: &Config{
+		config: &config{
 			trustedProxyCIDRs: cidrs,
 		},
 	}
@@ -220,7 +220,7 @@ func TestValidateProxyCount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					minTrustedProxies: tt.minProxies,
 					maxTrustedProxies: tt.maxProxies,
 					trustedProxyCIDRs: tt.trustedCIDRs,
@@ -284,7 +284,7 @@ func TestAnalyzeChainRightmost_NoCIDRs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					trustedProxyCIDRs: []netip.Prefix{},
 					maxTrustedProxies: tt.maxTrustedProxies,
 					metrics:           noopMetrics{},
@@ -390,7 +390,7 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					trustedProxyCIDRs: cidrs,
 					minTrustedProxies: tt.minProxies,
 					maxTrustedProxies: tt.maxProxies,
@@ -507,7 +507,7 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					trustedProxyCIDRs: cidrs,
 					minTrustedProxies: tt.minProxies,
 					maxTrustedProxies: tt.maxProxies,
@@ -574,7 +574,7 @@ func TestSelectLeftmostUntrustedIP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					trustedProxyCIDRs: cidrs,
 				},
 			}
@@ -695,7 +695,7 @@ func TestIsPlausibleClientIP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor := &Extractor{
-				config: &Config{
+				config: &config{
 					allowPrivateIPs: tt.allowPrivate,
 					metrics:         noopMetrics{},
 				},
@@ -852,7 +852,7 @@ func TestIsReservedIP(t *testing.T) {
 
 func TestIsPlausibleClientIP_ReservedRanges(t *testing.T) {
 	extractor := &Extractor{
-		config: &Config{
+		config: &config{
 			allowPrivateIPs: true, // Allow private but still reject reserved
 			metrics:         noopMetrics{},
 		},

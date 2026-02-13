@@ -75,12 +75,13 @@ if err != nil {
     log.Fatal(err)
 }
 
-result := extractor.ExtractIP(req)
-if result.Valid() {
-    fmt.Printf("Client IP: %s\n", result.IP)
-} else {
-    fmt.Printf("Failed: %v\n", result.Err)
+ip, err := extractor.ExtractAddr(req)
+if err != nil {
+    fmt.Printf("Failed: %v\n", err)
+    return
 }
+
+fmt.Printf("Client IP: %s\n", ip)
 ```
 
 ### Behind reverse proxies
@@ -250,7 +251,18 @@ extractor, err := clientip.New(
 )
 ```
 
+You can also construct metrics explicitly with `clientipprom.New()` or
+`clientipprom.NewWithRegisterer(...)` and pass them via
+`clientip.WithMetrics(...)`.
+
 ## Options
+
+`New(opts...)` accepts one or more `Option` builders.
+
+For one-shot extraction without reusing an extractor, use:
+
+- `ExtractWithOptions(req, opts...)`
+- `ExtractAddrWithOptions(req, opts...)`
 
 - `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in proxy header chains
 - `TrustedCIDRs(...string)` parse CIDR strings in-place
@@ -270,66 +282,86 @@ extractor, err := clientip.New(
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(Logger)` inject logger implementation
 - `WithMetrics(Metrics)` inject custom metrics implementation directly
-- `WithDebugInfo(bool)` include chain analysis in `Result.DebugInfo`
+- `WithMetricsFactory(func() (Metrics, error))` lazily construct metrics after option validation (last metrics option wins)
+- `WithDebugInfo(bool)` include chain analysis in `Extraction.DebugInfo`
 
 Default source order is `SourceRemoteAddr`.
 
 Any header-based source requires trusted upstream proxy ranges (`TrustedCIDRs`, `TrustedProxies`, or one of the trust helpers).
 
-Prometheus adapter options from `github.com/abczzz13/clientip/prometheus`:
+Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
 
-- `WithMetrics()` enable Prometheus metrics with default registerer
-- `WithRegisterer(prometheus.Registerer)` enable Prometheus metrics with custom registerer
-
-Options are applied in order. If multiple metrics options are provided, the last one wins.
+- `WithMetrics()` install Prometheus metrics on default registerer
+- `WithRegisterer(prometheus.Registerer)` install Prometheus metrics on custom registerer
+- `New()` / `NewWithRegisterer(prometheus.Registerer)` for explicit metrics construction
 
 Proxy count bounds (`min`/`max`) apply to trusted proxies present in `Forwarded` (from `for=` values) and `X-Forwarded-For`.
 The immediate proxy (`RemoteAddr`) is validated for trust separately before either header is trusted.
 
-## Result
+## Extraction
 
 ```go
-type Result struct {
+type Extraction struct {
     IP                netip.Addr
     Source            string // "forwarded", "x_forwarded_for", "x_real_ip", "remote_addr", or normalized custom header
-    Err               error
     TrustedProxyCount int
     DebugInfo         *ChainDebugInfo
 }
 
-func (r Result) Valid() bool
+func (e *Extractor) Extract(req *http.Request, overrides ...OverrideOptions) (Extraction, error)
+func (e *Extractor) ExtractAddr(req *http.Request, overrides ...OverrideOptions) (netip.Addr, error)
 ```
+
+When `Extract` returns a non-nil error, the returned `Extraction` value is
+best-effort metadata only (typically `Source` when available). For chain
+diagnostics, inspect typed errors like `ProxyValidationError` and
+`InvalidIPError`.
+
+Per-call overrides let you temporarily adjust policy for a single extraction:
+
+```go
+extraction, err := extractor.Extract(
+    req,
+    clientip.OverrideOptions{
+        SecurityMode: clientip.Set(clientip.SecurityModeLax),
+    },
+)
+```
+
+Multiple `OverrideOptions` values are merged left-to-right; later set values
+win. Only policy fields are overrideable (logger and metrics stay fixed per
+extractor instance).
 
 Custom header names are normalized via `NormalizeSourceName` (lowercase with underscores).
 
 ## Errors
 
 ```go
-result := extractor.ExtractIP(req)
-if !result.Valid() {
+_, err := extractor.Extract(req)
+if err != nil {
     switch {
-    case errors.Is(result.Err, clientip.ErrMultipleXFFHeaders):
+    case errors.Is(err, clientip.ErrMultipleXFFHeaders):
         // Possible spoofing attempt
-    case errors.Is(result.Err, clientip.ErrMultipleSingleIPHeaders):
+    case errors.Is(err, clientip.ErrMultipleSingleIPHeaders):
         // Duplicate single-IP header values received
-    case errors.Is(result.Err, clientip.ErrInvalidForwardedHeader):
+    case errors.Is(err, clientip.ErrInvalidForwardedHeader):
         // Malformed Forwarded header
-    case errors.Is(result.Err, clientip.ErrUntrustedProxy):
+    case errors.Is(err, clientip.ErrUntrustedProxy):
         // Forwarded/XFF came from an untrusted immediate proxy
-    case errors.Is(result.Err, clientip.ErrNoTrustedProxies):
+    case errors.Is(err, clientip.ErrNoTrustedProxies):
         // No trusted proxies found in the chain
-    case errors.Is(result.Err, clientip.ErrTooFewTrustedProxies):
+    case errors.Is(err, clientip.ErrTooFewTrustedProxies):
         // Trusted proxy count is below configured minimum
-    case errors.Is(result.Err, clientip.ErrTooManyTrustedProxies):
+    case errors.Is(err, clientip.ErrTooManyTrustedProxies):
         // Trusted proxy count exceeds configured maximum
-    case errors.Is(result.Err, clientip.ErrInvalidIP):
+    case errors.Is(err, clientip.ErrInvalidIP):
         // Invalid or implausible client IP
-    case errors.Is(result.Err, clientip.ErrSourceUnavailable):
+    case errors.Is(err, clientip.ErrSourceUnavailable):
         // Requested source was not present on this request
     }
 
     var mh *clientip.MultipleHeadersError
-    if errors.As(result.Err, &mh) {
+    if errors.As(err, &mh) {
         // Inspect mh.HeaderName, mh.HeaderCount, or mh.RemoteAddr
     }
 }
@@ -369,7 +401,7 @@ Typed chain-related errors expose additional context:
 - `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.
 - For local co-development, create an uncommitted workspace with `go work init . ./prometheus`.
 - Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`.
-- `just` uses consumer mode for adapter checks by default; override locally with `CLIENTIP_ADAPTER_GOWORK=auto just <target>`.
+- `just` and CI validate the adapter in consumer mode by default (`GOWORK=off`); set `CLIENTIP_ADAPTER_GOWORK=auto` locally when you intentionally want workspace-mode adapter checks.
 - Release in this order: tag root module `vX.Y.Z`, bump `prometheus/go.mod` to that version, then tag adapter module `prometheus/vX.Y.Z`.
 
 ## License

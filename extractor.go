@@ -7,49 +7,49 @@ import (
 	"net/netip"
 )
 
+// Extractor resolves client IP information from HTTP requests.
+//
+// Extractor instances are safe for concurrent reuse.
 type Extractor struct {
-	config *Config
-	source Source
+	config *config
+	source sourceExtractor
 }
 
+// New creates an Extractor from one or more Option builders.
 func New(opts ...Option) (*Extractor, error) {
-	cfg := defaultConfig()
-
-	for _, opt := range opts {
-		if err := opt(cfg); err != nil {
-			return nil, fmt.Errorf("invalid option: %w", err)
-		}
-	}
-
-	if err := cfg.validate(); err != nil {
+	cfg, err := configFromOptions(opts...)
+	if err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	extractor := &Extractor{config: cfg}
+	extractor.source = extractor.buildSourceChain(cfg)
 
-	sources := make([]Source, 0, len(cfg.sourcePriority))
+	return extractor, nil
+}
+
+func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
+	sources := make([]sourceExtractor, 0, len(cfg.sourcePriority))
 	for _, sourceName := range cfg.sourcePriority {
 		resolvedSourceName := canonicalSourceName(sourceName)
-		var source Source
+		var source sourceExtractor
 		switch resolvedSourceName {
 		case SourceForwarded:
-			source = newForwardedSource(extractor)
+			source = newForwardedSource(e)
 		case SourceXForwardedFor:
-			source = newForwardedForSource(extractor)
+			source = newForwardedForSource(e)
 		case SourceXRealIP:
-			source = newSingleHeaderSource(extractor, "X-Real-IP")
+			source = newSingleHeaderSource(e, "X-Real-IP")
 		case SourceRemoteAddr:
-			source = newRemoteAddrSource(extractor)
+			source = newRemoteAddrSource(e)
 		default:
-			// Assume it's a custom header name
-			source = newSingleHeaderSource(extractor, sourceName)
+			// Assume it's a custom header name.
+			source = newSingleHeaderSource(e, sourceName)
 		}
 		sources = append(sources, source)
 	}
 
-	extractor.source = newChainedSource(extractor, sources...)
-
-	return extractor, nil
+	return newChainedSource(e, sources...)
 }
 
 func canonicalSourceName(sourceName string) string {
@@ -67,32 +67,88 @@ func canonicalSourceName(sourceName string) string {
 	}
 }
 
-func (e *Extractor) ExtractIP(r *http.Request) Result {
-	ctx := r.Context()
+// Extract resolves client IP and metadata for the request.
+//
+// When overrides are provided, they are merged left-to-right and applied only
+// for this call.
+func (e *Extractor) Extract(r *http.Request, overrides ...OverrideOptions) (Extraction, error) {
+	activeExtractor := e
+	activeSource := e.source
 
-	extractionResult, err := e.source.Extract(ctx, r)
-	sourceName := e.getSourceName(extractionResult, err)
+	if len(overrides) > 0 {
+		effectiveConfig, err := e.config.withOverrides(overrides...)
+		if err != nil {
+			return Extraction{}, fmt.Errorf("invalid override options: %w", err)
+		}
 
-	if err != nil {
-		return Result{
-			IP:                netip.Addr{},
-			Source:            sourceName,
-			Err:               err,
-			TrustedProxyCount: extractionResult.TrustedProxyCount,
-			DebugInfo:         extractionResult.DebugInfo,
+		if effectiveConfig != e.config {
+			activeExtractor = &Extractor{config: effectiveConfig}
+			activeExtractor.source = activeExtractor.buildSourceChain(effectiveConfig)
+			activeSource = activeExtractor.source
 		}
 	}
 
-	return Result{
-		IP:                normalizeIP(extractionResult.IP),
-		Source:            sourceName,
-		Err:               nil,
-		TrustedProxyCount: extractionResult.TrustedProxyCount,
-		DebugInfo:         extractionResult.DebugInfo,
-	}
+	return activeExtractor.extractWithSource(activeSource, r)
 }
 
-func (e *Extractor) getSourceName(result ExtractionResult, err error) string {
+// ExtractAddr resolves only the client IP address.
+func (e *Extractor) ExtractAddr(r *http.Request, overrides ...OverrideOptions) (netip.Addr, error) {
+	extraction, err := e.Extract(r, overrides...)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+
+	return extraction.IP, nil
+}
+
+// ExtractWithOptions is a one-shot convenience helper.
+//
+// It constructs a temporary extractor from opts and resolves metadata for r.
+func ExtractWithOptions(r *http.Request, opts ...Option) (Extraction, error) {
+	extractor, err := New(opts...)
+	if err != nil {
+		return Extraction{}, err
+	}
+
+	return extractor.Extract(r)
+}
+
+// ExtractAddrWithOptions is a one-shot convenience helper.
+//
+// It constructs a temporary extractor from opts and resolves only the client
+// IP address for r.
+func ExtractAddrWithOptions(r *http.Request, opts ...Option) (netip.Addr, error) {
+	extractor, err := New(opts...)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+
+	return extractor.ExtractAddr(r)
+}
+
+func (e *Extractor) extractWithSource(source sourceExtractor, r *http.Request) (Extraction, error) {
+	ctx := r.Context()
+
+	extractionResult, err := source.Extract(ctx, r)
+	sourceName := e.getSourceName(extractionResult, err)
+
+	if err != nil {
+		return Extraction{
+			Source:            sourceName,
+			TrustedProxyCount: extractionResult.TrustedProxyCount,
+			DebugInfo:         extractionResult.DebugInfo,
+		}, err
+	}
+
+	return Extraction{
+		IP:                normalizeIP(extractionResult.IP),
+		Source:            sourceName,
+		TrustedProxyCount: extractionResult.TrustedProxyCount,
+		DebugInfo:         extractionResult.DebugInfo,
+	}, nil
+}
+
+func (e *Extractor) getSourceName(result extractionResult, err error) string {
 	if err != nil {
 		var sourceErr interface{ SourceName() string }
 		if errors.As(err, &sourceErr) {
