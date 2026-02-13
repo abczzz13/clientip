@@ -109,69 +109,24 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extract
 		}
 	}
 
-	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
-		remoteIP := parseIP(r.RemoteAddr)
-		if !s.extractor.isTrustedProxy(remoteIP) {
-			chain := strings.Join(forwardedValues, ", ")
-			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
-			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while Forwarded is present")
-			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-			return extractionResult{}, &ProxyValidationError{
-				ExtractionError: ExtractionError{
-					Err:    ErrUntrustedProxy,
-					Source: s.Name(),
-				},
-				Chain:             chain,
-				TrustedProxyCount: 0,
-				MinTrustedProxies: s.extractor.config.minTrustedProxies,
-				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
+	return s.extractor.extractChainSource(
+		ctx,
+		r,
+		s.Name(),
+		forwardedValues,
+		strings.Join(forwardedValues, ", "),
+		"request received from untrusted proxy while Forwarded is present",
+		"Forwarded chain exceeds configured maximum length",
+		s.extractor.parseForwardedValues,
+		func(err error) {
+			if !errors.Is(err, ErrInvalidForwardedHeader) {
+				return
 			}
-		}
-	}
 
-	parts, err := s.extractor.parseForwardedValues(forwardedValues)
-	if err != nil {
-		if errors.Is(err, ErrChainTooLong) {
-			var chainErr *ChainTooLongError
-			if errors.As(err, &chainErr) {
-				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "Forwarded chain exceeds configured maximum length",
-					"chain_length", chainErr.ChainLength,
-					"max_length", chainErr.MaxLength,
-				)
-			} else {
-				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "Forwarded chain exceeds configured maximum length")
-			}
-		}
-
-		if errors.Is(err, ErrInvalidForwardedHeader) {
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventMalformedForwarded)
 			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
-		}
-
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return extractionResult{}, err
-	}
-
-	ip, trustedCount, debugInfo, err := s.extractor.clientIPFromChainWithDebug(s.Name(), parts)
-	if err != nil {
-		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
-
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return extractionResult{}, err
-	}
-
-	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	result := extractionResult{
-		IP:                ip,
-		TrustedProxyCount: trustedCount,
-		Source:            s.Name(),
-	}
-
-	if s.extractor.config.debugMode {
-		result.DebugInfo = debugInfo
-	}
-
-	return result, nil
+		},
+	)
 }
 
 func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
@@ -189,6 +144,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extr
 		s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
 			"header_count", len(xffValues),
 		)
+		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return extractionResult{}, &MultipleHeadersError{
 			ExtractionError: ExtractionError{
 				Err:    ErrMultipleXFFHeaders,
@@ -200,67 +156,90 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extr
 		}
 	}
 
-	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
+	return s.extractor.extractChainSource(
+		ctx,
+		r,
+		s.Name(),
+		xffValues,
+		xffValues[0],
+		"request received from untrusted proxy while X-Forwarded-For is present",
+		"X-Forwarded-For chain exceeds configured maximum length",
+		s.extractor.parseXFFValues,
+		nil,
+	)
+}
+
+func (e *Extractor) extractChainSource(
+	ctx context.Context,
+	r *http.Request,
+	sourceName string,
+	headerValues []string,
+	chainForUntrusted string,
+	untrustedProxyMessage string,
+	chainTooLongMessage string,
+	parseValues func([]string) ([]string, error),
+	handleParseError func(error),
+) (extractionResult, error) {
+	if len(e.config.trustedProxyCIDRs) > 0 {
 		remoteIP := parseIP(r.RemoteAddr)
-		if !s.extractor.isTrustedProxy(remoteIP) {
-			chain := xffValues[0]
-			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
-			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while X-Forwarded-For is present")
-			s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+		if !e.isTrustedProxy(remoteIP) {
+			e.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
+			e.logSecurityWarning(ctx, r, sourceName, securityEventUntrustedProxy, untrustedProxyMessage)
+			e.config.metrics.RecordExtractionFailure(sourceName)
 			return extractionResult{}, &ProxyValidationError{
 				ExtractionError: ExtractionError{
 					Err:    ErrUntrustedProxy,
-					Source: s.Name(),
+					Source: sourceName,
 				},
-				Chain:             chain,
+				Chain:             chainForUntrusted,
 				TrustedProxyCount: 0,
-				MinTrustedProxies: s.extractor.config.minTrustedProxies,
-				MaxTrustedProxies: s.extractor.config.maxTrustedProxies,
+				MinTrustedProxies: e.config.minTrustedProxies,
+				MaxTrustedProxies: e.config.maxTrustedProxies,
 			}
 		}
 	}
 
-	parts, err := s.extractor.parseXFFValues(xffValues)
+	parts, err := parseValues(headerValues)
 	if err != nil {
 		if errors.Is(err, ErrChainTooLong) {
 			var chainErr *ChainTooLongError
 			if errors.As(err, &chainErr) {
-				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length",
+				e.logSecurityWarning(ctx, r, sourceName, securityEventChainTooLong, chainTooLongMessage,
 					"chain_length", chainErr.ChainLength,
 					"max_length", chainErr.MaxLength,
 				)
 			} else {
-				s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventChainTooLong, "X-Forwarded-For chain exceeds configured maximum length")
+				e.logSecurityWarning(ctx, r, sourceName, securityEventChainTooLong, chainTooLongMessage)
 			}
 		}
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+
+		if handleParseError != nil {
+			handleParseError(err)
+		}
+
+		e.config.metrics.RecordExtractionFailure(sourceName)
 		return extractionResult{}, err
 	}
 
-	ip, trustedCount, debugInfo, err := s.clientIPFromXFFWithDebug(parts)
+	ip, trustedCount, debugInfo, err := e.clientIPFromChainWithDebug(sourceName, parts)
 	if err != nil {
-		s.extractor.logProxyValidationWarning(ctx, r, s.Name(), err)
-
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+		e.logProxyValidationWarning(ctx, r, sourceName, err)
+		e.config.metrics.RecordExtractionFailure(sourceName)
 		return extractionResult{}, err
 	}
 
-	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
+	e.config.metrics.RecordExtractionSuccess(sourceName)
 	result := extractionResult{
 		IP:                ip,
 		TrustedProxyCount: trustedCount,
-		Source:            s.Name(),
+		Source:            sourceName,
 	}
 
-	if s.extractor.config.debugMode {
+	if e.config.debugMode {
 		result.DebugInfo = debugInfo
 	}
 
 	return result, nil
-}
-
-func (s *forwardedForSource) clientIPFromXFFWithDebug(parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
-	return s.extractor.clientIPFromChainWithDebug(s.Name(), parts)
 }
 
 type singleHeaderSource struct {

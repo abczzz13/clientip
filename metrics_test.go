@@ -171,6 +171,10 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 1 {
 		t.Errorf("security event count for %s = %d, want 1", securityEventMultipleHeaders, got)
 	}
+
+	if got := metrics.getFailureCount(SourceXForwardedFor); got != 1 {
+		t.Errorf("failure count for %s = %d, want 1", SourceXForwardedFor, got)
+	}
 }
 
 func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {

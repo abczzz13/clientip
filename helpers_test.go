@@ -262,6 +262,97 @@ func TestParseIP(t *testing.T) {
 	}
 }
 
+func TestTrimMatchedChar(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		ch    byte
+		want  string
+	}{
+		{
+			name:  "matching double quote delimiter",
+			input: `"203.0.113.1"`,
+			ch:    '"',
+			want:  "203.0.113.1",
+		},
+		{
+			name:  "matching single quote delimiter",
+			input: "'203.0.113.1'",
+			ch:    '\'',
+			want:  "203.0.113.1",
+		},
+		{
+			name:  "non-matching delimiter",
+			input: "203.0.113.1",
+			ch:    '"',
+			want:  "203.0.113.1",
+		},
+		{
+			name:  "too short to trim",
+			input: `"`,
+			ch:    '"',
+			want:  `"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimMatchedChar(tt.input, tt.ch)
+			if got != tt.want {
+				t.Errorf("trimMatchedChar(%q, %q) = %q, want %q", tt.input, tt.ch, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrimMatchedPair(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		start byte
+		end   byte
+		want  string
+	}{
+		{
+			name:  "matching pair",
+			input: "[2001:db8::1]",
+			start: '[',
+			end:   ']',
+			want:  "2001:db8::1",
+		},
+		{
+			name:  "unmatched leading bracket",
+			input: "[2001:db8::1",
+			start: '[',
+			end:   ']',
+			want:  "[2001:db8::1",
+		},
+		{
+			name:  "unmatched trailing bracket",
+			input: "2001:db8::1]",
+			start: '[',
+			end:   ']',
+			want:  "2001:db8::1]",
+		},
+		{
+			name:  "too short to trim",
+			input: "[",
+			start: '[',
+			end:   ']',
+			want:  "[",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimMatchedPair(tt.input, tt.start, tt.end)
+			if got != tt.want {
+				t.Errorf("trimMatchedPair(%q, %q, %q) = %q, want %q", tt.input, tt.start, tt.end, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeIP(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -18,7 +18,6 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 		return nil, nil
 	}
 
-	const typicalChainCapacity = 8
 	parts := make([]string, 0, typicalChainCapacity)
 
 	for _, value := range values {
@@ -41,19 +40,10 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 				continue
 			}
 
-			if len(parts) >= e.config.maxChainLength {
-				e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
-				return nil, &ChainTooLongError{
-					ExtractionError: ExtractionError{
-						Err:    ErrChainTooLong,
-						Source: SourceForwarded,
-					},
-					ChainLength: len(parts) + 1,
-					MaxLength:   e.config.maxChainLength,
-				}
+			parts, err = e.appendChainPart(parts, forwardedFor, SourceForwarded)
+			if err != nil {
+				return nil, err
 			}
-
-			parts = append(parts, forwardedFor)
 		}
 	}
 

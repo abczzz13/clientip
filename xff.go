@@ -28,6 +28,12 @@ var (
 	}
 )
 
+// typicalChainCapacity is the initial capacity used when parsing proxy chains.
+//
+// Most deployments have short chains (around 1-5 hops). Preallocating 8 avoids
+// reallocations in common cases without meaningful memory overhead.
+const typicalChainCapacity = 8
+
 func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 	if !ip.IsValid() {
 		return false
@@ -66,30 +72,36 @@ func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
 		return nil, nil
 	}
 
-	// Use a fixed reasonable capacity based on typical proxy chain lengths.
-	// Most deployments have 1-5 proxies. Allocating 8 avoids reallocation
-	// in the majority of cases while not wasting significant memory.
-	const typicalChainCapacity = 8
 	parts := make([]string, 0, typicalChainCapacity)
 	for _, v := range values {
 		for part := range strings.SplitSeq(v, ",") {
 			if trimmed := strings.TrimSpace(part); trimmed != "" {
-				if len(parts) >= e.config.maxChainLength {
-					e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
-					return nil, &ChainTooLongError{
-						ExtractionError: ExtractionError{
-							Err:    ErrChainTooLong,
-							Source: SourceXForwardedFor,
-						},
-						ChainLength: len(parts) + 1,
-						MaxLength:   e.config.maxChainLength,
-					}
+				var err error
+				parts, err = e.appendChainPart(parts, trimmed, SourceXForwardedFor)
+				if err != nil {
+					return nil, err
 				}
-				parts = append(parts, trimmed)
 			}
 		}
 	}
 	return parts, nil
+}
+
+// appendChainPart appends one parsed chain part while enforcing maxChainLength.
+func (e *Extractor) appendChainPart(parts []string, part, sourceName string) ([]string, error) {
+	if len(parts) >= e.config.maxChainLength {
+		e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
+		return nil, &ChainTooLongError{
+			ExtractionError: ExtractionError{
+				Err:    ErrChainTooLong,
+				Source: sourceName,
+			},
+			ChainLength: len(parts) + 1,
+			MaxLength:   e.config.maxChainLength,
+		}
+	}
+
+	return append(parts, part), nil
 }
 
 type chainAnalysis struct {
@@ -293,19 +305,10 @@ func isReservedIP(ip netip.Addr) bool {
 	return false
 }
 
-func trimMatchedEnds(s, chars string) string {
-	if len(chars) != 1 && len(chars) != 2 {
-		panic("trimMatchedEnds chars must be length 1 or 2")
-	}
-
+// trimMatchedPair removes one leading and trailing delimiter when both match.
+func trimMatchedPair(s string, start, end byte) string {
 	if len(s) < 2 {
 		return s
-	}
-
-	start := chars[0]
-	end := chars[0]
-	if len(chars) == 2 {
-		end = chars[1]
 	}
 
 	if s[0] != start || s[len(s)-1] != end {
@@ -313,6 +316,11 @@ func trimMatchedEnds(s, chars string) string {
 	}
 
 	return s[1 : len(s)-1]
+}
+
+// trimMatchedChar removes one matching leading and trailing character.
+func trimMatchedChar(s string, ch byte) string {
+	return trimMatchedPair(s, ch, ch)
 }
 
 // parseIP extracts an IP address from various formats found in proxy headers.
@@ -335,8 +343,8 @@ func parseIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	s = trimMatchedEnds(s, `"`)
-	s = trimMatchedEnds(s, "'")
+	s = trimMatchedChar(s, '"')
+	s = trimMatchedChar(s, '\'')
 	if s == "" {
 		return netip.Addr{}
 	}
@@ -345,7 +353,7 @@ func parseIP(s string) netip.Addr {
 		s = host
 	}
 
-	s = trimMatchedEnds(s, "[]")
+	s = trimMatchedPair(s, '[', ']')
 
 	ip, _ := netip.ParseAddr(s)
 	return ip
