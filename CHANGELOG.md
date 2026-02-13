@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-02-13
+
 ### Added
 
 - First-class RFC7239 `Forwarded` header support (`for=` chain parsing) with built-in source constant `SourceForwarded`.
