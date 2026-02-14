@@ -15,10 +15,13 @@ func ExampleWithMetrics() {
 		panic(err)
 	}
 
-	result := extractor.ExtractIP(&http.Request{
+	result, err := extractor.Extract(&http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Println(result.IP, result.Source)
 	// Output: 1.1.1.1 remote_addr
@@ -32,10 +35,13 @@ func ExampleWithRegisterer() {
 		panic(err)
 	}
 
-	extractor.ExtractIP(&http.Request{
+	_, err = extractor.Extract(&http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("%.0f\n", counterValue(registry, "ip_extraction_total", map[string]string{
 		"source": clientip.SourceRemoteAddr,
@@ -55,13 +61,16 @@ func ExampleNew() {
 		panic(err)
 	}
 
-	result := extractor.ExtractIP(&http.Request{
+	result, err := extractor.Extract(&http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
 	})
+	if err != nil {
+		panic(err)
+	}
 
-	fmt.Println(result.Valid())
-	// Output: true
+	fmt.Println(result.IP, result.Source)
+	// Output: 1.1.1.1 remote_addr
 }
 
 func ExampleNewWithRegisterer() {
@@ -77,53 +86,17 @@ func ExampleNewWithRegisterer() {
 		panic(err)
 	}
 
-	extractor.ExtractIP(&http.Request{
+	_, err = extractor.Extract(&http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("%.0f\n", counterValue(registry, "ip_extraction_total", map[string]string{
 		"source": clientip.SourceRemoteAddr,
 		"result": "success",
 	}))
 	// Output: 1
-}
-
-func counterValue(registry *prom.Registry, metricName string, labels map[string]string) float64 {
-	metricFamilies, err := registry.Gather()
-	if err != nil {
-		return 0
-	}
-
-	for _, family := range metricFamilies {
-		if family.GetName() != metricName {
-			continue
-		}
-
-		for _, metric := range family.GetMetric() {
-			if metric.GetCounter() == nil {
-				continue
-			}
-
-			actual := make(map[string]string, len(metric.GetLabel()))
-			for _, pair := range metric.GetLabel() {
-				actual[pair.GetName()] = pair.GetValue()
-			}
-
-			matched := true
-			for labelName, labelValue := range labels {
-				if actual[labelName] != labelValue {
-					matched = false
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
-
-			return metric.GetCounter().GetValue()
-		}
-	}
-
-	return 0
 }

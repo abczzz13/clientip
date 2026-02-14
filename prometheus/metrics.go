@@ -3,6 +3,7 @@ package prometheus
 import (
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/abczzz13/clientip"
 	prom "github.com/prometheus/client_golang/prometheus"
@@ -14,14 +15,14 @@ type PrometheusMetrics struct {
 	securityEvents  *prom.CounterVec
 }
 
-// WithMetrics returns a clientip option that installs Prometheus-backed
-// metrics using prom.DefaultRegisterer.
+// WithMetrics returns a clientip.Option that installs
+// Prometheus-backed metrics using prom.DefaultRegisterer.
 func WithMetrics() clientip.Option {
 	return withMetricsFactory(New)
 }
 
-// WithRegisterer returns a clientip option that installs Prometheus-backed
-// metrics using the provided registerer.
+// WithRegisterer returns a clientip.Option that installs
+// Prometheus-backed metrics using the provided registerer.
 //
 // If registerer is nil, prom.DefaultRegisterer is used.
 func WithRegisterer(registerer prom.Registerer) clientip.Option {
@@ -33,28 +34,24 @@ func WithRegisterer(registerer prom.Registerer) clientip.Option {
 // withMetricsFactory adapts a PrometheusMetrics constructor into a
 // clientip.Option.
 func withMetricsFactory(factory func() (*PrometheusMetrics, error)) clientip.Option {
-	return func(c *clientip.Config) error {
-		metrics, err := factory()
-		if err != nil {
-			return err
-		}
-		return clientip.WithMetrics(metrics)(c)
-	}
+	return clientip.WithMetricsFactory(func() (clientip.Metrics, error) {
+		return factory()
+	})
 }
 
-// New creates PrometheusMetrics and registers its collectors on
+// New creates Prometheus-backed metrics and registers its collectors on
 // prom.DefaultRegisterer.
 func New() (*PrometheusMetrics, error) {
-	return NewWithRegisterer(prom.DefaultRegisterer)
+	return NewWithRegisterer(nil)
 }
 
-// NewWithRegisterer creates PrometheusMetrics and registers its collectors on
-// the given registerer.
+// NewWithRegisterer creates Prometheus-backed metrics and registers its
+// collectors on the given registerer.
 //
 // If registerer is nil, prom.DefaultRegisterer is used. If the metrics are
 // already registered, existing compatible collectors are reused.
 func NewWithRegisterer(registerer prom.Registerer) (*PrometheusMetrics, error) {
-	if registerer == nil {
+	if isNilRegisterer(registerer) {
 		registerer = prom.DefaultRegisterer
 	}
 
@@ -87,6 +84,20 @@ func NewWithRegisterer(registerer prom.Registerer) (*PrometheusMetrics, error) {
 		extractionTotal: extractionTotal,
 		securityEvents:  securityEvents,
 	}, nil
+}
+
+func isNilRegisterer(registerer prom.Registerer) bool {
+	if registerer == nil {
+		return true
+	}
+
+	rv := reflect.ValueOf(registerer)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 func registerCounterVec(registerer prom.Registerer, collector *prom.CounterVec, metricName string) (*prom.CounterVec, error) {
