@@ -3,7 +3,8 @@
 Thanks for taking the time to contribute.
 
 ## Development
-- Use the Go version listed in `go.mod`.
+- Minimum supported Go for the core module is `1.21`.
+- Some maintainer tooling currently uses a newer Go toolchain (`1.26+`) in CI.
 - Keep changes focused and include tests where applicable.
 
 ## Running tests
@@ -42,6 +43,8 @@ just ci
 ```
 
 ## Installing tools
+These maintainer tools are pinned and may require Go `1.24+`.
+
 ```bash
 go install github.com/just/just@latest
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0

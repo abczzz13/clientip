@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/abczzz13/clientip v0.0.4
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.21.1
 )
 
 require (
