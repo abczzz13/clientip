@@ -3,7 +3,7 @@ module github.com/abczzz13/clientip/prometheus
 go 1.24
 
 require (
-	github.com/abczzz13/clientip v0.0.3
+	github.com/abczzz13/clientip v0.0.4
 	github.com/prometheus/client_golang v1.23.2
 )
 
