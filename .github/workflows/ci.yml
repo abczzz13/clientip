@@ -44,11 +44,19 @@ jobs:
 
   test-adapter-consumer:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - go-version: "1.21.x"
+            go-label: go121
+          - go-version: "1.26.x"
+            go-label: go126
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26.x"
+          go-version: ${{ matrix.go-version }}
           cache: true
           cache-dependency-path: |
             go.mod
@@ -61,7 +69,7 @@ jobs:
       - run: GOWORK=off go -C prometheus tool cover -func=../coverage-prometheus.out
       - uses: actions/upload-artifact@v6
         with:
-          name: coverage-prometheus-go126
+          name: coverage-prometheus-${{ matrix.go-label }}
           path: coverage-prometheus.out
       - run: before="$(git status --porcelain -- prometheus/go.mod prometheus/go.sum)"; GOWORK=off go -C prometheus mod tidy; after="$(git status --porcelain -- prometheus/go.mod prometheus/go.sum)"; test "$before" = "$after"
 
