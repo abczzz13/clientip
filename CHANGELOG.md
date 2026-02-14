@@ -20,6 +20,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Source-unavailable error values are now reused per source extractor instead of being reallocated on each request.
 - `RemoteAddr` handling now uses dedicated parsing that prefers host extraction, improving behavior for host:port inputs (including non-numeric port suffixes) and reducing false parses.
 - Internal chain analysis now carries the selected client IP through analysis to avoid reparsing and reduce duplicate work.
+- Root module minimum Go version is now `1.21` (down from `1.24`) with `X-Forwarded-For` parsing and integer range loops rewritten to Go 1.21-compatible forms.
+- Prometheus adapter now pins `github.com/prometheus/client_golang` to `v1.21.1`.
+- CI now tests the root module on a Go `1.21.x` + `1.26.x` matrix, keeps adapter consumer-mode checks on Go `1.26.x` until a Go `1.21` root tag is available, and runs lint/security tooling on Go `1.26.x` to satisfy pinned tool requirements.
 
 ## [0.0.4] - 2026-02-13
 

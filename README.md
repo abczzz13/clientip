@@ -27,6 +27,12 @@ go get github.com/abczzz13/clientip/prometheus
 import "github.com/abczzz13/clientip"
 ```
 
+## Compatibility
+
+- Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
+- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) currently validates in consumer mode on Go `1.26.x` because it depends on the latest tagged root module release.
+- Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
+
 ## Quick start
 
 By default, `New()` extracts from `RemoteAddr` only.

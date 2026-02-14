@@ -108,13 +108,15 @@ func trieContains(root *prefixTrieNode, addr []byte) bool {
 		return true
 	}
 
-	for bitIndex := range len(addr) * 8 {
-		node = node.children[addrBit(addr, bitIndex)]
-		if node == nil {
-			return false
-		}
-		if node.terminal {
-			return true
+	for _, octet := range addr {
+		for bit := 7; bit >= 0; bit-- {
+			node = node.children[(octet>>bit)&1]
+			if node == nil {
+				return false
+			}
+			if node.terminal {
+				return true
+			}
 		}
 	}
 

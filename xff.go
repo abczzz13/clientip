@@ -55,13 +55,23 @@ func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
 
 	parts := make([]string, 0, typicalChainCapacity)
 	for _, v := range values {
-		for part := range strings.SplitSeq(v, ",") {
-			if trimmed := strings.TrimSpace(part); trimmed != "" {
+		for {
+			part, rest, found := strings.Cut(v, ",")
+			if found {
+				v = rest
+			}
+
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
 				var err error
 				parts, err = e.appendChainPart(parts, trimmed, SourceXForwardedFor)
 				if err != nil {
 					return nil, err
 				}
+			}
+
+			if !found {
+				break
 			}
 		}
 	}
@@ -265,13 +275,20 @@ func (e *Extractor) selectLeftmostUntrustedIP(parts []string, trustedProxiesFrom
 }
 
 func selectLeftmostUntrustedTrusted(trustedFlags []bool, trustedProxiesFromRight int) int {
-	untrustedPortionEnd := max(len(trustedFlags)-trustedProxiesFromRight, 0)
+	untrustedPortionEnd := len(trustedFlags) - trustedProxiesFromRight
+	if untrustedPortionEnd < 0 {
+		untrustedPortionEnd = 0
+	}
 
-	for i := range untrustedPortionEnd {
+	for i := 0; i < untrustedPortionEnd; i++ {
 		if !trustedFlags[i] {
 			return i
 		}
 	}
 
-	return max(untrustedPortionEnd-1, 0)
+	if untrustedPortionEnd <= 0 {
+		return 0
+	}
+
+	return untrustedPortionEnd - 1
 }
