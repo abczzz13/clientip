@@ -87,15 +87,20 @@ func (e *Extractor) extractChainSource(
 	r *http.Request,
 	sourceName string,
 	headerValues []string,
-	chainForUntrusted string,
+	chainForUntrusted func() string,
 	untrustedProxyMessage string,
 	chainTooLongMessage string,
 	parseValues func([]string) ([]string, error),
 	handleParseError func(error),
 ) (extractionResult, error) {
 	if len(e.config.trustedProxyCIDRs) > 0 {
-		remoteIP := parseIP(r.RemoteAddr)
+		remoteIP := parseRemoteAddr(r.RemoteAddr)
 		if !e.isTrustedProxy(remoteIP) {
+			chain := ""
+			if chainForUntrusted != nil {
+				chain = chainForUntrusted()
+			}
+
 			e.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
 			e.logSecurityWarning(ctx, r, sourceName, securityEventUntrustedProxy, untrustedProxyMessage)
 			e.config.metrics.RecordExtractionFailure(sourceName)
@@ -104,7 +109,7 @@ func (e *Extractor) extractChainSource(
 					Err:    ErrUntrustedProxy,
 					Source: sourceName,
 				},
-				Chain:             chainForUntrusted,
+				Chain:             chain,
 				TrustedProxyCount: 0,
 				MinTrustedProxies: e.config.minTrustedProxies,
 				MaxTrustedProxies: e.config.maxTrustedProxies,

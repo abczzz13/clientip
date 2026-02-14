@@ -19,6 +19,7 @@ vendor/
 
 # Build artifacts
 dist/
+.bench/
 
 # OS/editor files
 .DS_Store

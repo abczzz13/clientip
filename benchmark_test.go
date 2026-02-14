@@ -63,6 +63,26 @@ func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	}
 }
 
+func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceForwarded, SourceRemoteAddr),
+	)
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("Forwarded", "for=1.1.1.1")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
@@ -155,6 +175,26 @@ func BenchmarkExtract_CustomHeader(b *testing.B) {
 	}
 }
 
+func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+	)
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
 func BenchmarkExtract_Parallel(b *testing.B) {
 	extractor, _ := New()
 	req := &http.Request{
@@ -231,6 +271,46 @@ func BenchmarkIsTrustedProxy(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		for _, ip := range testIPs {
 			extractor.isTrustedProxy(ip)
+		}
+	}
+}
+
+func BenchmarkIsTrustedProxy_LargeCIDRSet_Precomputed(b *testing.B) {
+	const prefixCount = 4096
+	prefixes := make([]netip.Prefix, 0, prefixCount)
+	for i := 0; i < prefixCount; i++ {
+		secondOctet := byte((i / 16) % 256)
+		thirdOctet := byte(i % 256)
+		prefixes = append(prefixes, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, secondOctet, thirdOctet, 0}), 24))
+	}
+
+	extractor, _ := New(TrustedProxies(prefixes, 0, 0))
+	ip := netip.MustParseAddr("10.128.8.8")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !extractor.isTrustedProxy(ip) {
+			b.Fatal("expected trusted proxy")
+		}
+	}
+}
+
+func BenchmarkIsTrustedProxy_LargeCIDRSet_LinearFallback(b *testing.B) {
+	const prefixCount = 4096
+	prefixes := make([]netip.Prefix, 0, prefixCount)
+	for i := 0; i < prefixCount; i++ {
+		secondOctet := byte((i / 16) % 256)
+		thirdOctet := byte(i % 256)
+		prefixes = append(prefixes, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, secondOctet, thirdOctet, 0}), 24))
+	}
+
+	extractor := &Extractor{config: &config{trustedProxyCIDRs: prefixes}}
+	ip := netip.MustParseAddr("10.128.8.8")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !extractor.isTrustedProxy(ip) {
+			b.Fatal("expected trusted proxy")
 		}
 	}
 }

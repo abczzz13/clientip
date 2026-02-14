@@ -32,14 +32,99 @@ func parseIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	if host, _, err := net.SplitHostPort(s); err == nil {
-		s = host
+	if looksLikeHostPort(s) {
+		host, ok := splitHostPortHost(s)
+		if !ok {
+			return netip.Addr{}
+		}
+
+		ip, ok := parseHostIP(host)
+		if !ok {
+			return netip.Addr{}
+		}
+
+		return ip
 	}
 
-	s = trimMatchedPair(s, '[', ']')
+	if ip, ok := parseNormalizedIP(s); ok {
+		return ip
+	}
 
-	ip, _ := netip.ParseAddr(s)
+	host, ok := splitHostPortHost(s)
+	if !ok {
+		return netip.Addr{}
+	}
+
+	ip, ok := parseHostIP(host)
+	if !ok {
+		return netip.Addr{}
+	}
+
 	return ip
+}
+
+func parseHostIP(host string) (netip.Addr, bool) {
+	ip, err := netip.ParseAddr(host)
+	if err == nil {
+		return ip, true
+	}
+
+	return parseNormalizedIP(host)
+}
+
+func parseRemoteAddr(s string) netip.Addr {
+	host, ok := splitHostPortHost(s)
+	if !ok {
+		return parseIP(s)
+	}
+
+	ip, ok := parseHostIP(host)
+	if !ok {
+		return netip.Addr{}
+	}
+
+	return ip
+}
+
+func looksLikeHostPort(s string) bool {
+	if len(s) < 3 {
+		return false
+	}
+
+	if s[0] == '[' {
+		end := strings.LastIndexByte(s, ']')
+		return end > 0 && end+1 < len(s) && s[end+1] == ':'
+	}
+
+	colon := strings.LastIndexByte(s, ':')
+	if colon <= 0 || colon == len(s)-1 {
+		return false
+	}
+
+	return strings.IndexByte(s[:colon], ':') == -1
+}
+
+func splitHostPortHost(s string) (string, bool) {
+	host, _, err := net.SplitHostPort(s)
+	if err != nil {
+		return "", false
+	}
+
+	return host, true
+}
+
+func parseNormalizedIP(s string) (netip.Addr, bool) {
+	s = trimMatchedPair(s, '[', ']')
+	if s == "" {
+		return netip.Addr{}, false
+	}
+
+	ip, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+
+	return ip, true
 }
 
 func normalizeIP(ip netip.Addr) netip.Addr {

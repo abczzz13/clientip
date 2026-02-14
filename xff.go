@@ -16,6 +16,10 @@ func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 		return false
 	}
 
+	if e.config.trustedProxyMatch.initialized {
+		return e.config.trustedProxyMatch.contains(ip)
+	}
+
 	for _, cidr := range e.config.trustedProxyCIDRs {
 		if cidr.Contains(ip) {
 			return true
@@ -95,7 +99,7 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 		}
 	}
 
-	analysis, err := e.analyzeChain(parts)
+	analysis, clientIP, err := e.analyzeChainForExtraction(parts, e.config.debugMode)
 
 	var debugInfo *ChainDebugInfo
 	if e.config.debugMode {
@@ -121,7 +125,6 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 	}
 
 	clientIPStr := parts[analysis.clientIndex]
-	clientIP := parseIP(clientIPStr)
 
 	if !e.isPlausibleClientIP(clientIP) {
 		chain := strings.Join(parts, ", ")
@@ -140,27 +143,38 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 	return normalizeIP(clientIP), analysis.trustedCount, debugInfo, nil
 }
 
-func (e *Extractor) analyzeChain(parts []string) (chainAnalysis, error) {
+func (e *Extractor) analyzeChainForExtraction(parts []string, collectTrustedIndices bool) (chainAnalysis, netip.Addr, error) {
 	if len(parts) == 0 {
-		return chainAnalysis{}, nil
+		return chainAnalysis{}, netip.Addr{}, nil
 	}
 
 	if e.config.chainSelection == LeftmostUntrustedIP {
-		return e.analyzeChainLeftmost(parts)
+		return e.analyzeChainLeftmostForExtraction(parts, collectTrustedIndices)
 	}
-	return e.analyzeChainRightmost(parts)
+	return e.analyzeChainRightmostForExtraction(parts, collectTrustedIndices)
 }
 
 func (e *Extractor) analyzeChainRightmost(parts []string) (chainAnalysis, error) {
+	analysis, _, err := e.analyzeChainRightmostForExtraction(parts, true)
+	return analysis, err
+}
+
+func (e *Extractor) analyzeChainRightmostForExtraction(parts []string, collectTrustedIndices bool) (chainAnalysis, netip.Addr, error) {
 	trustedCount := 0
 	clientIndex := 0
-	trustedIndices := make([]int, 0, len(parts))
+	clientIP := netip.Addr{}
+
+	var trustedIndices []int
+	if collectTrustedIndices {
+		trustedIndices = make([]int, 0, len(parts))
+	}
 
 	hasCIDRs := len(e.config.trustedProxyCIDRs) > 0
 
 	for i := len(parts) - 1; i >= 0; i-- {
 		if !hasCIDRs && e.config.maxTrustedProxies > 0 && trustedCount >= e.config.maxTrustedProxies {
 			clientIndex = i
+			clientIP = parseIP(parts[i])
 			break
 		}
 
@@ -168,66 +182,93 @@ func (e *Extractor) analyzeChainRightmost(parts []string) (chainAnalysis, error)
 
 		if hasCIDRs && !e.isTrustedProxy(ip) {
 			clientIndex = i
+			clientIP = ip
 			break
 		}
 
-		trustedIndices = append(trustedIndices, i)
+		if collectTrustedIndices {
+			trustedIndices = append(trustedIndices, i)
+		}
 		trustedCount++
+		clientIP = ip
 	}
 
-	if err := e.validateProxyCount(trustedCount); err != nil {
-		return chainAnalysis{
-			clientIndex:    clientIndex,
-			trustedCount:   trustedCount,
-			trustedIndices: trustedIndices,
-		}, err
-	}
-
-	return chainAnalysis{
+	analysis := chainAnalysis{
 		clientIndex:    clientIndex,
 		trustedCount:   trustedCount,
 		trustedIndices: trustedIndices,
-	}, nil
+	}
+
+	if err := e.validateProxyCount(trustedCount); err != nil {
+		return analysis, netip.Addr{}, err
+	}
+
+	return analysis, clientIP, nil
 }
 
 func (e *Extractor) analyzeChainLeftmost(parts []string) (chainAnalysis, error) {
+	analysis, _, err := e.analyzeChainLeftmostForExtraction(parts, true)
+	return analysis, err
+}
+
+func (e *Extractor) analyzeChainLeftmostForExtraction(parts []string, collectTrustedIndices bool) (chainAnalysis, netip.Addr, error) {
 	if len(e.config.trustedProxyCIDRs) == 0 {
-		return chainAnalysis{clientIndex: 0, trustedCount: 0}, nil
+		analysis := chainAnalysis{clientIndex: 0, trustedCount: 0}
+		return analysis, parseIP(parts[0]), nil
 	}
 
 	trustedCount := 0
-	trustedIndices := make([]int, 0, len(parts))
+	trustedFlags := make([]bool, len(parts))
+
+	var trustedIndices []int
+	if collectTrustedIndices {
+		trustedIndices = make([]int, 0, len(parts))
+	}
+
+	stillTrailingTrusted := true
 
 	for i := len(parts) - 1; i >= 0; i-- {
-		ip := parseIP(parts[i])
-		if !e.isTrustedProxy(ip) {
-			break
+		isTrusted := e.isTrustedProxy(parseIP(parts[i]))
+		trustedFlags[i] = isTrusted
+
+		if stillTrailingTrusted && isTrusted {
+			if collectTrustedIndices {
+				trustedIndices = append(trustedIndices, i)
+			}
+			trustedCount++
+			continue
 		}
-		trustedIndices = append(trustedIndices, i)
-		trustedCount++
+
+		stillTrailingTrusted = false
+	}
+
+	analysis := chainAnalysis{
+		trustedCount:   trustedCount,
+		trustedIndices: trustedIndices,
 	}
 
 	if err := e.validateProxyCount(trustedCount); err != nil {
-		return chainAnalysis{
-			clientIndex:    0,
-			trustedCount:   trustedCount,
-			trustedIndices: trustedIndices,
-		}, err
+		return analysis, netip.Addr{}, err
 	}
 
-	clientIndex := e.selectLeftmostUntrustedIP(parts, trustedCount)
-	return chainAnalysis{
-		clientIndex:    clientIndex,
-		trustedCount:   trustedCount,
-		trustedIndices: trustedIndices,
-	}, nil
+	analysis.clientIndex = selectLeftmostUntrustedTrusted(trustedFlags, trustedCount)
+	return analysis, parseIP(parts[analysis.clientIndex]), nil
 }
 
 func (e *Extractor) selectLeftmostUntrustedIP(parts []string, trustedProxiesFromRight int) int {
-	untrustedPortionEnd := max(len(parts)-trustedProxiesFromRight, 0)
+	trustedFlags := make([]bool, len(parts))
+	for i, part := range parts {
+		trustedFlags[i] = e.isTrustedProxy(parseIP(part))
+	}
+
+	return selectLeftmostUntrustedTrusted(trustedFlags, trustedProxiesFromRight)
+}
+
+func selectLeftmostUntrustedTrusted(trustedFlags []bool, trustedProxiesFromRight int) int {
+	untrustedPortionEnd := max(len(trustedFlags)-trustedProxiesFromRight, 0)
 
 	for i := range untrustedPortionEnd {
-		if !e.isTrustedProxy(parseIP(parts[i])) {
+		if !trustedFlags[i] {
 			return i
 		}
 	}

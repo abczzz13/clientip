@@ -184,6 +184,82 @@ func TestParseIP(t *testing.T) {
 	}
 }
 
+func TestParseRemoteAddr(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    netip.Addr
+		wantErr bool
+	}{
+		{
+			name:  "ipv4 host:port",
+			input: "203.0.113.1:8080",
+			want:  netip.MustParseAddr("203.0.113.1"),
+		},
+		{
+			name:  "ipv6 host:port",
+			input: "[2001:db8::1]:443",
+			want:  netip.MustParseAddr("2001:db8::1"),
+		},
+		{
+			name:  "bare ipv4 fallback",
+			input: "203.0.113.1",
+			want:  netip.MustParseAddr("203.0.113.1"),
+		},
+		{
+			name:  "bare ipv6 fallback",
+			input: "2001:db8::1",
+			want:  netip.MustParseAddr("2001:db8::1"),
+		},
+		{
+			name:  "bracketed ipv6 fallback",
+			input: "[2001:db8::1]",
+			want:  netip.MustParseAddr("2001:db8::1"),
+		},
+		{
+			name:  "quoted ipv4 fallback",
+			input: `"203.0.113.1"`,
+			want:  netip.MustParseAddr("203.0.113.1"),
+		},
+		{
+			name:    "hostname with port",
+			input:   "example.com:443",
+			wantErr: true,
+		},
+		{
+			name:  "non-numeric port is ignored",
+			input: "203.0.113.1:notaport",
+			want:  netip.MustParseAddr("203.0.113.1"),
+		},
+		{
+			name:    "empty",
+			input:   "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseRemoteAddr(tt.input)
+			if tt.wantErr {
+				if got.IsValid() {
+					t.Errorf("parseRemoteAddr(%q) = %v, want invalid", tt.input, got)
+				}
+				return
+			}
+
+			if !got.IsValid() {
+				t.Errorf("parseRemoteAddr(%q) = invalid, want %v", tt.input, tt.want)
+				return
+			}
+
+			if got != tt.want {
+				t.Errorf("parseRemoteAddr(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTrimMatchedChar(t *testing.T) {
 	tests := []struct {
 		name  string

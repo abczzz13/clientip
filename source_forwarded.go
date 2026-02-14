@@ -8,11 +8,13 @@ import (
 )
 
 type forwardedForSource struct {
-	extractor *Extractor
+	extractor      *Extractor
+	unavailableErr error
 }
 
 type forwardedSource struct {
-	extractor *Extractor
+	extractor      *Extractor
+	unavailableErr error
 }
 
 func (s *forwardedForSource) Name() string {
@@ -23,14 +25,27 @@ func (s *forwardedSource) Name() string {
 	return SourceForwarded
 }
 
+func (s *forwardedForSource) sourceUnavailableError() error {
+	if s.unavailableErr != nil {
+		return s.unavailableErr
+	}
+
+	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
+}
+
+func (s *forwardedSource) sourceUnavailableError() error {
+	if s.unavailableErr != nil {
+		return s.unavailableErr
+	}
+
+	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
+}
+
 func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	forwardedValues := r.Header.Values("Forwarded")
 
 	if len(forwardedValues) == 0 {
-		return extractionResult{}, &ExtractionError{
-			Err:    ErrSourceUnavailable,
-			Source: s.Name(),
-		}
+		return extractionResult{}, s.sourceUnavailableError()
 	}
 
 	return s.extractor.extractChainSource(
@@ -38,7 +53,9 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extract
 		r,
 		s.Name(),
 		forwardedValues,
-		strings.Join(forwardedValues, ", "),
+		func() string {
+			return strings.Join(forwardedValues, ", ")
+		},
 		"request received from untrusted proxy while Forwarded is present",
 		"Forwarded chain exceeds configured maximum length",
 		s.extractor.parseForwardedValues,
@@ -57,10 +74,7 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extr
 	xffValues := r.Header.Values("X-Forwarded-For")
 
 	if len(xffValues) == 0 {
-		return extractionResult{}, &ExtractionError{
-			Err:    ErrSourceUnavailable,
-			Source: s.Name(),
-		}
+		return extractionResult{}, s.sourceUnavailableError()
 	}
 
 	if len(xffValues) > 1 {
@@ -85,7 +99,9 @@ func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extr
 		r,
 		s.Name(),
 		xffValues,
-		xffValues[0],
+		func() string {
+			return xffValues[0]
+		},
 		"request received from untrusted proxy while X-Forwarded-For is present",
 		"X-Forwarded-For chain exceeds configured maximum length",
 		s.extractor.parseXFFValues,
