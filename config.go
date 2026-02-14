@@ -137,6 +137,7 @@ func (o OverrideOptions) hasSetValues() bool {
 // It is mutated by Option functions during construction and override merging.
 type config struct {
 	trustedProxyCIDRs []netip.Prefix
+	trustedProxyMatch trustedProxyMatcher
 	minTrustedProxies int
 	maxTrustedProxies int
 
@@ -268,6 +269,7 @@ func configFromOptions(opts ...Option) (*config, error) {
 	}
 
 	appendTrustedProxyCIDRs(cfg, cfg.trustedProxyCIDRs...)
+	cfg.trustedProxyMatch = buildTrustedProxyMatcher(cfg.trustedProxyCIDRs)
 
 	if cfg.useMetricsFactory {
 		if cfg.metricsFactory == nil {
@@ -303,6 +305,7 @@ func configFromOptions(opts ...Option) (*config, error) {
 func (c *config) clone() *config {
 	return &config{
 		trustedProxyCIDRs: clonePrefixes(c.trustedProxyCIDRs),
+		trustedProxyMatch: c.trustedProxyMatch,
 		minTrustedProxies: c.minTrustedProxies,
 		maxTrustedProxies: c.maxTrustedProxies,
 		allowPrivateIPs:   c.allowPrivateIPs,
@@ -337,6 +340,7 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 	}
 
 	effective := c.clone()
+	trustedProxyCIDRsOverridden := false
 
 	for _, override := range overrides {
 		if !override.hasSetValues() {
@@ -345,6 +349,7 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 
 		if override.TrustedProxyCIDRs.isSet() {
 			effective.trustedProxyCIDRs = clonePrefixes(override.TrustedProxyCIDRs.value())
+			trustedProxyCIDRsOverridden = true
 		}
 		if override.MinTrustedProxies.isSet() {
 			effective.minTrustedProxies = override.MinTrustedProxies.value()
@@ -374,7 +379,10 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 		}
 	}
 
-	appendTrustedProxyCIDRs(effective, effective.trustedProxyCIDRs...)
+	if trustedProxyCIDRsOverridden {
+		appendTrustedProxyCIDRs(effective, effective.trustedProxyCIDRs...)
+		effective.trustedProxyMatch = buildTrustedProxyMatcher(effective.trustedProxyCIDRs)
+	}
 
 	if err := effective.validate(); err != nil {
 		return nil, err

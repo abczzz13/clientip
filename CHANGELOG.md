@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- A precomputed trusted-proxy CIDR matcher (binary prefix trie) with dedicated tests and large-CIDR benchmark coverage.
+- New benchmark coverage for `Forwarded` extraction, preferred-source fallback behavior, and trusted-proxy lookup performance at large CIDR scales.
+- New `just` benchmark workflow commands: `bench`, `bench-all`, `bench-save`, `bench-compare-saved`, and `bench-compare`.
+
+### Changed
+
+- Trusted proxy matching now uses the precomputed matcher during extraction, with linear CIDR fallback retained for manually constructed configs.
+- Per-call overrides now preserve the existing trusted-proxy matcher when CIDRs are unchanged and rebuild it only when `TrustedProxyCIDRs` is overridden.
+- Header-chain extraction now defers untrusted-chain string construction until needed, reducing avoidable allocations on the hot path.
+- Source-unavailable error values are now reused per source extractor instead of being reallocated on each request.
+- `RemoteAddr` handling now uses dedicated parsing that prefers host extraction, improving behavior for host:port inputs (including non-numeric port suffixes) and reducing false parses.
+- Internal chain analysis now carries the selected client IP through analysis to avoid reparsing and reduce duplicate work.
+
 ## [0.0.4] - 2026-02-13
 
 ### Added

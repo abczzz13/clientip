@@ -396,6 +396,21 @@ Typed chain-related errors expose additional context:
 
 - O(n) in chain length; extractor is safe for concurrent reuse
 
+Benchmark workflow with `just`:
+
+```bash
+# Capture a stable baseline (6 samples by default)
+just bench-save before "BenchmarkExtract|BenchmarkChainAnalysis|BenchmarkParseIP"
+
+# Make changes, then capture again
+just bench-save after "BenchmarkExtract|BenchmarkChainAnalysis|BenchmarkParseIP"
+
+# Compare with benchstat table output (delta + significance)
+just bench-compare-saved before after
+```
+
+You can compare arbitrary files directly via `just bench-compare <before-file> <after-file>`.
+
 ## Maintainer notes (multi-module)
 
 - `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.

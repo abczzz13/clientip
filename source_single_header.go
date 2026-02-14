@@ -6,22 +6,28 @@ import (
 )
 
 type singleHeaderSource struct {
-	extractor  *Extractor
-	headerName string
-	sourceName string
+	extractor      *Extractor
+	headerName     string
+	sourceName     string
+	unavailableErr error
 }
 
 func (s *singleHeaderSource) Name() string {
 	return s.sourceName
 }
 
+func (s *singleHeaderSource) sourceUnavailableError() error {
+	if s.unavailableErr != nil {
+		return s.unavailableErr
+	}
+
+	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
+}
+
 func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
 	headerValues := r.Header.Values(s.headerName)
 	if len(headerValues) == 0 {
-		return extractionResult{}, &ExtractionError{
-			Err:    ErrSourceUnavailable,
-			Source: s.Name(),
-		}
+		return extractionResult{}, s.sourceUnavailableError()
 	}
 
 	if len(headerValues) > 1 {
@@ -44,14 +50,11 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extr
 
 	headerValue := headerValues[0]
 	if headerValue == "" {
-		return extractionResult{}, &ExtractionError{
-			Err:    ErrSourceUnavailable,
-			Source: s.Name(),
-		}
+		return extractionResult{}, s.sourceUnavailableError()
 	}
 
 	if len(s.extractor.config.trustedProxyCIDRs) > 0 {
-		remoteIP := parseIP(r.RemoteAddr)
+		remoteIP := parseRemoteAddr(r.RemoteAddr)
 		if !s.extractor.isTrustedProxy(remoteIP) {
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventUntrustedProxy)
 			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventUntrustedProxy, "request received from untrusted proxy while single-header source is present",
@@ -88,22 +91,28 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extr
 }
 
 type remoteAddrSource struct {
-	extractor *Extractor
+	extractor      *Extractor
+	unavailableErr error
 }
 
 func (s *remoteAddrSource) Name() string {
 	return SourceRemoteAddr
 }
 
-func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	if r.RemoteAddr == "" {
-		return extractionResult{}, &ExtractionError{
-			Err:    ErrSourceUnavailable,
-			Source: s.Name(),
-		}
+func (s *remoteAddrSource) sourceUnavailableError() error {
+	if s.unavailableErr != nil {
+		return s.unavailableErr
 	}
 
-	ip := parseIP(r.RemoteAddr)
+	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
+}
+
+func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
+	if r.RemoteAddr == "" {
+		return extractionResult{}, s.sourceUnavailableError()
+	}
+
+	ip := parseRemoteAddr(r.RemoteAddr)
 	if !s.extractor.isPlausibleClientIP(ip) {
 		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
 		return extractionResult{}, &RemoteAddrError{

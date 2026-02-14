@@ -409,6 +409,62 @@ func TestConfig_WithOverrides_NoSetValues_ReturnsBase(t *testing.T) {
 	}
 }
 
+func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutCIDROverride(t *testing.T) {
+	base, err := configFromOptions(
+		TrustedCIDRs("10.0.0.0/8", "2001:db8::/32"),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("configFromOptions() error = %v", err)
+	}
+
+	if !base.trustedProxyMatch.initialized {
+		t.Fatal("base matcher should be initialized")
+	}
+
+	effective, err := base.withOverrides(OverrideOptions{SecurityMode: Set(SecurityModeLax)})
+	if err != nil {
+		t.Fatalf("withOverrides() error = %v", err)
+	}
+
+	if effective == base {
+		t.Fatal("withOverrides() should return a cloned config when overrides are set")
+	}
+
+	if effective.trustedProxyMatch != base.trustedProxyMatch {
+		t.Fatal("trusted proxy matcher should be reused when trusted CIDRs are unchanged")
+	}
+}
+
+func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithCIDROverride(t *testing.T) {
+	base, err := configFromOptions(
+		TrustedCIDRs("10.0.0.0/8"),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("configFromOptions() error = %v", err)
+	}
+
+	effective, err := base.withOverrides(OverrideOptions{
+		TrustedProxyCIDRs: Set([]netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")}),
+	})
+	if err != nil {
+		t.Fatalf("withOverrides() error = %v", err)
+	}
+
+	if !effective.trustedProxyMatch.initialized {
+		t.Fatal("trusted proxy matcher should be initialized")
+	}
+
+	if !effective.trustedProxyMatch.contains(netip.MustParseAddr("192.168.1.2")) {
+		t.Fatal("expected overridden matcher to trust new CIDR range")
+	}
+
+	if effective.trustedProxyMatch.contains(netip.MustParseAddr("10.1.2.3")) {
+		t.Fatal("expected overridden matcher to stop trusting previous CIDR range")
+	}
+}
+
 func TestStringers(t *testing.T) {
 	tests := []struct {
 		name string
