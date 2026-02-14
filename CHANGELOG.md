@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-02-14
+
 ### Added
 
 - A precomputed trusted-proxy CIDR matcher (binary prefix trie) with dedicated tests and large-CIDR benchmark coverage.
