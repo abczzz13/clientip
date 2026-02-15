@@ -44,6 +44,21 @@ func TestParseForwardedValues(t *testing.T) {
 			want:   []string{"[2606:4700:4700::1]:8080"},
 		},
 		{
+			name:   "quoted comma is not treated as element delimiter",
+			values: []string{"for=\"1.1.1.1,8.8.8.8\";proto=https"},
+			want:   []string{"1.1.1.1,8.8.8.8"},
+		},
+		{
+			name:   "quoted semicolon is not treated as param delimiter",
+			values: []string{"for=\"1.1.1.1;edge\";proto=https"},
+			want:   []string{"1.1.1.1;edge"},
+		},
+		{
+			name:   "escaped quote remains inside quoted value",
+			values: []string{`for="1.1.1.1\";edge";proto=https`},
+			want:   []string{`1.1.1.1";edge`},
+		},
+		{
 			name:   "ignores element without for parameter",
 			values: []string{"proto=https;by=10.0.0.1, for=8.8.8.8"},
 			want:   []string{"8.8.8.8"},
@@ -61,6 +76,11 @@ func TestParseForwardedValues(t *testing.T) {
 		{
 			name:    "duplicate for parameter",
 			values:  []string{"for=1.1.1.1;for=8.8.8.8"},
+			wantErr: ErrInvalidForwardedHeader,
+		},
+		{
+			name:    "trailing escape in quoted value",
+			values:  []string{`for="1.1.1.1\`},
 			wantErr: ErrInvalidForwardedHeader,
 		},
 	}

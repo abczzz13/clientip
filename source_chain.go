@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/textproto"
 	"strings"
 )
 
@@ -44,6 +45,7 @@ func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtrac
 	return &singleHeaderSource{
 		extractor:      extractor,
 		headerName:     headerName,
+		headerKey:      textproto.CanonicalMIMEHeaderKey(headerName),
 		sourceName:     sourceName,
 		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
