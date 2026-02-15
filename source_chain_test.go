@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"testing"
 )
 
@@ -61,6 +62,7 @@ func TestChainedSource_Extract(t *testing.T) {
 				&singleHeaderSource{
 					extractor:  extractor,
 					headerName: "X-Real-IP",
+					headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
 					sourceName: SourceXRealIP,
 				},
 				&forwardedForSource{extractor: extractor},
@@ -120,6 +122,7 @@ func TestChainedSource_Name(t *testing.T) {
 		&singleHeaderSource{
 			extractor:  extractor,
 			headerName: "X-Real-IP",
+			headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
 			sourceName: SourceXRealIP,
 		},
 		&remoteAddrSource{extractor: extractor},
@@ -155,6 +158,16 @@ func TestSourceFactories(t *testing.T) {
 		source := newSingleHeaderSource(extractor, "X-Real-IP")
 		if source.Name() != SourceXRealIP {
 			t.Errorf("newSingleHeaderSource(X-Real-IP) source name = %q, want %q", source.Name(), SourceXRealIP)
+		}
+
+		single, ok := source.(*singleHeaderSource)
+		if !ok {
+			t.Fatalf("newSingleHeaderSource() type = %T, want *singleHeaderSource", source)
+		}
+
+		wantHeaderKey := textproto.CanonicalMIMEHeaderKey("X-Real-IP")
+		if single.headerKey != wantHeaderKey {
+			t.Errorf("newSingleHeaderSource(X-Real-IP) headerKey = %q, want %q", single.headerKey, wantHeaderKey)
 		}
 	})
 
@@ -244,6 +257,7 @@ func TestSourceUnavailableErrors(t *testing.T) {
 		source := &singleHeaderSource{
 			extractor:  extractor,
 			headerName: "X-Real-IP",
+			headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
 			sourceName: SourceXRealIP,
 		}
 		req := &http.Request{Header: make(http.Header)}

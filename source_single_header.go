@@ -8,6 +8,7 @@ import (
 type singleHeaderSource struct {
 	extractor      *Extractor
 	headerName     string
+	headerKey      string
 	sourceName     string
 	unavailableErr error
 }
@@ -25,7 +26,7 @@ func (s *singleHeaderSource) sourceUnavailableError() error {
 }
 
 func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	headerValues := r.Header.Values(s.headerName)
+	headerValues := r.Header[s.headerKey]
 	if len(headerValues) == 0 {
 		return extractionResult{}, s.sourceUnavailableError()
 	}

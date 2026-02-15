@@ -83,6 +83,26 @@ func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
 	}
 }
 
+func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceForwarded, SourceRemoteAddr),
+	)
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("Forwarded", `for="[2606:4700:4700::1]:8080";proto=https;by=10.0.0.1, for=1.1.1.1`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.Extract(req)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(

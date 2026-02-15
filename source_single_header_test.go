@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"testing"
 )
 
@@ -64,6 +65,7 @@ func TestSingleHeaderSource_Extract(t *testing.T) {
 			source := &singleHeaderSource{
 				extractor:  extractor,
 				headerName: tt.headerName,
+				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
 				sourceName: NormalizeSourceName(tt.headerName),
 			}
 
@@ -102,6 +104,7 @@ func TestSingleHeaderSource_Extract_MultipleHeaderValues(t *testing.T) {
 	source := &singleHeaderSource{
 		extractor:  extractor,
 		headerName: "X-Real-IP",
+		headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
 		sourceName: NormalizeSourceName("X-Real-IP"),
 	}
 
@@ -161,6 +164,7 @@ func TestSingleHeaderSource_Name(t *testing.T) {
 			source := &singleHeaderSource{
 				extractor:  extractor,
 				headerName: tt.headerName,
+				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
 				sourceName: NormalizeSourceName(tt.headerName),
 			}
 

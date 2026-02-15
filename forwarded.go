@@ -1,6 +1,7 @@
 package clientip
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -21,29 +22,25 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 	parts := make([]string, 0, typicalChainCapacity)
 
 	for _, value := range values {
-		elements, err := splitForwardedHeaderValue(value, ',')
-		if err != nil {
-			return nil, invalidForwardedHeaderError(err)
-		}
-
-		for _, element := range elements {
-			element = strings.TrimSpace(element)
-			if element == "" {
-				continue
-			}
-
-			forwardedFor, hasFor, err := parseForwardedElement(element)
-			if err != nil {
-				return nil, invalidForwardedHeaderError(err)
+		err := scanForwardedSegments(value, ',', func(element string) error {
+			forwardedFor, hasFor, parseErr := parseForwardedElement(element)
+			if parseErr != nil {
+				return parseErr
 			}
 			if !hasFor {
-				continue
+				return nil
 			}
 
-			parts, err = e.appendChainPart(parts, forwardedFor, SourceForwarded)
-			if err != nil {
+			var appendErr error
+			parts, appendErr = e.appendChainPart(parts, forwardedFor, SourceForwarded)
+			return appendErr
+		})
+		if err != nil {
+			if errors.Is(err, ErrChainTooLong) {
 				return nil, err
 			}
+
+			return nil, invalidForwardedHeaderError(err)
 		}
 	}
 
@@ -66,49 +63,94 @@ func invalidForwardedHeaderError(err error) error {
 // case-insensitively, and rejects duplicate for parameters in the same
 // element.
 func parseForwardedElement(element string) (forwardedFor string, hasFor bool, err error) {
-	params, err := splitForwardedHeaderValue(element, ';')
-	if err != nil {
-		return "", false, err
-	}
-
-	for _, param := range params {
-		param = strings.TrimSpace(param)
-		if param == "" {
-			continue
-		}
-
+	err = scanForwardedSegments(element, ';', func(param string) error {
 		eq := strings.IndexByte(param, '=')
 		if eq <= 0 {
-			return "", false, fmt.Errorf("invalid forwarded parameter %q", param)
+			return fmt.Errorf("invalid forwarded parameter %q", param)
 		}
 
 		key := strings.TrimSpace(param[:eq])
 		value := strings.TrimSpace(param[eq+1:])
 		if key == "" {
-			return "", false, fmt.Errorf("empty parameter key in %q", param)
+			return fmt.Errorf("empty parameter key in %q", param)
 		}
 		if value == "" {
-			return "", false, fmt.Errorf("empty parameter value for %q", key)
+			return fmt.Errorf("empty parameter value for %q", key)
 		}
 
 		if !strings.EqualFold(key, "for") {
-			continue
+			return nil
 		}
 
 		if hasFor {
-			return "", false, fmt.Errorf("duplicate for parameter in element %q", element)
+			return fmt.Errorf("duplicate for parameter in element %q", element)
 		}
 
 		parsedValue, parseErr := parseForwardedForValue(value)
 		if parseErr != nil {
-			return "", false, parseErr
+			return parseErr
 		}
 
 		forwardedFor = parsedValue
 		hasFor = true
+		return nil
+	})
+	if err != nil {
+		return "", false, err
 	}
 
 	return forwardedFor, hasFor, nil
+}
+
+// scanForwardedSegments splits value by delimiter while respecting quoted
+// segments and escape sequences inside quoted strings.
+func scanForwardedSegments(value string, delimiter byte, onSegment func(string) error) error {
+	start := 0
+	inQuotes := false
+	escaped := false
+
+	for i := 0; i <= len(value); i++ {
+		if i == len(value) {
+			if inQuotes {
+				return fmt.Errorf("unterminated quoted string in %q", value)
+			}
+			if escaped {
+				return fmt.Errorf("unterminated escape in %q", value)
+			}
+		} else {
+			ch := value[i]
+
+			if escaped {
+				escaped = false
+				continue
+			}
+
+			if ch == '\\' && inQuotes {
+				escaped = true
+				continue
+			}
+
+			if ch == '"' {
+				inQuotes = !inQuotes
+				continue
+			}
+
+			if ch != delimiter || inQuotes {
+				continue
+			}
+		}
+
+		segment := strings.TrimSpace(value[start:i])
+		if segment != "" {
+			if err := onSegment(segment); err != nil {
+				return err
+			}
+		}
+
+		start = i + 1
+	}
+
+	return nil
 }
 
 // parseForwardedForValue parses a Forwarded for parameter value.
@@ -143,7 +185,17 @@ func unquoteForwardedValue(value string) (string, error) {
 		return "", fmt.Errorf("invalid quoted string %q", value)
 	}
 
+	inner := value[1 : len(value)-1]
+	if strings.IndexByte(inner, '\\') == -1 {
+		if strings.IndexByte(inner, '"') != -1 {
+			return "", fmt.Errorf("unexpected quote in %q", value)
+		}
+
+		return inner, nil
+	}
+
 	var b strings.Builder
+	b.Grow(len(inner))
 	escaped := false
 
 	for i := 1; i < len(value)-1; i++ {
@@ -172,47 +224,4 @@ func unquoteForwardedValue(value string) (string, error) {
 	}
 
 	return b.String(), nil
-}
-
-// splitForwardedHeaderValue splits value by delimiter while respecting quoted
-// segments and escape sequences inside quoted strings.
-func splitForwardedHeaderValue(value string, delimiter byte) ([]string, error) {
-	segments := make([]string, 0, 4)
-	start := 0
-	inQuotes := false
-	escaped := false
-
-	for i := 0; i < len(value); i++ {
-		ch := value[i]
-
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' && inQuotes {
-			escaped = true
-			continue
-		}
-
-		if ch == '"' {
-			inQuotes = !inQuotes
-			continue
-		}
-
-		if ch == delimiter && !inQuotes {
-			segments = append(segments, value[start:i])
-			start = i + 1
-		}
-	}
-
-	if inQuotes {
-		return nil, fmt.Errorf("unterminated quoted string in %q", value)
-	}
-	if escaped {
-		return nil, fmt.Errorf("unterminated escape in %q", value)
-	}
-
-	segments = append(segments, value[start:])
-	return segments, nil
 }
