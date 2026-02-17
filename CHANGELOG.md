@@ -6,6 +6,21 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Framework-agnostic extraction API: `RequestInput`, `HeaderValues`, `HeaderValuesFunc`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom`.
+- One-shot helpers for framework-agnostic input: `ExtractFromWithOptions` and `ExtractAddrFromWithOptions`.
+- New examples and tests covering framework-style integrations, parity with `net/http` extraction behavior, context/path propagation for logging, and cancellation behavior for framework header providers.
+- Additional `Forwarded` parser tests for quoted delimiters/escapes and malformed quoted-value edge cases.
+- Benchmark coverage for `ExtractFrom` with both `http.Header` and `HeaderValuesFunc` header providers, plus parameter-rich `Forwarded` header extraction.
+
+### Changed
+
+- Internal extraction now keeps `*http.Request` as the core representation; `ExtractFrom` adapts `RequestInput` into a minimal request while preserving existing security behavior for duplicate headers and trusted-proxy validation.
+- `ExtractFrom` now avoids header adaptation work for remote-address-only priority, lazily materializes header maps for custom header providers, and checks `RequestInput.Context` cancellation before consulting header providers.
+- Header-based source extraction now uses canonicalized precomputed header keys with direct map lookups (`http.Header[key]`) on hot paths.
+- `Forwarded` parsing now uses a single-pass segment scanner that respects quoted delimiters and escape sequences while preserving strict malformed-header validation.
+
 ## [0.0.5] - 2026-02-14
 
 ### Added

@@ -1,6 +1,8 @@
 package clientip
 
-import "errors"
+import (
+	"errors"
+)
 
 func errorIsType(err error, target any) bool {
 	if err == nil {

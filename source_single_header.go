@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"context"
+	"errors"
 	"net/http"
 )
 
@@ -109,22 +110,36 @@ func (s *remoteAddrSource) sourceUnavailableError() error {
 }
 
 func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	if r.RemoteAddr == "" {
-		return extractionResult{}, s.sourceUnavailableError()
+	remoteAddr := r.RemoteAddr
+	result, err := s.extractor.extractRemoteAddr(remoteAddr)
+	if err != nil {
+		if errors.Is(err, ErrSourceUnavailable) {
+			return extractionResult{}, s.sourceUnavailableError()
+		}
+
+		return extractionResult{}, err
 	}
 
-	ip := parseRemoteAddr(r.RemoteAddr)
-	if !s.extractor.isPlausibleClientIP(ip) {
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
+	return result, nil
+}
+
+func (e *Extractor) extractRemoteAddr(remoteAddr string) (extractionResult, error) {
+	if remoteAddr == "" {
+		return extractionResult{}, &ExtractionError{Err: ErrSourceUnavailable, Source: SourceRemoteAddr}
+	}
+
+	ip := parseRemoteAddr(remoteAddr)
+	if !e.isPlausibleClientIP(ip) {
+		e.config.metrics.RecordExtractionFailure(SourceRemoteAddr)
 		return extractionResult{}, &RemoteAddrError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
-				Source: s.Name(),
+				Source: SourceRemoteAddr,
 			},
-			RemoteAddr: r.RemoteAddr,
+			RemoteAddr: remoteAddr,
 		}
 	}
 
-	s.extractor.config.metrics.RecordExtractionSuccess(s.Name())
-	return extractionResult{IP: normalizeIP(ip), Source: s.Name()}, nil
+	e.config.metrics.RecordExtractionSuccess(SourceRemoteAddr)
+	return extractionResult{IP: normalizeIP(ip), Source: SourceRemoteAddr}, nil
 }

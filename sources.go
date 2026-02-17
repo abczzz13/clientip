@@ -32,18 +32,24 @@ type sourceExtractor interface {
 }
 
 func requestPath(r *http.Request) string {
-	if r.URL == nil {
+	if r == nil || r.URL == nil {
 		return ""
 	}
+
 	return r.URL.Path
 }
 
 func (e *Extractor) logSecurityWarning(ctx context.Context, r *http.Request, sourceName, event, msg string, attrs ...any) {
+	remoteAddr := ""
+	if r != nil {
+		remoteAddr = r.RemoteAddr
+	}
+
 	baseAttrs := []any{
 		"event", event,
 		"source", sourceName,
 		"path", requestPath(r),
-		"remote_addr", r.RemoteAddr,
+		"remote_addr", remoteAddr,
 	}
 
 	baseAttrs = append(baseAttrs, attrs...)
@@ -94,7 +100,12 @@ func (e *Extractor) extractChainSource(
 	handleParseError func(error),
 ) (extractionResult, error) {
 	if len(e.config.trustedProxyCIDRs) > 0 {
-		remoteIP := parseRemoteAddr(r.RemoteAddr)
+		remoteAddr := ""
+		if r != nil {
+			remoteAddr = r.RemoteAddr
+		}
+
+		remoteIP := parseRemoteAddr(remoteAddr)
 		if !e.isTrustedProxy(remoteIP) {
 			chain := ""
 			if chainForUntrusted != nil {

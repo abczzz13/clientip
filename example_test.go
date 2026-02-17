@@ -1,11 +1,13 @@
 package clientip_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"os"
 
 	"github.com/abczzz13/clientip"
@@ -178,4 +180,28 @@ func ExampleWithSecurityMode_lax() {
 	extraction, _ := extractor.Extract(req)
 	fmt.Println(extraction.IP, extraction.Source)
 	// Output: 1.1.1.1 remote_addr
+}
+
+func ExampleExtractor_ExtractFrom() {
+	extractor, _ := clientip.New(
+		clientip.TrustLoopbackProxy(),
+		clientip.Priority("CF-Connecting-IP", clientip.SourceRemoteAddr),
+	)
+
+	cfHeader := textproto.CanonicalMIMEHeaderKey("CF-Connecting-IP")
+	input := clientip.RequestInput{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Path:       "/framework-request",
+		Headers: clientip.HeaderValuesFunc(func(name string) []string {
+			if name == cfHeader {
+				return []string{"8.8.8.8"}
+			}
+			return nil
+		}),
+	}
+
+	extraction, _ := extractor.ExtractFrom(input)
+	fmt.Println(extraction.IP, extraction.Source)
+	// Output: 8.8.8.8 cf_connecting_ip
 }

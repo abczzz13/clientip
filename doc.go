@@ -1,11 +1,13 @@
-// Package clientip provides secure client IP extraction from HTTP requests with
-// support for proxy chains, trusted proxy validation, and multiple header sources.
+// Package clientip provides secure client IP extraction from HTTP requests and
+// framework-agnostic request inputs with support for proxy chains, trusted
+// proxy validation, and multiple header sources.
 //
 // # Features
 //
 //   - Security-first design with protection against IP spoofing and header injection
 //   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
 //   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
+//   - Framework-friendly RequestInput API for non-net/http integrations
 //   - Safe defaults: RemoteAddr-only unless header sources are explicitly configured
 //   - Deployment presets for common topologies (direct, loopback proxy, VM proxy)
 //   - Optional observability with context-aware logging and pluggable metrics
@@ -27,6 +29,15 @@
 //	}
 //
 //	fmt.Printf("Client IP: %s from %s\n", extraction.IP, extraction.Source)
+//
+// Framework-agnostic input is available via ExtractFrom:
+//
+//	extraction, err := extractor.ExtractFrom(clientip.RequestInput{
+//	    Context:    ctx,
+//	    RemoteAddr: remoteAddr,
+//	    Path:       path,
+//	    Headers:    headerProvider,
+//	})
 //
 // # Behind Reverse Proxy
 //
