@@ -30,7 +30,7 @@ import "github.com/abczzz13/clientip"
 ## Compatibility
 
 - Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
-- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) supports Go `1.21+` and validates in consumer mode on Go `1.21.x` and `1.26.x`.
+- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x`.
 - Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
 
 ## Quick start

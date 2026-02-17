@@ -42,7 +42,7 @@ func (s *forwardedSource) sourceUnavailableError() error {
 }
 
 func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	forwardedValues := r.Header.Values("Forwarded")
+	forwardedValues := r.Header["Forwarded"]
 
 	if len(forwardedValues) == 0 {
 		return extractionResult{}, s.sourceUnavailableError()
@@ -71,7 +71,7 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extract
 }
 
 func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	xffValues := r.Header.Values("X-Forwarded-For")
+	xffValues := r.Header["X-Forwarded-For"]
 
 	if len(xffValues) == 0 {
 		return extractionResult{}, s.sourceUnavailableError()
