@@ -40,11 +40,10 @@ func TestForwardedForSource_Extract(t *testing.T) {
 			wantErrType: &ExtractionError{},
 		},
 		{
-			name:        "multiple XFF headers",
-			xffHeaders:  []string{"1.1.1.1", "8.8.8.8"},
-			wantValid:   false,
-			wantErr:     ErrMultipleXFFHeaders,
-			wantErrType: &MultipleHeadersError{},
+			name:       "multiple XFF headers are combined",
+			xffHeaders: []string{"1.1.1.1", "8.8.8.8"},
+			wantValid:  true,
+			wantIP:     "1.1.1.1",
 		},
 		{
 			name:       "invalid IP in chain",

@@ -98,7 +98,7 @@
 //
 // The package includes several security features:
 //
-//   - Detection of malformed Forwarded headers and duplicate header values
+//   - Detection of malformed Forwarded headers and duplicate single-IP header values
 //   - Immediate proxy trust enforcement before honoring Forwarded/X-Forwarded-For
 //   - Validation of proxy counts (min/max enforcement)
 //   - Chain length limits to prevent DoS

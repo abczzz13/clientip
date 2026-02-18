@@ -146,7 +146,8 @@ input := clientip.RequestInput{
 ```
 
 Important: do not merge repeated header lines into a single comma-joined value.
-Duplicate header detection is a security signal used by strict mode.
+Single-IP sources (for example `X-Real-IP` or custom headers) rely on per-line
+values to detect duplicates in strict mode.
 
 ### Behind reverse proxies
 
@@ -426,8 +427,6 @@ Custom header names are normalized via `NormalizeSourceName` (lowercase with und
 _, err := extractor.Extract(req)
 if err != nil {
     switch {
-    case errors.Is(err, clientip.ErrMultipleXFFHeaders):
-        // Possible spoofing attempt
     case errors.Is(err, clientip.ErrMultipleSingleIPHeaders):
         // Duplicate single-IP header values received
     case errors.Is(err, clientip.ErrInvalidForwardedHeader):
@@ -461,7 +460,7 @@ Typed chain-related errors expose additional context:
 ## Security notes
 
 - Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
-- Rejects multiple `X-Forwarded-For` headers (spoofing defense)
+- Parses multiple `X-Forwarded-For` header lines as one chain (wire order preserved)
 - Rejects multiple values for single-IP headers (for example repeated `X-Real-IP`)
 - Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted proxy prefixes are configured)
 - Requires trusted proxy prefixes for any header-based source

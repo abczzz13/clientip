@@ -171,29 +171,27 @@ func ExampleWithChainSelection_leftmostUntrusted() {
 func ExampleWithSecurityMode_strict() {
 	extractor, _ := clientip.New(
 		clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+		clientip.Priority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeStrict),
 	)
 
 	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-	req.Header.Add("X-Forwarded-For", "8.8.8.8")
-	req.Header.Add("X-Forwarded-For", "9.9.9.9")
+	req.Header.Set("Forwarded", `for="1.1.1.1`)
 
 	extraction, err := extractor.Extract(req)
-	fmt.Println(err == nil, errors.Is(err, clientip.ErrMultipleXFFHeaders), extraction.Source)
-	// Output: false true x_forwarded_for
+	fmt.Println(err == nil, errors.Is(err, clientip.ErrInvalidForwardedHeader), extraction.Source)
+	// Output: false true forwarded
 }
 
 func ExampleWithSecurityMode_lax() {
 	extractor, _ := clientip.New(
 		clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+		clientip.Priority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeLax),
 	)
 
 	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-	req.Header.Add("X-Forwarded-For", "8.8.8.8")
-	req.Header.Add("X-Forwarded-For", "9.9.9.9")
+	req.Header.Set("Forwarded", `for="1.1.1.1`)
 
 	extraction, _ := extractor.Extract(req)
 	fmt.Println(extraction.IP, extraction.Source)

@@ -197,7 +197,7 @@ func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
+func TestMetrics_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
@@ -215,14 +215,21 @@ func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "1.1.1.1")
 
-	_, _ = extractor.Extract(req)
-
-	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 1 {
-		t.Errorf("security event count for %s = %d, want 1", securityEventMultipleHeaders, got)
+	result, err := extractor.Extract(req)
+	if err != nil || !result.IP.IsValid() {
+		t.Fatalf("expected extraction success, got error: %v", err)
 	}
 
-	if got := metrics.getFailureCount(SourceXForwardedFor); got != 1 {
-		t.Errorf("failure count for %s = %d, want 1", SourceXForwardedFor, got)
+	if got := metrics.getSecurityEventCount(securityEventMultipleHeaders); got != 0 {
+		t.Errorf("security event count for %s = %d, want 0", securityEventMultipleHeaders, got)
+	}
+
+	if got := metrics.getSuccessCount(SourceXForwardedFor); got != 1 {
+		t.Errorf("success count for %s = %d, want 1", SourceXForwardedFor, got)
+	}
+
+	if got := metrics.getFailureCount(SourceXForwardedFor); got != 0 {
+		t.Errorf("failure count for %s = %d, want 0", SourceXForwardedFor, got)
 	}
 }
 
