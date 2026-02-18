@@ -106,3 +106,82 @@ jobs:
       - uses: extractions/setup-just@v3
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
       - run: just actionlint
+
+  benchmark-compare:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: off
+      BENCH_PATTERN: 'BenchmarkExtract_(RemoteAddr|XForwardedFor_Simple|XForwardedFor_WithTrustedProxies|Forwarded_Simple|Forwarded_WithParams|XForwardedFor_LongChain|WithDebugInfo|LeftmostUntrustedSelection|Fallback_MissingPreferredHeader)$|BenchmarkExtractFrom_(HTTP_RemoteAddr|HTTP_XForwardedFor_Simple|HeaderValuesFunc_XForwardedFor_Simple)$'
+      BENCH_COUNT: "4"
+      BENCH_TIME: "300ms"
+      BENCHSTAT_VERSION: "v0.0.0-20260211190930-8161c38c6cdc"
+      BENCH_DIR: "bench-results"
+    concurrency:
+      group: benchmark-compare-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+      - run: go install "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}"
+      - name: Compare benchmark samples
+        run: |
+          set -euo pipefail
+          mkdir -p "$BENCH_DIR"
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+
+          echo "Running benchmark sample for base commit: $base_sha"
+          git checkout --detach "$base_sha"
+          go test -run '^$' -bench "$BENCH_PATTERN" -benchmem -count "$BENCH_COUNT" -benchtime "$BENCH_TIME" ./... > "$BENCH_DIR/base.txt"
+          if ! grep -q '^Benchmark' "$BENCH_DIR/base.txt"; then
+            echo "No benchmark output matched BENCH_PATTERN for base commit" >&2
+            exit 1
+          fi
+
+          echo "Running benchmark sample for head commit: $head_sha"
+          git checkout --detach "$head_sha"
+          go test -run '^$' -bench "$BENCH_PATTERN" -benchmem -count "$BENCH_COUNT" -benchtime "$BENCH_TIME" ./... > "$BENCH_DIR/head.txt"
+          if ! grep -q '^Benchmark' "$BENCH_DIR/head.txt"; then
+            echo "No benchmark output matched BENCH_PATTERN for head commit" >&2
+            exit 1
+          fi
+
+          benchstat "$BENCH_DIR/base.txt" "$BENCH_DIR/head.txt" > "$BENCH_DIR/compare.txt"
+
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## PR benchmark comparison"
+            echo ""
+            printf -- "- Pattern: \`%s\`\n" "$BENCH_PATTERN"
+            printf -- "- Samples: \`%s\`\n" "$BENCH_COUNT"
+            printf -- "- Benchtime: \`%s\`\n" "$BENCH_TIME"
+            printf -- "- Base SHA: \`%s\`\n" "${{ github.event.pull_request.base.sha }}"
+            printf -- "- Head SHA: \`%s\`\n" "${{ github.event.pull_request.head.sha }}"
+            echo ""
+            if [ -f "$BENCH_DIR/compare.txt" ]; then
+              echo '```text'
+              cat "$BENCH_DIR/compare.txt"
+              echo '```'
+            else
+              echo "_benchmark comparison output unavailable_"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: benchmark-compare
+          path: ${{ env.BENCH_DIR }}/
+          retention-days: 14
