@@ -107,24 +107,26 @@ func (s SetValue[T]) value() T {
 // Only policy-related fields are overrideable. Logger and Metrics remain fixed
 // at extractor construction time.
 type OverrideOptions struct {
-	TrustedProxyCIDRs SetValue[[]netip.Prefix]
-	MinTrustedProxies SetValue[int]
-	MaxTrustedProxies SetValue[int]
+	TrustedProxyPrefixes SetValue[[]netip.Prefix]
+	MinTrustedProxies    SetValue[int]
+	MaxTrustedProxies    SetValue[int]
 
-	AllowPrivateIPs SetValue[bool]
-	MaxChainLength  SetValue[int]
-	ChainSelection  SetValue[ChainSelection]
-	SecurityMode    SetValue[SecurityMode]
-	DebugInfo       SetValue[bool]
+	AllowPrivateIPs             SetValue[bool]
+	AllowReservedClientPrefixes SetValue[[]netip.Prefix]
+	MaxChainLength              SetValue[int]
+	ChainSelection              SetValue[ChainSelection]
+	SecurityMode                SetValue[SecurityMode]
+	DebugInfo                   SetValue[bool]
 
 	SourcePriority SetValue[[]string]
 }
 
 func (o OverrideOptions) hasSetValues() bool {
-	return o.TrustedProxyCIDRs.isSet() ||
+	return o.TrustedProxyPrefixes.isSet() ||
 		o.MinTrustedProxies.isSet() ||
 		o.MaxTrustedProxies.isSet() ||
 		o.AllowPrivateIPs.isSet() ||
+		o.AllowReservedClientPrefixes.isSet() ||
 		o.MaxChainLength.isSet() ||
 		o.ChainSelection.isSet() ||
 		o.SecurityMode.isSet() ||
@@ -141,11 +143,12 @@ type config struct {
 	minTrustedProxies int
 	maxTrustedProxies int
 
-	allowPrivateIPs bool
-	maxChainLength  int
-	chainSelection  ChainSelection
-	securityMode    SecurityMode
-	debugMode       bool
+	allowPrivateIPs             bool
+	allowReservedClientPrefixes []netip.Prefix
+	maxChainLength              int
+	chainSelection              ChainSelection
+	securityMode                SecurityMode
+	debugMode                   bool
 
 	sourcePriority   []string
 	sourceHeaderKeys []string
@@ -200,6 +203,15 @@ func clonePrefixes(prefixes []netip.Prefix) []netip.Prefix {
 	return cloned
 }
 
+func cloneAddrs(addrs []netip.Addr) []netip.Addr {
+	if addrs == nil {
+		return nil
+	}
+	cloned := make([]netip.Addr, len(addrs))
+	copy(cloned, addrs)
+	return cloned
+}
+
 func cloneStrings(values []string) []string {
 	if values == nil {
 		return nil
@@ -209,31 +221,59 @@ func cloneStrings(values []string) []string {
 	return cloned
 }
 
+func normalizePrefixes(prefixes []netip.Prefix, kind string) ([]netip.Prefix, error) {
+	normalized := make([]netip.Prefix, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		if !prefix.IsValid() {
+			return nil, fmt.Errorf("invalid %s %q", kind, prefix)
+		}
+		normalized = append(normalized, prefix.Masked())
+	}
+
+	return normalized, nil
+}
+
+func normalizeTrustedProxyPrefixes(prefixes []netip.Prefix) ([]netip.Prefix, error) {
+	return normalizePrefixes(prefixes, "trusted proxy prefix")
+}
+
+func normalizeReservedClientPrefixes(prefixes []netip.Prefix) ([]netip.Prefix, error) {
+	return normalizePrefixes(prefixes, "reserved client prefix")
+}
+
+func mergeUniquePrefixes(existing []netip.Prefix, additions ...netip.Prefix) []netip.Prefix {
+	if len(existing) == 0 && len(additions) == 0 {
+		return nil
+	}
+
+	merged := make([]netip.Prefix, 0, len(existing)+len(additions))
+	seen := make(map[netip.Prefix]struct{}, len(existing)+len(additions))
+
+	for _, prefix := range existing {
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		merged = append(merged, prefix)
+	}
+
+	for _, prefix := range additions {
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		merged = append(merged, prefix)
+	}
+
+	return merged
+}
+
 func appendTrustedProxyCIDRs(c *config, prefixes ...netip.Prefix) {
 	if len(prefixes) == 0 {
 		return
 	}
 
-	merged := make([]netip.Prefix, 0, len(c.trustedProxyCIDRs)+len(prefixes))
-	seen := make(map[netip.Prefix]struct{}, len(c.trustedProxyCIDRs)+len(prefixes))
-
-	for _, prefix := range c.trustedProxyCIDRs {
-		if _, ok := seen[prefix]; ok {
-			continue
-		}
-		seen[prefix] = struct{}{}
-		merged = append(merged, prefix)
-	}
-
-	for _, prefix := range prefixes {
-		if _, ok := seen[prefix]; ok {
-			continue
-		}
-		seen[prefix] = struct{}{}
-		merged = append(merged, prefix)
-	}
-
-	c.trustedProxyCIDRs = merged
+	c.trustedProxyCIDRs = mergeUniquePrefixes(c.trustedProxyCIDRs, prefixes...)
 }
 
 func defaultConfig() *config {
@@ -307,21 +347,22 @@ func configFromOptions(opts ...Option) (*config, error) {
 
 func (c *config) clone() *config {
 	return &config{
-		trustedProxyCIDRs: clonePrefixes(c.trustedProxyCIDRs),
-		trustedProxyMatch: c.trustedProxyMatch,
-		minTrustedProxies: c.minTrustedProxies,
-		maxTrustedProxies: c.maxTrustedProxies,
-		allowPrivateIPs:   c.allowPrivateIPs,
-		maxChainLength:    c.maxChainLength,
-		chainSelection:    c.chainSelection,
-		securityMode:      c.securityMode,
-		debugMode:         c.debugMode,
-		sourcePriority:    cloneStrings(c.sourcePriority),
-		sourceHeaderKeys:  cloneStrings(c.sourceHeaderKeys),
-		logger:            c.logger,
-		metrics:           c.metrics,
-		metricsFactory:    c.metricsFactory,
-		useMetricsFactory: c.useMetricsFactory,
+		trustedProxyCIDRs:           clonePrefixes(c.trustedProxyCIDRs),
+		trustedProxyMatch:           c.trustedProxyMatch,
+		minTrustedProxies:           c.minTrustedProxies,
+		maxTrustedProxies:           c.maxTrustedProxies,
+		allowPrivateIPs:             c.allowPrivateIPs,
+		allowReservedClientPrefixes: clonePrefixes(c.allowReservedClientPrefixes),
+		maxChainLength:              c.maxChainLength,
+		chainSelection:              c.chainSelection,
+		securityMode:                c.securityMode,
+		debugMode:                   c.debugMode,
+		sourcePriority:              cloneStrings(c.sourcePriority),
+		sourceHeaderKeys:            cloneStrings(c.sourceHeaderKeys),
+		logger:                      c.logger,
+		metrics:                     c.metrics,
+		metricsFactory:              c.metricsFactory,
+		useMetricsFactory:           c.useMetricsFactory,
 	}
 }
 
@@ -351,8 +392,13 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 			continue
 		}
 
-		if override.TrustedProxyCIDRs.isSet() {
-			effective.trustedProxyCIDRs = clonePrefixes(override.TrustedProxyCIDRs.value())
+		if override.TrustedProxyPrefixes.isSet() {
+			normalized, err := normalizeTrustedProxyPrefixes(override.TrustedProxyPrefixes.value())
+			if err != nil {
+				return nil, err
+			}
+
+			effective.trustedProxyCIDRs = mergeUniquePrefixes(nil, normalized...)
 			trustedProxyCIDRsOverridden = true
 		}
 		if override.MinTrustedProxies.isSet() {
@@ -364,6 +410,14 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 
 		if override.AllowPrivateIPs.isSet() {
 			effective.allowPrivateIPs = override.AllowPrivateIPs.value()
+		}
+		if override.AllowReservedClientPrefixes.isSet() {
+			normalized, err := normalizeReservedClientPrefixes(override.AllowReservedClientPrefixes.value())
+			if err != nil {
+				return nil, err
+			}
+
+			effective.allowReservedClientPrefixes = mergeUniquePrefixes(nil, normalized...)
 		}
 		if override.MaxChainLength.isSet() {
 			effective.maxChainLength = override.MaxChainLength.value()
@@ -385,7 +439,6 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 	}
 
 	if trustedProxyCIDRsOverridden {
-		appendTrustedProxyCIDRs(effective, effective.trustedProxyCIDRs...)
 		effective.trustedProxyMatch = buildTrustedProxyMatcher(effective.trustedProxyCIDRs)
 	}
 

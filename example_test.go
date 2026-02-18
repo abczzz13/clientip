@@ -73,7 +73,9 @@ func ExampleNew_withOptions() {
 	cidrs, _ := netip.ParsePrefix("10.0.0.0/8")
 
 	extractor, err := clientip.New(
-		clientip.TrustedProxies([]netip.Prefix{cidrs}, 1, 2),
+		clientip.TrustProxyPrefixes(cidrs),
+		clientip.MinTrustedProxies(1),
+		clientip.MaxTrustedProxies(2),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.AllowPrivateIPs(false),
 		clientip.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
@@ -89,11 +91,25 @@ func ExampleNew_withOptions() {
 	fmt.Printf("Client IP: %s from source: %s\n", extraction.IP, extraction.Source)
 }
 
+func ExampleAllowReservedClientPrefixes() {
+	extractor, _ := clientip.New(
+		clientip.AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+	)
+
+	req := &http.Request{RemoteAddr: "198.51.100.10:12345", Header: make(http.Header)}
+
+	extraction, _ := extractor.Extract(req)
+	fmt.Println(extraction.IP, extraction.Source)
+	// Output: 198.51.100.10 remote_addr
+}
+
 func ExampleNew_flexibleProxyRange() {
 	cidrs, _ := netip.ParsePrefix("10.0.0.0/8")
 
 	extractor, _ := clientip.New(
-		clientip.TrustedProxies([]netip.Prefix{cidrs}, 1, 3),
+		clientip.TrustProxyPrefixes(cidrs),
+		clientip.MinTrustedProxies(1),
+		clientip.MaxTrustedProxies(3),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 	)
 
@@ -138,7 +154,9 @@ func ExampleWithChainSelection_leftmostUntrusted() {
 	cloudflareCIDRs, _ := netip.ParsePrefix("173.245.48.0/20")
 
 	extractor, _ := clientip.New(
-		clientip.TrustedProxies([]netip.Prefix{cloudflareCIDRs}, 1, 3),
+		clientip.TrustProxyPrefixes(cloudflareCIDRs),
+		clientip.MinTrustedProxies(1),
+		clientip.MaxTrustedProxies(3),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.WithChainSelection(clientip.LeftmostUntrustedIP),
 	)
@@ -152,7 +170,7 @@ func ExampleWithChainSelection_leftmostUntrusted() {
 
 func ExampleWithSecurityMode_strict() {
 	extractor, _ := clientip.New(
-		clientip.TrustProxyIP("1.1.1.1"),
+		clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeStrict),
 	)
@@ -168,7 +186,7 @@ func ExampleWithSecurityMode_strict() {
 
 func ExampleWithSecurityMode_lax() {
 	extractor, _ := clientip.New(
-		clientip.TrustProxyIP("1.1.1.1"),
+		clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 		clientip.WithSecurityMode(clientip.SecurityModeLax),
 	)

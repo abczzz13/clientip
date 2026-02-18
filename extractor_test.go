@@ -234,7 +234,7 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 func TestExtract_XForwardedFor(t *testing.T) {
 	extractor, err := New(
 		TrustLoopbackProxy(),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -426,7 +426,9 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(2),
 		Priority(SourceForwarded),
 	)
 	if err != nil {
@@ -512,7 +514,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 
 func TestExtract_StrictMode_TerminalSecurityErrors(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -540,7 +542,7 @@ func TestExtract_StrictMode_TerminalSecurityErrors(t *testing.T) {
 
 func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -568,7 +570,7 @@ func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 
 func TestExtract_SecurityModeLax_AllowsFallbackOnSecurityErrors(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
@@ -597,7 +599,7 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnSecurityErrors(t *testing.T) {
 
 func TestExtract_SecurityModeLax_AllowsFallbackOnMalformedForwarded(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceForwarded, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
@@ -626,7 +628,7 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnMalformedForwarded(t *testing.T
 
 func TestExtract_ChainTooLong_IsTerminalByDefault(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		MaxChainLength(2),
 	)
@@ -659,7 +661,9 @@ func TestExtract_StrictMode_UntrustedProxy_IsTerminal(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -691,7 +695,9 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnUntrustedProxy(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
@@ -720,7 +726,7 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnUntrustedProxy(t *testing.T) {
 func TestExtract_XRealIP(t *testing.T) {
 	extractor, err := New(
 		TrustLoopbackProxy(),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(
 			SourceXRealIP,
 			SourceXForwardedFor,
@@ -897,7 +903,9 @@ func TestExtract_WithTrustedProxies(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(2),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -992,7 +1000,9 @@ func TestExtract_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustedProxies(cidrs, 0, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(0),
+		MaxTrustedProxies(2),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -1082,10 +1092,114 @@ func TestExtract_AllowPrivateIPs(t *testing.T) {
 	}
 }
 
+func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
+	t.Run("remote reserved allowed", func(t *testing.T) {
+		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "198.51.100.10:8080", Header: make(http.Header)}
+		result, err := extractor.Extract(req)
+		if err != nil {
+			t.Fatalf("Extract() error = %v", err)
+		}
+
+		if got, want := result.IP, netip.MustParseAddr("198.51.100.10"); got != want {
+			t.Fatalf("IP = %s, want %s", got, want)
+		}
+		if got, want := result.Source, SourceRemoteAddr; got != want {
+			t.Fatalf("Source = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("remote reserved not allowlisted", func(t *testing.T) {
+		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("203.0.113.0/24")))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "198.51.100.10:8080", Header: make(http.Header)}
+		_, err = extractor.Extract(req)
+		if !errors.Is(err, ErrInvalidIP) {
+			t.Fatalf("error = %v, want ErrInvalidIP", err)
+		}
+	})
+
+	t.Run("xff reserved allowed", func(t *testing.T) {
+		extractor, err := New(
+			TrustLoopbackProxy(),
+			Priority(SourceXForwardedFor),
+			AllowReservedClientPrefixes(netip.MustParsePrefix("100.64.0.0/10")),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}
+		req.Header.Set("X-Forwarded-For", "100.64.0.1")
+
+		result, err := extractor.Extract(req)
+		if err != nil {
+			t.Fatalf("Extract() error = %v", err)
+		}
+
+		if got, want := result.IP, netip.MustParseAddr("100.64.0.1"); got != want {
+			t.Fatalf("IP = %s, want %s", got, want)
+		}
+		if got, want := result.Source, SourceXForwardedFor; got != want {
+			t.Fatalf("Source = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("private still rejected", func(t *testing.T) {
+		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("192.168.0.0/16")))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "192.168.1.10:8080", Header: make(http.Header)}
+		_, err = extractor.Extract(req)
+		if !errors.Is(err, ErrInvalidIP) {
+			t.Fatalf("error = %v, want ErrInvalidIP", err)
+		}
+	})
+}
+
+func TestExtract_WithOverrides_AllowReservedClientPrefixes(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{RemoteAddr: "198.51.100.10:8080", Header: make(http.Header)}
+
+	_, err = extractor.Extract(req)
+	if !errors.Is(err, ErrInvalidIP) {
+		t.Fatalf("error = %v, want ErrInvalidIP", err)
+	}
+
+	result, err := extractor.Extract(req, OverrideOptions{
+		AllowReservedClientPrefixes: Set([]netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}),
+	})
+	if err != nil {
+		t.Fatalf("Extract() with override error = %v", err)
+	}
+
+	if got, want := result.IP, netip.MustParseAddr("198.51.100.10"); got != want {
+		t.Fatalf("IP = %s, want %s", got, want)
+	}
+	if got, want := result.Source, SourceRemoteAddr; got != want {
+		t.Fatalf("Source = %q, want %q", got, want)
+	}
+}
+
 func TestExtract_WithDebugInfo(t *testing.T) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(2),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithDebugInfo(true),
 	)
@@ -1229,7 +1343,9 @@ func TestExtract_ErrorTypes(t *testing.T) {
 	t.Run("ProxyValidationError", func(t *testing.T) {
 		cidrs, _ := ParseCIDRs("10.0.0.0/8")
 		extractor, err := New(
-			TrustedProxies(cidrs, 2, 3),
+			TrustProxyPrefixes(cidrs...),
+			MinTrustedProxies(2),
+			MaxTrustedProxies(3),
 			Priority(SourceXForwardedFor),
 		)
 		if err != nil {
@@ -1434,7 +1550,7 @@ func TestExtract_NewAPI_Methods(t *testing.T) {
 
 func TestExtract_WithOverrides_LastWins(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("127.0.0.1"),
+		TrustProxyAddrs(netip.MustParseAddr("127.0.0.1")),
 		Priority("X-Frontend-IP", SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeStrict),
 	)
@@ -1559,7 +1675,9 @@ func TestNew_OptionsImmutability(t *testing.T) {
 	priority := []string{SourceXForwardedFor, SourceRemoteAddr}
 
 	extractor, err := New(
-		TrustedProxies(trusted, 0, 0),
+		TrustProxyPrefixes(trusted...),
+		MinTrustedProxies(0),
+		MaxTrustedProxies(0),
 		Priority(priority...),
 	)
 	if err != nil {

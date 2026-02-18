@@ -159,7 +159,9 @@ if err != nil {
 extractor, err := clientip.New(
     // min=0 allows requests where proxy headers contain only the client IP
     // (trusted RemoteAddr is validated separately).
-    clientip.TrustedProxies(cidrs, 0, 3),
+    clientip.TrustProxyPrefixes(cidrs...),
+    clientip.MinTrustedProxies(0),
+    clientip.MaxTrustedProxies(3),
     clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithChainSelection(clientip.RightmostUntrustedIP),
 )
@@ -187,14 +189,14 @@ extractor, err := clientip.New(
 // Strict is default and fails closed on security errors
 // (including malformed Forwarded and invalid present source values).
 strictExtractor, _ := clientip.New(
-    clientip.TrustProxyIP("1.1.1.1"),
+    clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
     clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeStrict),
 )
 
 // Lax mode allows fallback to lower-priority sources after those errors.
 laxExtractor, _ := clientip.New(
-    clientip.TrustProxyIP("1.1.1.1"),
+    clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
     clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeLax),
 )
@@ -331,18 +333,19 @@ For one-shot extraction without reusing an extractor, use:
 - `ExtractFromWithOptions(input, opts...)`
 - `ExtractAddrFromWithOptions(input, opts...)`
 
-- `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in proxy header chains
-- `TrustedCIDRs(...string)` parse CIDR strings in-place
+- `TrustProxyPrefixes(...netip.Prefix)` add trusted proxy network prefixes
 - `TrustLoopbackProxy()` trust loopback upstream proxies (`127.0.0.0/8`, `::1/128`)
 - `TrustPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
 - `TrustLocalProxyDefaults()` trust loopback + private proxy ranges
-- `TrustProxyIP(string)` trust a single upstream proxy IP (exact host prefix)
+- `TrustProxyAddrs(...netip.Addr)` add trusted upstream proxy host addresses
 - `PresetDirectConnection()` remote-address only extraction preset
 - `PresetLoopbackReverseProxy()` loopback reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
 - `PresetVMReverseProxy()` VM/private-network reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
 - `PresetPreferredHeaderThenXFFLax(string)` preferred-header fallback preset in lax mode
-- `MinProxies(int)` / `MaxProxies(int)` set bounds after `TrustedCIDRs`
+- `MinTrustedProxies(int)` / `MaxTrustedProxies(int)` set trusted-proxy count bounds for chain headers
 - `AllowPrivateIPs(bool)` allow private client IPs
+- `AllowReservedClientPrefixes(...netip.Prefix)` explicitly allow selected reserved/special-use client ranges
+- `ParseCIDRs(...string)` parse CIDR strings to `[]netip.Prefix` for typed options
 - `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
 - `WithChainSelection(ChainSelection)` choose `RightmostUntrustedIP` (default) or `LeftmostUntrustedIP`
 - `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`), with at most one chain header source (`SourceForwarded` or `SourceXForwardedFor`) per extractor
@@ -354,7 +357,7 @@ For one-shot extraction without reusing an extractor, use:
 
 Default source order is `SourceRemoteAddr`.
 
-Any header-based source requires trusted upstream proxy ranges (`TrustedCIDRs`, `TrustedProxies`, or one of the trust helpers).
+Any header-based source requires trusted upstream proxy ranges (`TrustProxyPrefixes` or one of the trust helpers).
 
 Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
 
@@ -364,6 +367,9 @@ Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
 
 Proxy count bounds (`min`/`max`) apply to trusted proxies present in `Forwarded` (from `for=` values) and `X-Forwarded-For`.
 The immediate proxy (`RemoteAddr`) is validated for trust separately before either header is trusted.
+
+`AllowReservedClientPrefixes` only bypasses reserved/special-use filtering for matching ranges.
+It does not bypass loopback/link-local/multicast/unspecified rejection, and private-IP policy remains controlled by `AllowPrivateIPs`.
 
 ## Extraction
 
@@ -457,11 +463,11 @@ Typed chain-related errors expose additional context:
 - Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
 - Rejects multiple `X-Forwarded-For` headers (spoofing defense)
 - Rejects multiple values for single-IP headers (for example repeated `X-Real-IP`)
-- Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted CIDRs are configured)
-- Requires trusted proxy CIDRs for any header-based source
+- Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted proxy prefixes are configured)
+- Requires trusted proxy prefixes for any header-based source
 - Allows at most one chain-header source (`Forwarded` or `X-Forwarded-For`) per extractor configuration
 - Enforces trusted proxy count bounds and chain length
-- Filters implausible IPs (loopback, multicast, reserved); optional private IP allowlist
+- Filters implausible IPs (loopback, multicast, reserved); optional private-IP and reserved-prefix allowlists
 - Strict fail-closed behavior is the default (`SecurityModeStrict`) for security-significant errors and invalid present source values
 - Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
 

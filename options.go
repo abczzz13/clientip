@@ -5,29 +5,17 @@ import (
 	"net/netip"
 )
 
-// TrustedProxies sets trusted proxy CIDRs and proxy-count bounds.
-//
-// min and max apply to trusted proxies found in chain-header sources.
-func TrustedProxies(cidrs []netip.Prefix, min, max int) Option {
-	trusted := clonePrefixes(cidrs)
+// TrustProxyPrefixes adds trusted proxy network prefixes.
+func TrustProxyPrefixes(prefixes ...netip.Prefix) Option {
+	prefixes = clonePrefixes(prefixes)
 
 	return func(c *config) error {
-		c.trustedProxyCIDRs = clonePrefixes(trusted)
-		c.minTrustedProxies = min
-		c.maxTrustedProxies = max
-		return nil
-	}
-}
-
-// TrustedCIDRs parses and sets trusted proxy CIDRs.
-func TrustedCIDRs(cidrs ...string) Option {
-	return func(c *config) error {
-		prefixes, err := ParseCIDRs(cidrs...)
+		normalized, err := normalizeTrustedProxyPrefixes(prefixes)
 		if err != nil {
 			return err
 		}
 
-		c.trustedProxyCIDRs = prefixes
+		appendTrustedProxyCIDRs(c, normalized...)
 		return nil
 	}
 }
@@ -57,30 +45,36 @@ func TrustLocalProxyDefaults() Option {
 	}
 }
 
-// TrustProxyIP adds a single trusted proxy host IP.
-func TrustProxyIP(ip string) Option {
+// TrustProxyAddrs adds trusted upstream proxy host addresses.
+func TrustProxyAddrs(addrs ...netip.Addr) Option {
+	addrs = cloneAddrs(addrs)
+
 	return func(c *config) error {
-		parsedIP := parseIP(ip)
-		if !parsedIP.IsValid() {
-			return fmt.Errorf("invalid proxy IP %q", ip)
+		prefixes := make([]netip.Prefix, 0, len(addrs))
+		for _, addr := range addrs {
+			if !addr.IsValid() {
+				return fmt.Errorf("invalid proxy address %q", addr)
+			}
+
+			addr = normalizeIP(addr)
+			prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
 		}
 
-		parsedIP = normalizeIP(parsedIP)
-		appendTrustedProxyCIDRs(c, netip.PrefixFrom(parsedIP, parsedIP.BitLen()))
+		appendTrustedProxyCIDRs(c, prefixes...)
 		return nil
 	}
 }
 
-// MinProxies sets the minimum trusted proxy count for chain-header sources.
-func MinProxies(min int) Option {
+// MinTrustedProxies sets the minimum trusted proxy count for chain-header sources.
+func MinTrustedProxies(min int) Option {
 	return func(c *config) error {
 		c.minTrustedProxies = min
 		return nil
 	}
 }
 
-// MaxProxies sets the maximum trusted proxy count for chain-header sources.
-func MaxProxies(max int) Option {
+// MaxTrustedProxies sets the maximum trusted proxy count for chain-header sources.
+func MaxTrustedProxies(max int) Option {
 	return func(c *config) error {
 		c.maxTrustedProxies = max
 		return nil
@@ -91,6 +85,21 @@ func MaxProxies(max int) Option {
 func AllowPrivateIPs(allow bool) Option {
 	return func(c *config) error {
 		c.allowPrivateIPs = allow
+		return nil
+	}
+}
+
+// AllowReservedClientPrefixes configures reserved client prefixes to explicitly allow.
+func AllowReservedClientPrefixes(prefixes ...netip.Prefix) Option {
+	prefixes = clonePrefixes(prefixes)
+
+	return func(c *config) error {
+		normalized, err := normalizeReservedClientPrefixes(prefixes)
+		if err != nil {
+			return err
+		}
+
+		c.allowReservedClientPrefixes = mergeUniquePrefixes(c.allowReservedClientPrefixes, normalized...)
 		return nil
 	}
 }

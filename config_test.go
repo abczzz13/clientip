@@ -19,15 +19,16 @@ func (*testTypedNilMetrics) RecordExtractionFailure(string) {}
 func (*testTypedNilMetrics) RecordSecurityEvent(string) {}
 
 type configSnapshot struct {
-	TrustedProxyCIDRs []string
-	MinTrustedProxies int
-	MaxTrustedProxies int
-	AllowPrivateIPs   bool
-	MaxChainLength    int
-	ChainSelection    ChainSelection
-	SecurityMode      SecurityMode
-	DebugMode         bool
-	SourcePriority    []string
+	TrustedProxyCIDRs     []string
+	MinTrustedProxies     int
+	MaxTrustedProxies     int
+	AllowPrivateIPs       bool
+	AllowReservedPrefixes []string
+	MaxChainLength        int
+	ChainSelection        ChainSelection
+	SecurityMode          SecurityMode
+	DebugMode             bool
+	SourcePriority        []string
 }
 
 func snapshotConfig(cfg *config) configSnapshot {
@@ -37,16 +38,25 @@ func snapshotConfig(cfg *config) configSnapshot {
 	}
 
 	return configSnapshot{
-		TrustedProxyCIDRs: trusted,
-		MinTrustedProxies: cfg.minTrustedProxies,
-		MaxTrustedProxies: cfg.maxTrustedProxies,
-		AllowPrivateIPs:   cfg.allowPrivateIPs,
-		MaxChainLength:    cfg.maxChainLength,
-		ChainSelection:    cfg.chainSelection,
-		SecurityMode:      cfg.securityMode,
-		DebugMode:         cfg.debugMode,
-		SourcePriority:    cloneStrings(cfg.sourcePriority),
+		TrustedProxyCIDRs:     trusted,
+		MinTrustedProxies:     cfg.minTrustedProxies,
+		MaxTrustedProxies:     cfg.maxTrustedProxies,
+		AllowPrivateIPs:       cfg.allowPrivateIPs,
+		AllowReservedPrefixes: cidrStrings(cfg.allowReservedClientPrefixes),
+		MaxChainLength:        cfg.maxChainLength,
+		ChainSelection:        cfg.chainSelection,
+		SecurityMode:          cfg.securityMode,
+		DebugMode:             cfg.debugMode,
+		SourcePriority:        cloneStrings(cfg.sourcePriority),
 	}
+}
+
+func cidrStrings(prefixes []netip.Prefix) []string {
+	values := make([]string, len(prefixes))
+	for i, prefix := range prefixes {
+		values[i] = prefix.String()
+	}
+	return values
 }
 
 func TestNew_ConfigScenarios(t *testing.T) {
@@ -59,25 +69,29 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		{
 			name: "default",
 			want: configSnapshot{
-				TrustedProxyCIDRs: []string{},
-				MinTrustedProxies: 0,
-				MaxTrustedProxies: 0,
-				AllowPrivateIPs:   false,
-				MaxChainLength:    DefaultMaxChainLength,
-				ChainSelection:    RightmostUntrustedIP,
-				SecurityMode:      SecurityModeStrict,
-				DebugMode:         false,
-				SourcePriority:    []string{SourceRemoteAddr},
+				TrustedProxyCIDRs:     []string{},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceRemoteAddr},
 			},
 		},
 		{
 			name: "configured options",
 			opts: []Option{
-				TrustedProxies([]netip.Prefix{
+				TrustProxyPrefixes(
 					netip.MustParsePrefix("10.0.0.0/8"),
 					netip.MustParsePrefix("172.16.0.0/12"),
-				}, 1, 3),
+				),
+				MinTrustedProxies(1),
+				MaxTrustedProxies(3),
 				AllowPrivateIPs(true),
+				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
 				MaxChainLength(42),
 				WithChainSelection(LeftmostUntrustedIP),
 				WithSecurityMode(SecurityModeLax),
@@ -85,15 +99,16 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				Priority(SourceXForwardedFor, SourceRemoteAddr),
 			},
 			want: configSnapshot{
-				TrustedProxyCIDRs: []string{"10.0.0.0/8", "172.16.0.0/12"},
-				MinTrustedProxies: 1,
-				MaxTrustedProxies: 3,
-				AllowPrivateIPs:   true,
-				MaxChainLength:    42,
-				ChainSelection:    LeftmostUntrustedIP,
-				SecurityMode:      SecurityModeLax,
-				DebugMode:         true,
-				SourcePriority:    []string{SourceXForwardedFor, SourceRemoteAddr},
+				TrustedProxyCIDRs:     []string{"10.0.0.0/8", "172.16.0.0/12"},
+				MinTrustedProxies:     1,
+				MaxTrustedProxies:     3,
+				AllowPrivateIPs:       true,
+				AllowReservedPrefixes: []string{"198.51.100.0/24"},
+				MaxChainLength:        42,
+				ChainSelection:        LeftmostUntrustedIP,
+				SecurityMode:          SecurityModeLax,
+				DebugMode:             true,
+				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
 			},
 		},
 		{
@@ -104,21 +119,65 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				WithSecurityMode(SecurityModeLax),
 			},
 			want: configSnapshot{
-				TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
-				MinTrustedProxies: 0,
-				MaxTrustedProxies: 0,
-				AllowPrivateIPs:   false,
-				MaxChainLength:    DefaultMaxChainLength,
-				ChainSelection:    RightmostUntrustedIP,
-				SecurityMode:      SecurityModeLax,
-				DebugMode:         false,
-				SourcePriority:    []string{SourceXForwardedFor, SourceRemoteAddr},
+				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeLax,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
 			},
 		},
 		{
-			name:        "invalid cidr helper",
-			opts:        []Option{TrustedCIDRs("not-a-cidr")},
-			wantErrText: "invalid CIDR",
+			name: "merge trusted proxy prefixes",
+			opts: []Option{
+				TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
+				TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12")),
+			},
+			want: configSnapshot{
+				TrustedProxyCIDRs:     []string{"10.0.0.0/8", "172.16.0.0/12"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceRemoteAddr},
+			},
+		},
+		{
+			name: "merge reserved client prefixes",
+			opts: []Option{
+				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24")),
+			},
+			want: configSnapshot{
+				TrustedProxyCIDRs:     []string{},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{"198.51.100.0/24", "203.0.113.0/24"},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceRemoteAddr},
+			},
+		},
+		{
+			name:        "invalid trusted prefix helper",
+			opts:        []Option{TrustProxyPrefixes(netip.Prefix{})},
+			wantErrText: "invalid trusted proxy prefix",
+		},
+		{
+			name:        "invalid allow reserved prefix helper",
+			opts:        []Option{AllowReservedClientPrefixes(netip.Prefix{})},
+			wantErrText: "invalid reserved client prefix",
 		},
 	}
 
@@ -156,13 +215,13 @@ func TestNew_InvalidOptions(t *testing.T) {
 	}{
 		{
 			name:        "min exceeds max",
-			opts:        []Option{TrustedCIDRs("10.0.0.0/8"), MinProxies(5), MaxProxies(2)},
+			opts:        []Option{TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), MinTrustedProxies(5), MaxTrustedProxies(2)},
 			wantErrText: "minTrustedProxies",
 		},
 		{
 			name:        "header source without trusted proxies",
 			opts:        []Option{Priority(SourceXForwardedFor)},
-			wantErrText: "header-based sources require trusted proxy CIDRs",
+			wantErrText: "header-based sources require trusted proxy prefixes",
 		},
 		{
 			name:        "invalid chain selection",
@@ -190,18 +249,18 @@ func TestNew_InvalidOptions(t *testing.T) {
 			wantErrText: "metrics cannot be nil",
 		},
 		{
-			name:        "invalid trust proxy ip helper",
-			opts:        []Option{TrustProxyIP("not-an-ip")},
-			wantErrText: "invalid proxy IP",
+			name:        "invalid trust proxy addr helper",
+			opts:        []Option{TrustProxyAddrs(netip.Addr{})},
+			wantErrText: "invalid proxy address",
 		},
 		{
 			name:        "leftmost without trusted proxies",
 			opts:        []Option{Priority(SourceXForwardedFor), WithChainSelection(LeftmostUntrustedIP)},
-			wantErrText: "LeftmostUntrustedIP selection requires trustedProxyCIDRs",
+			wantErrText: "LeftmostUntrustedIP selection requires trusted proxy prefixes",
 		},
 		{
 			name:        "multiple chain sources",
-			opts:        []Option{TrustedCIDRs("10.0.0.0/8"), Priority(SourceForwarded, SourceXForwardedFor), WithLogger(logger)},
+			opts:        []Option{TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), Priority(SourceForwarded, SourceXForwardedFor), WithLogger(logger)},
 			wantErrText: "priority cannot include both",
 		},
 		{
@@ -326,15 +385,16 @@ func TestConfig_WithOverrides(t *testing.T) {
 				{SecurityMode: Set(SecurityModeStrict)},
 			},
 			want: configSnapshot{
-				TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
-				MinTrustedProxies: 0,
-				MaxTrustedProxies: 0,
-				AllowPrivateIPs:   false,
-				MaxChainLength:    DefaultMaxChainLength,
-				ChainSelection:    RightmostUntrustedIP,
-				SecurityMode:      SecurityModeStrict,
-				DebugMode:         false,
-				SourcePriority:    []string{SourceXForwardedFor, SourceRemoteAddr},
+				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
 			},
 		},
 		{
@@ -343,15 +403,58 @@ func TestConfig_WithOverrides(t *testing.T) {
 				{SourcePriority: Set([]string{SourceRemoteAddr})},
 			},
 			want: configSnapshot{
-				TrustedProxyCIDRs: []string{"127.0.0.0/8", "::1/128"},
-				MinTrustedProxies: 0,
-				MaxTrustedProxies: 0,
-				AllowPrivateIPs:   false,
-				MaxChainLength:    DefaultMaxChainLength,
-				ChainSelection:    RightmostUntrustedIP,
-				SecurityMode:      SecurityModeStrict,
-				DebugMode:         false,
-				SourcePriority:    []string{SourceRemoteAddr},
+				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceRemoteAddr},
+			},
+		},
+		{
+			name: "override trusted prefixes normalizes and dedupes",
+			overrides: []OverrideOptions{
+				{TrustedProxyPrefixes: Set([]netip.Prefix{
+					netip.MustParsePrefix("10.0.0.1/8"),
+					netip.MustParsePrefix("10.0.0.2/8"),
+				})},
+			},
+			want: configSnapshot{
+				TrustedProxyCIDRs:     []string{"10.0.0.0/8"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+			},
+		},
+		{
+			name: "override reserved allowlist",
+			overrides: []OverrideOptions{
+				{AllowReservedClientPrefixes: Set([]netip.Prefix{
+					netip.MustParsePrefix("198.51.100.10/24"),
+					netip.MustParsePrefix("198.51.100.0/24"),
+				})},
+			},
+			want: configSnapshot{
+				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{"198.51.100.0/24"},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
 			},
 		},
 		{
@@ -360,6 +463,20 @@ func TestConfig_WithOverrides(t *testing.T) {
 				{SourcePriority: Set([]string{})},
 			},
 			wantErrText: "at least one source required",
+		},
+		{
+			name: "invalid trusted prefix override",
+			overrides: []OverrideOptions{
+				{TrustedProxyPrefixes: Set([]netip.Prefix{{}})},
+			},
+			wantErrText: "invalid trusted proxy prefix",
+		},
+		{
+			name: "invalid reserved prefix override",
+			overrides: []OverrideOptions{
+				{AllowReservedClientPrefixes: Set([]netip.Prefix{{}})},
+			},
+			wantErrText: "invalid reserved client prefix",
 		},
 	}
 
@@ -409,9 +526,9 @@ func TestConfig_WithOverrides_NoSetValues_ReturnsBase(t *testing.T) {
 	}
 }
 
-func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutCIDROverride(t *testing.T) {
+func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutPrefixOverride(t *testing.T) {
 	base, err := configFromOptions(
-		TrustedCIDRs("10.0.0.0/8", "2001:db8::/32"),
+		TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -432,13 +549,13 @@ func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutCIDROverride(t 
 	}
 
 	if effective.trustedProxyMatch != base.trustedProxyMatch {
-		t.Fatal("trusted proxy matcher should be reused when trusted CIDRs are unchanged")
+		t.Fatal("trusted proxy matcher should be reused when trusted proxy prefixes are unchanged")
 	}
 }
 
-func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithCIDROverride(t *testing.T) {
+func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithPrefixOverride(t *testing.T) {
 	base, err := configFromOptions(
-		TrustedCIDRs("10.0.0.0/8"),
+		TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -446,7 +563,7 @@ func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithCIDROverride(t *tes
 	}
 
 	effective, err := base.withOverrides(OverrideOptions{
-		TrustedProxyCIDRs: Set([]netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")}),
+		TrustedProxyPrefixes: Set([]netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")}),
 	})
 	if err != nil {
 		t.Fatalf("withOverrides() error = %v", err)

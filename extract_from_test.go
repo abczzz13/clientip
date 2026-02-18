@@ -24,7 +24,7 @@ func (p *panicOnNilHeaderProvider) Values(string) []string {
 
 func TestExtractFrom_ParityWithExtract(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestExtractFrom_RemoteAddrOnlyDoesNotRequestHeaders(t *testing.T) {
 
 func TestExtractFrom_TypedNilHeaderProviderTreatedAsAbsent(t *testing.T) {
 	extractor, err := New(
-		TrustProxyIP("8.8.8.8"),
+		TrustProxyAddrs(netip.MustParseAddr("8.8.8.8")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -229,7 +229,7 @@ func TestExtractFrom_RemoteAddrOnly_RespectsCanceledContext(t *testing.T) {
 
 	t.Run("override_to_remote_addr_priority", func(t *testing.T) {
 		extractor, err := New(
-			TrustProxyIP("8.8.8.8"),
+			TrustProxyAddrs(netip.MustParseAddr("8.8.8.8")),
 			Priority(SourceXForwardedFor, SourceRemoteAddr),
 		)
 		if err != nil {
@@ -254,7 +254,7 @@ func TestExtractFrom_CanceledContext_DoesNotRequestHeaders(t *testing.T) {
 	cancel()
 
 	extractor, err := New(
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
@@ -283,7 +283,7 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {

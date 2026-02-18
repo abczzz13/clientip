@@ -50,7 +50,7 @@ func TestTrustedProxyMatcher_ZeroPrefix(t *testing.T) {
 }
 
 func TestIsTrustedProxy_UsesPrecomputedMatcher(t *testing.T) {
-	extractor, err := New(TrustedCIDRs("10.0.0.0/8"))
+	extractor, err := New(TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

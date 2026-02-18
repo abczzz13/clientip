@@ -13,6 +13,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - New examples and tests covering framework-style integrations, parity with `net/http` extraction behavior, context/path propagation for logging, and cancellation behavior for framework header providers.
 - Additional `Forwarded` parser tests for quoted delimiters/escapes and malformed quoted-value edge cases.
 - Benchmark coverage for `ExtractFrom` with both `http.Header` and `HeaderValuesFunc` header providers, plus parameter-rich `Forwarded` header extraction.
+- New option `AllowReservedClientPrefixes(...netip.Prefix)` to explicitly allow selected reserved/special-use client ranges.
 
 ### Changed
 
@@ -20,6 +21,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - `ExtractFrom` now avoids header adaptation work for remote-address-only priority, lazily materializes header maps for custom header providers, and checks `RequestInput.Context` cancellation before consulting header providers.
 - Header-based source extraction now uses canonicalized precomputed header keys with direct map lookups (`http.Header[key]`) on hot paths.
 - `Forwarded` parsing now uses a single-pass segment scanner that respects quoted delimiters and escape sequences while preserving strict malformed-header validation.
+- Option APIs are now typed-first: trusted proxy configuration now uses `TrustProxyPrefixes`, `TrustProxyAddrs`, `MinTrustedProxies`, and `MaxTrustedProxies`; reserved-range allowlisting now uses `AllowReservedClientPrefixes`; and per-call overrides use `TrustedProxyPrefixes` and `AllowReservedClientPrefixes` fields. This replaces `TrustedProxies`, `TrustedCIDRs`, `TrustProxyIP`, `MinProxies`, `MaxProxies`, and `AllowReservedClientCIDRs`.
 
 ## [0.0.5] - 2026-02-14
 

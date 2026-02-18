@@ -710,3 +710,38 @@ func TestIsPlausibleClientIP_ReservedRanges(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPlausibleClientIP_AllowReservedClientPrefixes(t *testing.T) {
+	extractor := &Extractor{
+		config: &config{
+			allowReservedClientPrefixes: []netip.Prefix{
+				netip.MustParsePrefix("100.64.0.0/10"),
+				netip.MustParsePrefix("2001:db8::/32"),
+			},
+			metrics: noopMetrics{},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		ip     string
+		wantOk bool
+	}{
+		{name: "allowlisted reserved IPv4", ip: "100.64.0.1", wantOk: true},
+		{name: "non-allowlisted reserved IPv4", ip: "198.51.100.1", wantOk: false},
+		{name: "allowlisted reserved IPv6", ip: "2001:db8::1", wantOk: true},
+		{name: "non-allowlisted reserved IPv6", ip: "64:ff9b::808:808", wantOk: false},
+		{name: "private remains rejected", ip: "192.168.1.1", wantOk: false},
+		{name: "public remains allowed", ip: "8.8.8.8", wantOk: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := netip.MustParseAddr(tt.ip)
+			got := extractor.isPlausibleClientIP(ip)
+			if got != tt.wantOk {
+				t.Errorf("isPlausibleClientIP(%s) = %v, want %v", tt.ip, got, tt.wantOk)
+			}
+		})
+	}
+}

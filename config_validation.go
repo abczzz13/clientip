@@ -17,7 +17,7 @@ func (c *config) validate() error {
 		return fmt.Errorf("minTrustedProxies (%d) cannot exceed maxTrustedProxies (%d)", c.minTrustedProxies, c.maxTrustedProxies)
 	}
 	if c.minTrustedProxies > 0 && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("minTrustedProxies > 0 requires trustedProxyCIDRs to be configured for security validation; to skip validation and trust all proxies, use TrustedCIDRs(\"0.0.0.0/0\", \"::/0\")")
+		return fmt.Errorf("minTrustedProxies > 0 requires trusted proxy prefixes to be configured for security validation; to skip validation and trust all proxies, use TrustProxyPrefixes(netip.MustParsePrefix(\"0.0.0.0/0\"), netip.MustParsePrefix(\"::/0\"))")
 	}
 	if c.maxChainLength <= 0 {
 		return fmt.Errorf("maxChainLength must be > 0, got %d", c.maxChainLength)
@@ -38,11 +38,11 @@ func (c *config) validate() error {
 	}
 
 	if hasChainSource && c.chainSelection == LeftmostUntrustedIP && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("LeftmostUntrustedIP selection requires trustedProxyCIDRs to be configured; without CIDR validation, this selection provides no security benefit over RightmostUntrustedIP")
+		return fmt.Errorf("LeftmostUntrustedIP selection requires trusted proxy prefixes to be configured; without trusted-proxy validation, this selection provides no security benefit over RightmostUntrustedIP")
 	}
 
 	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("header-based sources require trusted proxy CIDRs; configure TrustedCIDRs/TrustedProxies or trust helpers such as TrustLoopbackProxy, TrustPrivateProxyRanges, or TrustProxyIP")
+		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure TrustProxyPrefixes or trust helpers such as TrustLoopbackProxy, TrustPrivateProxyRanges, TrustLocalProxyDefaults, or TrustProxyAddrs")
 	}
 
 	if isNilLogger(c.logger) {
