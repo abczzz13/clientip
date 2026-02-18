@@ -25,33 +25,17 @@ func (s *forwardedSource) Name() string {
 	return SourceForwarded
 }
 
-func (s *forwardedForSource) sourceUnavailableError() error {
-	if s.unavailableErr != nil {
-		return s.unavailableErr
-	}
-
-	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
-}
-
-func (s *forwardedSource) sourceUnavailableError() error {
-	if s.unavailableErr != nil {
-		return s.unavailableErr
-	}
-
-	return &ExtractionError{Err: ErrSourceUnavailable, Source: s.Name()}
-}
-
 func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
+	sourceName := s.Name()
 	forwardedValues := r.Header["Forwarded"]
-
 	if len(forwardedValues) == 0 {
-		return extractionResult{}, s.sourceUnavailableError()
+		return extractionResult{}, sourceUnavailableError(s.unavailableErr, sourceName)
 	}
 
 	return s.extractor.extractChainSource(
 		ctx,
 		r,
-		s.Name(),
+		sourceName,
 		forwardedValues,
 		func() string {
 			return strings.Join(forwardedValues, ", ")
@@ -65,42 +49,25 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extract
 			}
 
 			s.extractor.config.metrics.RecordSecurityEvent(securityEventMalformedForwarded)
-			s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
+			s.extractor.logSecurityWarning(ctx, r, sourceName, securityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
 		},
 	)
 }
 
 func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
+	sourceName := s.Name()
 	xffValues := r.Header["X-Forwarded-For"]
-
 	if len(xffValues) == 0 {
-		return extractionResult{}, s.sourceUnavailableError()
-	}
-
-	if len(xffValues) > 1 {
-		s.extractor.config.metrics.RecordSecurityEvent(securityEventMultipleHeaders)
-		s.extractor.logSecurityWarning(ctx, r, s.Name(), securityEventMultipleHeaders, "multiple X-Forwarded-For headers received - possible spoofing attempt",
-			"header_count", len(xffValues),
-		)
-		s.extractor.config.metrics.RecordExtractionFailure(s.Name())
-		return extractionResult{}, &MultipleHeadersError{
-			ExtractionError: ExtractionError{
-				Err:    ErrMultipleXFFHeaders,
-				Source: s.Name(),
-			},
-			HeaderCount: len(xffValues),
-			HeaderName:  "X-Forwarded-For",
-			RemoteAddr:  r.RemoteAddr,
-		}
+		return extractionResult{}, sourceUnavailableError(s.unavailableErr, sourceName)
 	}
 
 	return s.extractor.extractChainSource(
 		ctx,
 		r,
-		s.Name(),
+		sourceName,
 		xffValues,
 		func() string {
-			return xffValues[0]
+			return strings.Join(xffValues, ", ")
 		},
 		"request received from untrusted proxy while X-Forwarded-For is present",
 		"X-Forwarded-For chain exceeds configured maximum length",

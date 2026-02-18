@@ -19,7 +19,7 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 		return nil, nil
 	}
 
-	parts := make([]string, 0, typicalChainCapacity)
+	parts := make([]string, 0, e.chainPartsCapacity(values))
 
 	for _, value := range values {
 		err := scanForwardedSegments(value, ',', func(element string) error {

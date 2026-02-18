@@ -35,7 +35,6 @@ func TestExtractFrom_ParityWithExtract(t *testing.T) {
 		name    string
 		headers []string
 		remote  string
-		wantErr error
 	}{
 		{
 			name:   "remote_addr_only",
@@ -50,7 +49,6 @@ func TestExtractFrom_ParityWithExtract(t *testing.T) {
 			name:    "duplicate_xff",
 			remote:  "1.1.1.1:8080",
 			headers: []string{"8.8.8.8", "9.9.9.9"},
-			wantErr: ErrMultipleXFFHeaders,
 		},
 	}
 
@@ -75,19 +73,6 @@ func TestExtractFrom_ParityWithExtract(t *testing.T) {
 				Path:       req.URL.Path,
 				Headers:    req.Header,
 			})
-
-			if tt.wantErr != nil {
-				if !errors.Is(httpErr, tt.wantErr) {
-					t.Fatalf("Extract() error = %v, want %v", httpErr, tt.wantErr)
-				}
-				if !errors.Is(inputErr, tt.wantErr) {
-					t.Fatalf("ExtractFrom() error = %v, want %v", inputErr, tt.wantErr)
-				}
-				if inputExtraction.Source != httpExtraction.Source {
-					t.Fatalf("source mismatch: ExtractFrom=%q Extract=%q", inputExtraction.Source, httpExtraction.Source)
-				}
-				return
-			}
 
 			if httpErr != nil {
 				t.Fatalf("Extract() error = %v", httpErr)
@@ -285,6 +270,7 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 		WithLogger(logger),
 		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor),
+		MaxChainLength(1),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -305,10 +291,10 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 		Headers:    headers,
 	})
 	if err == nil && result.IP.IsValid() {
-		t.Fatal("expected extraction failure for duplicate X-Forwarded-For headers")
+		t.Fatal("expected extraction failure for overlong X-Forwarded-For chain")
 	}
-	if !errors.Is(err, ErrMultipleXFFHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleXFFHeaders", err)
+	if !errors.Is(err, ErrChainTooLong) {
+		t.Fatalf("error = %v, want ErrChainTooLong", err)
 	}
 
 	entries := logger.snapshot()
@@ -324,7 +310,7 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 	assertCommonSecurityWarningAttrs(
 		t,
 		entry.attrs,
-		securityEventMultipleHeaders,
+		securityEventChainTooLong,
 		SourceXForwardedFor,
 		"/from-input",
 		"1.1.1.1:8080",

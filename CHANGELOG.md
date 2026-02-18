@@ -17,10 +17,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
-- Internal extraction now keeps `*http.Request` as the core representation; `ExtractFrom` adapts `RequestInput` into a minimal request while preserving existing security behavior for duplicate headers and trusted-proxy validation.
+- Internal extraction now keeps `*http.Request` as the core representation; `ExtractFrom` adapts `RequestInput` into a minimal request while preserving existing security behavior for duplicate single-IP headers and trusted-proxy validation.
 - `ExtractFrom` now avoids header adaptation work for remote-address-only priority, lazily materializes header maps for custom header providers, and checks `RequestInput.Context` cancellation before consulting header providers.
 - Header-based source extraction now uses canonicalized precomputed header keys with direct map lookups (`http.Header[key]`) on hot paths.
 - `Forwarded` parsing now uses a single-pass segment scanner that respects quoted delimiters and escape sequences while preserving strict malformed-header validation.
+- `X-Forwarded-For` extraction now combines multiple header lines into one logical chain (matching `Forwarded`) instead of treating duplicates as a terminal error, and no longer emits the `multiple_headers` security event for this case.
+- Removed `ErrMultipleXFFHeaders`; duplicate-line handling for `X-Forwarded-For` is no longer an error condition.
 - Option APIs are now typed-first: trusted proxy configuration now uses `TrustProxyPrefixes`, `TrustProxyAddrs`, `MinTrustedProxies`, and `MaxTrustedProxies`; reserved-range allowlisting now uses `AllowReservedClientPrefixes`; and per-call overrides use `TrustedProxyPrefixes` and `AllowReservedClientPrefixes` fields. This replaces `TrustedProxies`, `TrustedCIDRs`, `TrustProxyIP`, `MinProxies`, `MaxProxies`, and `AllowReservedClientCIDRs`.
 
 ## [0.0.5] - 2026-02-14

@@ -97,7 +97,6 @@ func (c *chainedSource) isTerminalError(err error) bool {
 	}
 
 	return errors.Is(err, ErrInvalidIP) ||
-		errors.Is(err, ErrMultipleXFFHeaders) ||
 		errors.Is(err, ErrMultipleSingleIPHeaders) ||
 		errors.Is(err, ErrUntrustedProxy) ||
 		errors.Is(err, ErrNoTrustedProxies) ||

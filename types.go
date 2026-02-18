@@ -16,10 +16,6 @@ var (
 	// request.
 	ErrSourceUnavailable = errors.New("source unavailable")
 
-	// ErrMultipleXFFHeaders indicates multiple X-Forwarded-For header lines were
-	// received.
-	ErrMultipleXFFHeaders = errors.New("multiple X-Forwarded-For headers received")
-
 	// ErrMultipleSingleIPHeaders indicates multiple values were provided for a
 	// single-IP header source.
 	ErrMultipleSingleIPHeaders = errors.New("multiple single-IP headers received")

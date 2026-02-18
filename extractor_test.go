@@ -152,7 +152,7 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 		}
 	})
 
-	t.Run("X-Forwarded-For alias preserves multiple-header defense", func(t *testing.T) {
+	t.Run("X-Forwarded-For alias combines multiple header lines", func(t *testing.T) {
 		extractor, err := New(
 			TrustLoopbackProxy(),
 			Priority("X-Forwarded-For", SourceRemoteAddr),
@@ -169,14 +169,14 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 		req.Header.Add("X-Forwarded-For", "9.9.9.9")
 
 		result, err := extractor.Extract(req)
-		if err == nil && result.IP.IsValid() {
-			t.Fatal("expected extraction to fail closed on multiple X-Forwarded-For headers")
-		}
-		if !errors.Is(err, ErrMultipleXFFHeaders) {
-			t.Fatalf("error = %v, want ErrMultipleXFFHeaders", err)
+		if err != nil || !result.IP.IsValid() {
+			t.Fatalf("expected valid extraction, got error: %v", err)
 		}
 		if result.Source != SourceXForwardedFor {
 			t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+		}
+		if got, want := result.IP.String(), "9.9.9.9"; got != want {
+			t.Fatalf("IP = %q, want %q", got, want)
 		}
 	})
 
@@ -512,31 +512,49 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 	}
 }
 
-func TestExtract_StrictMode_TerminalSecurityErrors(t *testing.T) {
-	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
-	)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+func TestExtract_ParsesMultipleXFFHeaders_AcrossSecurityModes(t *testing.T) {
+	tests := []struct {
+		name            string
+		securityMode    SecurityMode
+		setSecurityMode bool
+	}{
+		{name: "strict_default"},
+		{name: "lax", securityMode: SecurityModeLax, setSecurityMode: true},
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-	}
-	req.Header.Add("X-Forwarded-For", "8.8.8.8")
-	req.Header.Add("X-Forwarded-For", "9.9.9.9")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []Option{
+				TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+				Priority(SourceXForwardedFor, SourceRemoteAddr),
+			}
+			if tt.setSecurityMode {
+				opts = append(opts, WithSecurityMode(tt.securityMode))
+			}
 
-	result, err := extractor.Extract(req)
-	if err == nil && result.IP.IsValid() {
-		t.Fatal("expected extraction to fail closed on multiple XFF headers")
-	}
-	if !errors.Is(err, ErrMultipleXFFHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleXFFHeaders", err)
-	}
-	if result.Source != SourceXForwardedFor {
-		t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+			extractor, err := New(opts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			req := &http.Request{
+				RemoteAddr: "1.1.1.1:8080",
+				Header:     make(http.Header),
+			}
+			req.Header.Add("X-Forwarded-For", "8.8.8.8")
+			req.Header.Add("X-Forwarded-For", "9.9.9.9")
+
+			result, err := extractor.Extract(req)
+			if err != nil || !result.IP.IsValid() {
+				t.Fatalf("expected extraction to succeed, got error: %v", err)
+			}
+			if result.Source != SourceXForwardedFor {
+				t.Fatalf("source = %q, want %q", result.Source, SourceXForwardedFor)
+			}
+			if got, want := result.IP.String(), "9.9.9.9"; got != want {
+				t.Fatalf("ip = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
@@ -565,35 +583,6 @@ func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 	}
 	if result.Source != SourceForwarded {
 		t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
-	}
-}
-
-func TestExtract_SecurityModeLax_AllowsFallbackOnSecurityErrors(t *testing.T) {
-	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
-		WithSecurityMode(SecurityModeLax),
-	)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-	}
-	req.Header.Add("X-Forwarded-For", "8.8.8.8")
-	req.Header.Add("X-Forwarded-For", "9.9.9.9")
-
-	result, err := extractor.Extract(req)
-	if err != nil || !result.IP.IsValid() {
-		t.Fatalf("expected SecurityModeLax fallback success, got error: %v", err)
-	}
-	if result.Source != SourceRemoteAddr {
-		t.Fatalf("source = %q, want %q", result.Source, SourceRemoteAddr)
-	}
-	if got, want := result.IP.String(), "1.1.1.1"; got != want {
-		t.Fatalf("ip = %q, want %q", got, want)
 	}
 }
 
@@ -1267,7 +1256,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 		}
 	})
 
-	t.Run("MultipleHeadersError", func(t *testing.T) {
+	t.Run("MultipleXFFHeaders_AreCombined", func(t *testing.T) {
 		extractor, err := New(
 			TrustLoopbackProxy(),
 			Priority(SourceXForwardedFor),
@@ -1283,22 +1272,17 @@ func TestExtract_ErrorTypes(t *testing.T) {
 		req.Header.Add("X-Forwarded-For", "1.1.1.1")
 
 		result, err := extractor.Extract(req)
-
-		if err == nil && result.IP.IsValid() {
-			t.Error("Expected invalid result for multiple headers")
+		if err != nil {
+			t.Fatalf("expected extraction success, got error: %v", err)
 		}
-
-		var multipleHeadersErr *MultipleHeadersError
-		if !errors.As(err, &multipleHeadersErr) {
-			t.Errorf("Expected MultipleHeadersError, got %T", err)
-		} else {
-			if multipleHeadersErr.HeaderCount != 2 {
-				t.Errorf("HeaderCount = %d, want 2", multipleHeadersErr.HeaderCount)
-			}
+		if !result.IP.IsValid() {
+			t.Fatal("expected valid result for multiple X-Forwarded-For headers")
 		}
-
-		if !errors.Is(err, ErrMultipleXFFHeaders) {
-			t.Error("Expected error to wrap ErrMultipleXFFHeaders")
+		if got, want := result.IP.String(), "1.1.1.1"; got != want {
+			t.Errorf("IP = %q, want %q", got, want)
+		}
+		if got, want := result.Source, SourceXForwardedFor; got != want {
+			t.Errorf("Source = %q, want %q", got, want)
 		}
 	})
 

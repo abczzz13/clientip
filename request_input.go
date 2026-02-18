@@ -9,8 +9,9 @@ import (
 
 // HeaderValues provides access to request header values by name.
 //
-// Implementations should return one slice entry per received header line to
-// preserve duplicate-header detection behavior.
+// Implementations should return one slice entry per received header line.
+// Single-IP sources rely on per-line values to detect duplicates, and chain
+// sources preserve wire order across repeated lines.
 //
 // Header names are requested in canonical MIME format (for example
 // "X-Forwarded-For").
@@ -36,9 +37,9 @@ func (f HeaderValuesFunc) Values(name string) []string {
 //
 // Context defaults to context.Background() when nil.
 //
-// For Headers, preserve duplicate header lines as separate values for each
+// For Headers, preserve repeated header lines as separate values for each
 // header name (for example two X-Forwarded-For lines should yield a slice with
-// length 2).
+// length 2, and two X-Real-IP lines should also yield length 2).
 type RequestInput struct {
 	Context    context.Context
 	RemoteAddr string

@@ -75,7 +75,7 @@ func assertCommonSecurityWarningAttrs(t *testing.T, attrs map[string]any, event,
 	assertAttr(t, attrs, "remote_addr", remoteAddr)
 }
 
-func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
+func TestLogging_MultipleXFFHeaders_DoNotWarn(t *testing.T) {
 	logger := &capturedLogger{}
 
 	extractor, err := New(
@@ -87,42 +87,29 @@ func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	ctx := context.WithValue(context.Background(), loggerTestContextKey("trace_id"), "trace-123")
-	req := (&http.Request{
+	req := &http.Request{
 		RemoteAddr: "1.1.1.1:8080",
 		Header:     make(http.Header),
 		URL:        &url.URL{Path: "/test/multiple-headers"},
-	}).WithContext(ctx)
+	}
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "9.9.9.9")
 
 	result, err := extractor.Extract(req)
-	if err == nil && result.IP.IsValid() {
-		t.Fatal("expected extraction to fail for multiple X-Forwarded-For headers")
+	if err != nil || !result.IP.IsValid() {
+		t.Fatalf("expected extraction success, got error: %v", err)
 	}
-	if !errors.Is(err, ErrMultipleXFFHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleXFFHeaders", err)
+	if got, want := result.Source, SourceXForwardedFor; got != want {
+		t.Fatalf("source = %q, want %q", got, want)
+	}
+	if got, want := result.IP.String(), "9.9.9.9"; got != want {
+		t.Fatalf("ip = %q, want %q", got, want)
 	}
 
 	entries := logger.snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("logged entries = %d, want 1", len(entries))
+	if len(entries) != 0 {
+		t.Fatalf("logged entries = %d, want 0", len(entries))
 	}
-
-	entry := entries[0]
-	if got := entry.ctx.Value(loggerTestContextKey("trace_id")); got != "trace-123" {
-		t.Fatalf("trace context value = %v, want %q", got, "trace-123")
-	}
-
-	assertCommonSecurityWarningAttrs(
-		t,
-		entry.attrs,
-		securityEventMultipleHeaders,
-		SourceXForwardedFor,
-		"/test/multiple-headers",
-		"1.1.1.1:8080",
-	)
-	assertAttr(t, entry.attrs, "header_count", 2)
 }
 
 func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {

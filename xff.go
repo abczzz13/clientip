@@ -5,11 +5,74 @@ import (
 	"strings"
 )
 
-// typicalChainCapacity is the initial capacity used when parsing proxy chains.
-//
-// Most deployments have short chains (around 1-5 hops). Preallocating 8 avoids
-// reallocations in common cases without meaningful memory overhead.
+// typicalChainCapacity is the default initial capacity used when parsing proxy
+// chains.
 const typicalChainCapacity = 8
+
+func (e *Extractor) chainPartsCapacity(values []string) int {
+	maxLength := e.config.maxChainLength
+	if maxLength <= 0 {
+		maxLength = 1
+	}
+
+	if len(values) == 1 {
+		v := values[0]
+		firstComma := strings.IndexByte(v, ',')
+		if firstComma == -1 {
+			return 1
+		}
+
+		secondComma := strings.IndexByte(v[firstComma+1:], ',')
+		if secondComma == -1 {
+			if maxLength < 2 {
+				return maxLength
+			}
+			return 2
+		}
+
+		if strings.IndexByte(v[firstComma+secondComma+2:], ',') == -1 {
+			if maxLength < 3 {
+				return maxLength
+			}
+			return 3
+		}
+	} else if len(values) == 2 {
+		if strings.IndexByte(values[0], ',') == -1 && strings.IndexByte(values[1], ',') == -1 {
+			if maxLength < 2 {
+				return maxLength
+			}
+			return 2
+		}
+	}
+
+	if maxLength < typicalChainCapacity {
+		return maxLength
+	}
+
+	return typicalChainCapacity
+}
+
+func trimHTTPWhitespace(value string) string {
+	start := 0
+	for start < len(value) {
+		ch := value[start]
+		if ch != ' ' && ch != '\t' {
+			break
+		}
+		start++
+	}
+
+	end := len(value)
+	for end > start {
+		ch := value[end-1]
+		if ch != ' ' && ch != '\t' {
+			break
+		}
+		end--
+	}
+
+	return value[start:end]
+}
 
 func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
 	if !ip.IsValid() {
@@ -53,26 +116,33 @@ func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
 		return nil, nil
 	}
 
-	parts := make([]string, 0, typicalChainCapacity)
+	maxChainLength := e.config.maxChainLength
+	parts := make([]string, 0, e.chainPartsCapacity(values))
 	for _, v := range values {
-		for {
-			part, rest, found := strings.Cut(v, ",")
-			if found {
-				v = rest
+		start := 0
+		for i := 0; i <= len(v); i++ {
+			if i != len(v) && v[i] != ',' {
+				continue
 			}
 
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
-				var err error
-				parts, err = e.appendChainPart(parts, trimmed, SourceXForwardedFor)
-				if err != nil {
-					return nil, err
+			part := trimHTTPWhitespace(v[start:i])
+			if part != "" {
+				if len(parts) >= maxChainLength {
+					e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
+					return nil, &ChainTooLongError{
+						ExtractionError: ExtractionError{
+							Err:    ErrChainTooLong,
+							Source: SourceXForwardedFor,
+						},
+						ChainLength: len(parts) + 1,
+						MaxLength:   maxChainLength,
+					}
 				}
+
+				parts = append(parts, part)
 			}
 
-			if !found {
-				break
-			}
+			start = i + 1
 		}
 	}
 	return parts, nil
@@ -228,7 +298,13 @@ func (e *Extractor) analyzeChainLeftmostForExtraction(parts []string, collectTru
 	}
 
 	trustedCount := 0
-	trustedFlags := make([]bool, len(parts))
+	leftmostUntrustedIndex := -1
+	leftmostUntrustedIP := netip.Addr{}
+	hasLeftmostUntrusted := false
+
+	fallbackClientIndex := 0
+	fallbackClientIP := netip.Addr{}
+	hasFallbackClient := false
 
 	var trustedIndices []int
 	if collectTrustedIndices {
@@ -238,8 +314,8 @@ func (e *Extractor) analyzeChainLeftmostForExtraction(parts []string, collectTru
 	stillTrailingTrusted := true
 
 	for i := len(parts) - 1; i >= 0; i-- {
-		isTrusted := e.isTrustedProxy(parseIP(parts[i]))
-		trustedFlags[i] = isTrusted
+		ip := parseIP(parts[i])
+		isTrusted := e.isTrustedProxy(ip)
 
 		if stillTrailingTrusted && isTrusted {
 			if collectTrustedIndices {
@@ -249,19 +325,42 @@ func (e *Extractor) analyzeChainLeftmostForExtraction(parts []string, collectTru
 			continue
 		}
 
+		if stillTrailingTrusted {
+			fallbackClientIndex = i
+			fallbackClientIP = ip
+			hasFallbackClient = true
+		}
+
 		stillTrailingTrusted = false
+		if !isTrusted {
+			leftmostUntrustedIndex = i
+			leftmostUntrustedIP = ip
+			hasLeftmostUntrusted = true
+		}
 	}
 
 	analysis := chainAnalysis{
-		trustedCount:   trustedCount,
-		trustedIndices: trustedIndices,
+		trustedCount: trustedCount,
+	}
+	if collectTrustedIndices {
+		analysis.trustedIndices = trustedIndices
 	}
 
 	if err := e.validateProxyCount(trustedCount); err != nil {
 		return analysis, netip.Addr{}, err
 	}
 
-	analysis.clientIndex = selectLeftmostUntrustedTrusted(trustedFlags, trustedCount)
+	if hasLeftmostUntrusted {
+		analysis.clientIndex = leftmostUntrustedIndex
+		return analysis, leftmostUntrustedIP, nil
+	}
+
+	if hasFallbackClient {
+		analysis.clientIndex = fallbackClientIndex
+		return analysis, fallbackClientIP, nil
+	}
+
+	analysis.clientIndex = 0
 	return analysis, parseIP(parts[analysis.clientIndex]), nil
 }
 
