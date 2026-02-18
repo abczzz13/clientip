@@ -1,6 +1,7 @@
 package clientip
 
 import (
+	"context"
 	"net/http"
 	"net/netip"
 	"testing"
@@ -231,6 +232,71 @@ func BenchmarkExtract_Parallel(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
+	extractor, _ := New()
+	input := RequestInput{
+		Context:    context.Background(),
+		RemoteAddr: "1.1.1.1:12345",
+		Headers:    make(http.Header),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.ExtractFrom(input)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
+func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	headers := make(http.Header)
+	headers.Set("X-Forwarded-For", "1.1.1.1")
+	input := RequestInput{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Headers:    headers,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.ExtractFrom(input)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
+func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
+	extractor, _ := New(
+		TrustLoopbackProxy(),
+		Priority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	xffValues := []string{"1.1.1.1"}
+	input := RequestInput{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Headers: HeaderValuesFunc(func(name string) []string {
+			if name == "X-Forwarded-For" {
+				return xffValues
+			}
+			return nil
+		}),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extractor.ExtractFrom(input)
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
 }
 
 func BenchmarkParseIP(b *testing.B) {

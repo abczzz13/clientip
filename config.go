@@ -147,7 +147,8 @@ type config struct {
 	securityMode    SecurityMode
 	debugMode       bool
 
-	sourcePriority []string
+	sourcePriority   []string
+	sourceHeaderKeys []string
 
 	logger  Logger
 	metrics Metrics
@@ -268,6 +269,8 @@ func configFromOptions(opts ...Option) (*config, error) {
 		return nil, err
 	}
 
+	cfg.sourceHeaderKeys = sourceHeaderKeys(cfg.sourcePriority)
+
 	appendTrustedProxyCIDRs(cfg, cfg.trustedProxyCIDRs...)
 	cfg.trustedProxyMatch = buildTrustedProxyMatcher(cfg.trustedProxyCIDRs)
 
@@ -314,6 +317,7 @@ func (c *config) clone() *config {
 		securityMode:      c.securityMode,
 		debugMode:         c.debugMode,
 		sourcePriority:    cloneStrings(c.sourcePriority),
+		sourceHeaderKeys:  cloneStrings(c.sourceHeaderKeys),
 		logger:            c.logger,
 		metrics:           c.metrics,
 		metricsFactory:    c.metricsFactory,
@@ -376,6 +380,7 @@ func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
 
 		if override.SourcePriority.isSet() {
 			effective.sourcePriority = canonicalizeSourceNames(cloneStrings(override.SourcePriority.value()))
+			effective.sourceHeaderKeys = sourceHeaderKeys(effective.sourcePriority)
 		}
 	}
 

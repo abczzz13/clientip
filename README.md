@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/abczzz13/clientip.svg)](https://pkg.go.dev/github.com/abczzz13/clientip)
 [![License](https://img.shields.io/github/license/abczzz13/clientip)](LICENSE)
 
-Secure client IP extraction for `net/http` requests with trusted proxy validation, configurable source priority, and optional logging/metrics.
+Secure client IP extraction for `net/http` and framework-agnostic request inputs with trusted proxy validation, configurable source priority, and optional logging/metrics.
 
 ## Stability
 
@@ -90,6 +90,64 @@ if err != nil {
 fmt.Printf("Client IP: %s\n", ip)
 ```
 
+### Framework-friendly input API
+
+Use `ExtractFrom` when your framework does not expose `*http.Request` directly.
+
+```go
+input := clientip.RequestInput{
+    Context:    ctx,
+    RemoteAddr: remoteAddr,
+    Path:       path,
+    Headers:    headersProvider, // any type implementing Values(name string) []string
+}
+
+extraction, err := extractor.ExtractFrom(input)
+if err != nil {
+    // handle error
+}
+```
+
+`http.Header` already implements the required header interface, so for `net/http`
+style frameworks (Gin, Echo, Chi) you can keep using `Extract(req)` directly.
+
+`ExtractFrom` only requests header names required by the configured
+`Priority(...)` sources.
+
+```go
+// Gin
+extraction, err := extractor.Extract(c.Request)
+
+// Echo
+extraction, err := extractor.Extract(c.Request())
+```
+
+For `fasthttp`/Fiber style frameworks, provide a header adapter with
+`HeaderValuesFunc` and preserve duplicate header lines:
+
+```go
+input := clientip.RequestInput{
+    Context:    c.UserContext(),
+    RemoteAddr: c.Context().RemoteAddr().String(),
+    Path:       c.Path(),
+    Headers: clientip.HeaderValuesFunc(func(name string) []string {
+        raw := c.Context().Request.Header.PeekAll(name)
+        if len(raw) == 0 {
+            return nil
+        }
+
+        values := make([]string, len(raw))
+        for i, v := range raw {
+            values[i] = string(v)
+        }
+        return values
+    }),
+}
+```
+
+Important: do not merge repeated header lines into a single comma-joined value.
+Duplicate header detection is a security signal used by strict mode.
+
 ### Behind reverse proxies
 
 ```go
@@ -157,8 +215,9 @@ type Logger interface {
 This intentionally mirrors `slog.Logger.WarnContext`, so `*slog.Logger`
 works directly with `WithLogger` (no adapter needed).
 
-The context passed to logger calls comes from `req.Context()`, so trace/span IDs
-added by middleware remain available in logs.
+The context passed to logger calls comes from `req.Context()` (`Extract`) or
+`RequestInput.Context` (`ExtractFrom`), so trace/span IDs added by middleware
+remain available in logs.
 
 Structured log attributes are passed as alternating key/value pairs, matching
 the style used by `slog`.
@@ -269,6 +328,8 @@ For one-shot extraction without reusing an extractor, use:
 
 - `ExtractWithOptions(req, opts...)`
 - `ExtractAddrWithOptions(req, opts...)`
+- `ExtractFromWithOptions(input, opts...)`
+- `ExtractAddrFromWithOptions(input, opts...)`
 
 - `TrustedProxies([]netip.Prefix, min, max)` set trusted proxy CIDRs with min/max trusted proxy counts in proxy header chains
 - `TrustedCIDRs(...string)` parse CIDR strings in-place
@@ -314,8 +375,21 @@ type Extraction struct {
     DebugInfo         *ChainDebugInfo
 }
 
+type HeaderValues interface {
+    Values(name string) []string
+}
+
+type RequestInput struct {
+    Context    context.Context
+    RemoteAddr string
+    Path       string
+    Headers    HeaderValues
+}
+
 func (e *Extractor) Extract(req *http.Request, overrides ...OverrideOptions) (Extraction, error)
 func (e *Extractor) ExtractAddr(req *http.Request, overrides ...OverrideOptions) (netip.Addr, error)
+func (e *Extractor) ExtractFrom(input RequestInput, overrides ...OverrideOptions) (Extraction, error)
+func (e *Extractor) ExtractAddrFrom(input RequestInput, overrides ...OverrideOptions) (netip.Addr, error)
 ```
 
 When `Extract` returns a non-nil error, the returned `Extraction` value is
