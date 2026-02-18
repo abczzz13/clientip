@@ -46,7 +46,9 @@ func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(2),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
@@ -107,7 +109,9 @@ func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 5),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(5),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
@@ -128,7 +132,9 @@ func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 2),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(2),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithDebugInfo(true),
 	)
@@ -153,7 +159,9 @@ func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor, SourceRemoteAddr),
 		WithChainSelection(LeftmostUntrustedIP),
 	)
@@ -370,7 +378,11 @@ func BenchmarkIsTrustedProxy_LargeCIDRSet_Precomputed(b *testing.B) {
 		prefixes = append(prefixes, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, secondOctet, thirdOctet, 0}), 24))
 	}
 
-	extractor, _ := New(TrustedProxies(prefixes, 0, 0))
+	extractor, _ := New(
+		TrustProxyPrefixes(prefixes...),
+		MinTrustedProxies(0),
+		MaxTrustedProxies(0),
+	)
 	ip := netip.MustParseAddr("10.128.8.8")
 
 	b.ResetTimer()
@@ -404,7 +416,9 @@ func BenchmarkIsTrustedProxy_LargeCIDRSet_LinearFallback(b *testing.B) {
 func BenchmarkChainAnalysis_Rightmost(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 	)
 
 	parts := []string{"1.1.1.1", "8.8.8.8", "10.0.0.1", "10.0.0.2"}
@@ -421,7 +435,9 @@ func BenchmarkChainAnalysis_Rightmost(b *testing.B) {
 func BenchmarkChainAnalysis_Leftmost(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		WithChainSelection(LeftmostUntrustedIP),
 	)
 

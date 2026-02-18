@@ -41,11 +41,13 @@
 //
 // # Behind Reverse Proxy
 //
-// Configure trusted proxy CIDRs with flexible min/max proxy count:
+// Configure trusted proxy prefixes with flexible min/max proxy count:
 //
 //	cidrs, _ := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
 //	extractor, err := clientip.New(
-//	    clientip.TrustedProxies(cidrs, 0, 2),  // Count trusted proxies present in proxy headers
+//	    clientip.TrustProxyPrefixes(cidrs...), // Trust upstream proxy ranges
+//	    clientip.MinTrustedProxies(0),         // Count trusted proxies present in proxy headers
+//	    clientip.MaxTrustedProxies(2),
 //	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 //	    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
 //	    clientip.AllowPrivateIPs(false),
@@ -64,9 +66,10 @@
 //	    ),
 //	)
 //
-// Header sources require trusted upstream proxy ranges. Use TrustedCIDRs,
-// TrustedProxies, or helper options like TrustLoopbackProxy,
-// TrustPrivateProxyRanges, or TrustProxyIP.
+// Header sources require trusted upstream proxy ranges. Use
+// TrustProxyPrefixes (with ParseCIDRs for string inputs) or helper options like
+// TrustLoopbackProxy, TrustPrivateProxyRanges, TrustLocalProxyDefaults, or
+// TrustProxyAddrs.
 //
 // Presets are available for common setups:
 //
@@ -83,7 +86,9 @@
 //	metrics, _ := clientipprom.New()
 //
 //	extractor, err := clientip.New(
-//	    clientip.TrustedProxies(cidrs, 0, 3),
+//	    clientip.TrustProxyPrefixes(cidrs...),
+//	    clientip.MinTrustedProxies(0),
+//	    clientip.MaxTrustedProxies(3),
 //	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 //	    clientip.WithLogger(slog.Default()),
 //	    clientip.WithMetrics(metrics),
@@ -98,7 +103,7 @@
 //   - Validation of proxy counts (min/max enforcement)
 //   - Chain length limits to prevent DoS
 //   - Rejection of invalid/implausible IPs (loopback, multicast, etc.)
-//   - Optional private IP filtering
+//   - Optional private IP filtering and explicit reserved CIDR allowlisting
 //   - Strict fail-closed behavior by default (SecurityModeStrict)
 //
 // # Security Anti-Patterns

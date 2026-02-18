@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sync"
 	"testing"
@@ -79,7 +80,7 @@ func TestLogging_MultipleHeaders_WarnsWithRequestContext(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -129,7 +130,7 @@ func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXRealIP),
 	)
 	if err != nil {
@@ -175,7 +176,7 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor),
 		MaxChainLength(2),
 	)
@@ -225,7 +226,9 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustedProxies(cidrs, 2, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(2),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -275,7 +278,9 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -325,7 +330,9 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustedProxies(cidrs, 1, 1),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(1),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -375,7 +382,9 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -418,7 +427,7 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {

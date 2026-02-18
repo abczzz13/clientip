@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"net/http"
+	"net/netip"
 	"sync"
 	"testing"
 )
@@ -148,11 +149,59 @@ func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 	}
 }
 
+func TestMetrics_SecurityEvent_ReservedIP(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "198.51.100.1:8080",
+		Header:     make(http.Header),
+	}
+
+	_, _ = extractor.Extract(req)
+
+	if got := metrics.getSecurityEventCount(securityEventReservedIP); got != 1 {
+		t.Errorf("security event count for %s = %d, want 1", securityEventReservedIP, got)
+	}
+}
+
+func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
+	metrics := newMockMetrics()
+	extractor, err := New(
+		AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+		WithMetrics(metrics),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "198.51.100.1:8080",
+		Header:     make(http.Header),
+	}
+
+	if _, err := extractor.Extract(req); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+
+	if got := metrics.getSecurityEventCount(securityEventReservedIP); got != 0 {
+		t.Errorf("security event count for %s = %d, want 0", securityEventReservedIP, got)
+	}
+	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 1 {
+		t.Errorf("success count for %s = %d, want 1", SourceRemoteAddr, got)
+	}
+}
+
 func TestMetrics_SecurityEvent_MultipleHeaders(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXForwardedFor),
 	)
 	if err != nil {
@@ -181,7 +230,7 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceXRealIP),
 	)
 	if err != nil {
@@ -213,7 +262,9 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustedProxies(cidrs, 2, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(2),
+		MaxTrustedProxies(3),
 		WithMetrics(metrics),
 		Priority(SourceXForwardedFor),
 	)
@@ -238,7 +289,9 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		WithMetrics(metrics),
 		Priority(SourceXForwardedFor),
 	)
@@ -263,7 +316,9 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 1),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(1),
 		WithMetrics(metrics),
 		Priority(SourceXForwardedFor),
 	)
@@ -288,7 +343,9 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustedProxies(cidrs, 1, 3),
+		TrustProxyPrefixes(cidrs...),
+		MinTrustedProxies(1),
+		MaxTrustedProxies(3),
 		WithMetrics(metrics),
 		Priority(SourceXForwardedFor),
 	)
@@ -338,7 +395,7 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyIP("1.1.1.1"),
+		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
 		Priority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {

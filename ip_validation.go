@@ -35,7 +35,7 @@ func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
 	}
 
 	// Check for reserved/special-use ranges that should never be client IPs
-	if isReservedIP(ip) {
+	if isReservedIP(ip) && !e.isAllowlistedReservedClientIP(ip) {
 		e.config.metrics.RecordSecurityEvent(securityEventReservedIP)
 		return false
 	}
@@ -46,6 +46,22 @@ func (e *Extractor) isPlausibleClientIP(ip netip.Addr) bool {
 	}
 
 	return true
+}
+
+func (e *Extractor) isAllowlistedReservedClientIP(ip netip.Addr) bool {
+	if len(e.config.allowReservedClientPrefixes) == 0 || !ip.IsValid() {
+		return false
+	}
+
+	ip = normalizeIP(ip)
+
+	for _, prefix := range e.config.allowReservedClientPrefixes {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isReservedIP checks if an IP is in a reserved or special-use range that
