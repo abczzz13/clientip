@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-02-18
+
 ### Added
 
 - Framework-agnostic extraction API: `RequestInput`, `HeaderValues`, `HeaderValuesFunc`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom`.
