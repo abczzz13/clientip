@@ -21,6 +21,17 @@ test pattern="" *args:
   @go test -v -p 1 -count=1 ./... {{ if pattern == "" { "-shuffle=on" } else { if pattern == "--" { "-shuffle=on" } else { "-run \"" + pattern + "\"" } } }} {{args}}
   @GOWORK={{adapter_gowork}} go -C prometheus test -v -p 1 -count=1 ./... {{ if pattern == "" { "-shuffle=on" } else { if pattern == "--" { "-shuffle=on" } else { "-run \"" + pattern + "\"" } } }} {{args}}
 
+fuzz fuzztime="30s" *args:
+  @echo "Running parser fuzz targets for {{fuzztime}} each"
+  @go test -run '^$' -fuzz '^FuzzParseIP_RoundTripNormalization$' -fuzztime "{{fuzztime}}" . {{args}}
+  @go test -run '^$' -fuzz '^FuzzParseRemoteAddr_RoundTripNormalization$' -fuzztime "{{fuzztime}}" . {{args}}
+  @go test -run '^$' -fuzz '^FuzzParseXFFValues_ErrorShapeAndOutput$' -fuzztime "{{fuzztime}}" . {{args}}
+  @go test -run '^$' -fuzz '^FuzzParseForwardedValues_ErrorShapeAndOutput$' -fuzztime "{{fuzztime}}" . {{args}}
+
+fuzz-one target fuzztime="30s" *args:
+  @echo "Running fuzz target name {{target}} for {{fuzztime}}"
+  @go test -run '^$' -fuzz '^{{target}}$' -fuzztime "{{fuzztime}}" . {{args}}
+
 bench pattern="." *args:
   @echo "Running benchmarks matching pattern: {{pattern}}"
   @go test -run '^$' -bench "{{pattern}}" -benchmem -count=1 ./... {{args}}

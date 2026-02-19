@@ -1,7 +1,6 @@
 package clientip
 
 import (
-	"net/http"
 	"net/netip"
 	"sync"
 	"testing"
@@ -67,10 +66,7 @@ func TestMetrics_ExtractionSuccess(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:12345",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("1.1.1.1:12345", "")
 
 	result, err := extractor.Extract(req)
 	if err != nil || !result.IP.IsValid() {
@@ -91,10 +87,7 @@ func TestMetrics_ExtractionFailure(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("127.0.0.1:8080", "")
 
 	result, err := extractor.Extract(req)
 	if err == nil && result.IP.IsValid() {
@@ -115,10 +108,7 @@ func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("127.0.0.1:8080", "")
 
 	_, _ = extractor.Extract(req)
 
@@ -137,10 +127,7 @@ func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "192.168.1.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("192.168.1.1:8080", "")
 
 	_, _ = extractor.Extract(req)
 
@@ -158,10 +145,7 @@ func TestMetrics_SecurityEvent_ReservedIP(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "198.51.100.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("198.51.100.1:8080", "")
 
 	_, _ = extractor.Extract(req)
 
@@ -180,10 +164,7 @@ func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "198.51.100.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("198.51.100.1:8080", "")
 
 	if _, err := extractor.Extract(req); err != nil {
 		t.Fatalf("Extract() error = %v", err)
@@ -208,10 +189,7 @@ func TestMetrics_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("1.1.1.1:8080", "")
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "1.1.1.1")
 
@@ -244,10 +222,7 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("1.1.1.1:8080", "")
 	req.Header.Add("X-Real-IP", "8.8.8.8")
 	req.Header.Add("X-Real-IP", "9.9.9.9")
 
@@ -267,7 +242,7 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 
 func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
 		TrustProxyPrefixes(cidrs...),
 		MinTrustedProxies(2),
@@ -279,10 +254,7 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("10.0.0.1:8080", "")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
 	_, _ = extractor.Extract(req)
@@ -294,7 +266,7 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 
 func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
 		TrustProxyPrefixes(cidrs...),
 		MinTrustedProxies(1),
@@ -306,10 +278,7 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("10.0.0.1:8080", "")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
 	_, _ = extractor.Extract(req)
@@ -321,7 +290,7 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 
 func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
 		TrustProxyPrefixes(cidrs...),
 		MinTrustedProxies(1),
@@ -333,10 +302,7 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.2:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("10.0.0.2:8080", "")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1, 10.0.0.2")
 
 	_, _ = extractor.Extract(req)
@@ -348,7 +314,7 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 
 func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	metrics := newMockMetrics()
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
 		TrustProxyPrefixes(cidrs...),
 		MinTrustedProxies(1),
@@ -360,10 +326,7 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "8.8.8.8:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("8.8.8.8:8080", "")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
 	_, _ = extractor.Extract(req)
@@ -385,10 +348,7 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("127.0.0.1:8080", "")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 5.5.5.5, 6.6.6.6")
 
 	_, _ = extractor.Extract(req)
@@ -409,10 +369,7 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("1.1.1.1:8080", "")
 	req.Header.Set("Forwarded", "for=\"1.1.1.1")
 
 	_, _ = extractor.Extract(req)
@@ -433,10 +390,7 @@ func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req := newTestRequest("127.0.0.1:8080", "")
 	req.Header.Set("Forwarded", "for=1.1.1.1")
 
 	result, err := extractor.Extract(req)
@@ -461,24 +415,15 @@ func TestMetrics_MultipleExtractions(t *testing.T) {
 	}
 
 	// Successful extraction
-	req1 := &http.Request{
-		RemoteAddr: "1.1.1.1:12345",
-		Header:     make(http.Header),
-	}
+	req1 := newTestRequest("1.1.1.1:12345", "")
 	_, _ = extractor.Extract(req1)
 
 	// Another successful extraction
-	req2 := &http.Request{
-		RemoteAddr: "8.8.8.8:8080",
-		Header:     make(http.Header),
-	}
+	req2 := newTestRequest("8.8.8.8:8080", "")
 	_, _ = extractor.Extract(req2)
 
 	// Failed extraction
-	req3 := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req3 := newTestRequest("127.0.0.1:8080", "")
 	_, _ = extractor.Extract(req3)
 
 	if got := metrics.getSuccessCount(SourceRemoteAddr); got != 2 {
@@ -502,18 +447,12 @@ func TestMetrics_DifferentSources(t *testing.T) {
 	}
 
 	// Success from X-Forwarded-For
-	req1 := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
+	req1 := newTestRequest("127.0.0.1:8080", "")
 	req1.Header.Set("X-Forwarded-For", "1.1.1.1")
 	_, _ = extractor.Extract(req1)
 
 	// Success from RemoteAddr
-	req2 := &http.Request{
-		RemoteAddr: "8.8.8.8:8080",
-		Header:     make(http.Header),
-	}
+	req2 := newTestRequest("8.8.8.8:8080", "")
 	_, _ = extractor.Extract(req2)
 
 	if got := metrics.getSuccessCount(SourceXForwardedFor); got != 1 {
@@ -539,10 +478,7 @@ func TestMetrics_ConcurrentAccess(t *testing.T) {
 
 	for i := 0; i < goroutines; i++ {
 		go func() {
-			req := &http.Request{
-				RemoteAddr: "1.1.1.1:12345",
-				Header:     make(http.Header),
-			}
+			req := newTestRequest("1.1.1.1:12345", "")
 			_, _ = extractor.Extract(req)
 			done <- true
 		}()

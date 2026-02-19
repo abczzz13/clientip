@@ -10,7 +10,7 @@ import (
 )
 
 func TestForwardedForSource_Extract(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &forwardedForSource{extractor: extractor}
 
 	tests := []struct {
@@ -98,7 +98,7 @@ func TestForwardedForSource_Extract(t *testing.T) {
 }
 
 func TestForwardedForSource_Name(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &forwardedForSource{extractor: extractor}
 
 	if source.Name() != SourceXForwardedFor {
@@ -107,7 +107,7 @@ func TestForwardedForSource_Name(t *testing.T) {
 }
 
 func TestForwardedSource_Extract(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &forwardedSource{extractor: extractor}
 
 	tests := []struct {
@@ -196,7 +196,7 @@ func TestForwardedSource_Extract(t *testing.T) {
 }
 
 func TestForwardedSource_Name(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &forwardedSource{extractor: extractor}
 
 	if source.Name() != SourceForwarded {

@@ -8,7 +8,7 @@ import (
 )
 
 func TestRemoteAddrSource_Extract(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &remoteAddrSource{extractor: extractor}
 
 	tests := []struct {
@@ -72,7 +72,7 @@ func TestRemoteAddrSource_Extract(t *testing.T) {
 }
 
 func TestRemoteAddrSource_Name(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	source := &remoteAddrSource{extractor: extractor}
 
 	if source.Name() != SourceRemoteAddr {

@@ -582,6 +582,75 @@ func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithPrefixOverride(t *t
 	}
 }
 
+func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
+	tests := []struct {
+		name        string
+		opts        []Option
+		wantErrText string
+	}{
+		{
+			name:        "negative min trusted proxies",
+			opts:        []Option{MinTrustedProxies(-1)},
+			wantErrText: "minTrustedProxies must be >= 0",
+		},
+		{
+			name:        "negative max trusted proxies",
+			opts:        []Option{MaxTrustedProxies(-1)},
+			wantErrText: "maxTrustedProxies must be >= 0",
+		},
+		{
+			name:        "zero max chain length",
+			opts:        []Option{MaxChainLength(0)},
+			wantErrText: "maxChainLength must be > 0",
+		},
+		{
+			name:        "negative max chain length",
+			opts:        []Option{MaxChainLength(-1)},
+			wantErrText: "maxChainLength must be > 0",
+		},
+		{
+			name:        "duplicate source in priority",
+			opts:        []Option{Priority(SourceRemoteAddr, SourceRemoteAddr)},
+			wantErrText: "duplicate source",
+		},
+		{
+			name:        "duplicate source after canonicalization",
+			opts:        []Option{TrustLoopbackProxy(), Priority(SourceXForwardedFor, "X-Forwarded-For")},
+			wantErrText: "duplicate source",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := New(tt.opts...)
+			got := errorTextStateOf(err, tt.wantErrText)
+
+			want := errorTextState{
+				HasErr:       true,
+				ContainsText: true,
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("New() error mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestTrustPrivateProxyRanges_AddsExpectedCIDRs(t *testing.T) {
+	extractor, err := New(TrustPrivateProxyRanges())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got := snapshotConfig(extractor.config).TrustedProxyCIDRs
+	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("trusted CIDRs mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestStringers(t *testing.T) {
 	tests := []struct {
 		name string
