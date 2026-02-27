@@ -36,7 +36,7 @@ jobs:
       - run: go test -race ./...
       - run: go test -coverprofile=coverage.out ./...
       - run: go tool cover -func=coverage.out
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-root-${{ matrix.go-label }}
           path: coverage.out
@@ -67,7 +67,7 @@ jobs:
       - run: GOWORK=off go -C prometheus test -race ./...
       - run: GOWORK=off go -C prometheus test -coverprofile=../coverage-prometheus.out ./...
       - run: GOWORK=off go -C prometheus tool cover -func=../coverage-prometheus.out
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-prometheus-${{ matrix.go-label }}
           path: coverage-prometheus.out
@@ -179,7 +179,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-compare
