@@ -3,6 +3,7 @@ package clientip
 import (
 	"fmt"
 	"net/netip"
+	"reflect"
 	"slices"
 )
 
@@ -47,51 +48,67 @@ func (s ChainSelection) valid() bool {
 	return s == RightmostUntrustedIP || s == LeftmostUntrustedIP
 }
 
-// SecurityMode controls fallback behavior after security-significant errors.
-type SecurityMode int
+// Config configures an Extractor.
+type Config struct {
+	TrustedProxyPrefixes          []netip.Prefix
+	MinTrustedProxies             int
+	MaxTrustedProxies             int
+	AllowPrivateIPs               bool
+	AllowedReservedClientPrefixes []netip.Prefix
+	MaxChainLength                int
+	ChainSelection                ChainSelection
+	DebugInfo                     bool
+	Sources                       []Source
+	Logger                        Logger
+	Metrics                       Metrics
+}
 
-const (
-	// SecurityModeStrict fails closed and stops on security-significant errors.
-	SecurityModeStrict SecurityMode = iota + 1
-	// SecurityModeLax allows fallback to lower-priority sources after such errors.
-	SecurityModeLax
-)
-
-// String returns the canonical text representation of m.
-func (m SecurityMode) String() string {
-	switch m {
-	case SecurityModeStrict:
-		return "strict"
-	case SecurityModeLax:
-		return "lax"
-	default:
-		return "unknown"
+// DefaultConfig returns the default extractor configuration.
+func DefaultConfig() Config {
+	return Config{
+		MaxChainLength: DefaultMaxChainLength,
+		ChainSelection: RightmostUntrustedIP,
+		Sources:        []Source{builtinSource(sourceRemoteAddr)},
 	}
 }
 
-// valid reports whether m is a supported security mode.
-func (m SecurityMode) valid() bool {
-	return m == SecurityModeStrict || m == SecurityModeLax
+// LoopbackProxyPrefixes returns loopback CIDRs commonly used when the app sits
+// behind a reverse proxy on the same host.
+func LoopbackProxyPrefixes() []netip.Prefix {
+	return clonePrefixes(loopbackProxyCIDRs)
 }
 
-// Option configures an Extractor.
-//
-// Construct options using package-provided option builder functions.
-type Option func(*config) error
+// PrivateProxyPrefixes returns private-network CIDRs commonly used for trusted
+// upstream proxies in VM and internal network deployments.
+func PrivateProxyPrefixes() []netip.Prefix {
+	return clonePrefixes(privateProxyCIDRs)
+}
 
-// CallOption configures one Extract/ExtractFrom call.
-//
-// Call options can override policy fields for a single extraction, while
-// logger and metrics remain fixed at extractor construction time.
-type CallOption func(*config) error
+// LocalProxyPrefixes returns loopback and private-network proxy CIDRs.
+func LocalProxyPrefixes() []netip.Prefix {
+	return mergeUniquePrefixes(clonePrefixes(loopbackProxyCIDRs), privateProxyCIDRs...)
+}
 
-// config holds extractor configuration state.
-//
-// It is mutated by Option functions during construction and by CallOption
-// functions during per-call policy adjustments.
+// ProxyPrefixesFromAddrs converts individual proxy addresses into host-sized
+// trusted prefixes.
+func ProxyPrefixesFromAddrs(addrs ...netip.Addr) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, 0, len(addrs))
+	for _, addr := range addrs {
+		if !addr.IsValid() {
+			return nil, fmt.Errorf("invalid proxy address %q", addr)
+		}
+
+		addr = normalizeIP(addr)
+		prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+	}
+
+	return prefixes, nil
+}
+
+// config holds normalized runtime configuration state.
 type config struct {
 	trustedProxyCIDRs []netip.Prefix
-	trustedProxyMatch trustedProxyMatcher
+	trustedProxyMatch prefixMatcher
 	minTrustedProxies int
 	maxTrustedProxies int
 
@@ -99,7 +116,6 @@ type config struct {
 	allowReservedClientPrefixes []netip.Prefix
 	maxChainLength              int
 	chainSelection              ChainSelection
-	securityMode                SecurityMode
 	debugMode                   bool
 
 	sourcePriority   []Source
@@ -107,9 +123,90 @@ type config struct {
 
 	logger  Logger
 	metrics Metrics
+}
 
-	metricsFactory    func() (Metrics, error)
-	useMetricsFactory bool
+func (c *config) validate() error {
+	if c.minTrustedProxies < 0 {
+		return fmt.Errorf("minTrustedProxies must be >= 0, got %d", c.minTrustedProxies)
+	}
+	if c.maxTrustedProxies < 0 {
+		return fmt.Errorf("maxTrustedProxies must be >= 0, got %d", c.maxTrustedProxies)
+	}
+	if c.maxTrustedProxies > 0 && c.minTrustedProxies > c.maxTrustedProxies {
+		return fmt.Errorf("minTrustedProxies (%d) cannot exceed maxTrustedProxies (%d)", c.minTrustedProxies, c.maxTrustedProxies)
+	}
+	if c.minTrustedProxies > 0 && len(c.trustedProxyCIDRs) == 0 {
+		return fmt.Errorf("minTrustedProxies > 0 requires TrustedProxyPrefixes to be configured for security validation; to skip validation and trust all proxies, set TrustedProxyPrefixes to 0.0.0.0/0 and ::/0")
+	}
+	if c.maxChainLength <= 0 {
+		return fmt.Errorf("maxChainLength must be > 0, got %d", c.maxChainLength)
+	}
+	if !c.chainSelection.valid() {
+		return fmt.Errorf("invalid chain selection %d (must be RightmostUntrustedIP=1 or LeftmostUntrustedIP=2)", c.chainSelection)
+	}
+	if len(c.sourcePriority) == 0 {
+		return fmt.Errorf("at least one source required in priority list")
+	}
+
+	hasHeaderSource, hasChainSource, err := c.validateSourcePriority()
+	if err != nil {
+		return err
+	}
+
+	if hasChainSource && c.chainSelection == LeftmostUntrustedIP && len(c.trustedProxyCIDRs) == 0 {
+		return fmt.Errorf("LeftmostUntrustedIP selection requires trusted proxy prefixes to be configured; without trusted-proxy validation, this selection provides no security benefit over RightmostUntrustedIP")
+	}
+
+	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
+		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure TrustedProxyPrefixes directly or use LoopbackProxyPrefixes, PrivateProxyPrefixes, LocalProxyPrefixes, or ProxyPrefixesFromAddrs")
+	}
+
+	if isNilValue(c.logger) {
+		return fmt.Errorf("logger cannot be nil")
+	}
+	if isNilValue(c.metrics) {
+		return fmt.Errorf("metrics cannot be nil")
+	}
+	return nil
+}
+
+func (c *config) validateSourcePriority() (hasHeaderSource, hasChainSource bool, err error) {
+	seen := make(map[Source]struct{}, len(c.sourcePriority))
+	seenForwarded := false
+	seenXFF := false
+
+	for _, source := range c.sourcePriority {
+		source = canonicalSource(source)
+		if !source.valid() {
+			return false, false, fmt.Errorf("source names cannot be empty")
+		}
+
+		if _, ok := seen[source]; ok {
+			return false, false, fmt.Errorf("duplicate source %q in priority list", source)
+		}
+		seen[source] = struct{}{}
+
+		switch source.kind {
+		case sourceStaticFallback:
+			return false, false, fmt.Errorf("source %q is resolver-only and cannot be used in Config.Sources", source)
+		case sourceForwarded:
+			seenForwarded = true
+			hasChainSource = true
+			hasHeaderSource = true
+		case sourceXForwardedFor:
+			seenXFF = true
+			hasChainSource = true
+			hasHeaderSource = true
+		case sourceXRealIP, sourceHeader:
+			hasHeaderSource = true
+		}
+	}
+
+	if seenForwarded && seenXFF {
+		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", builtinSource(sourceForwarded), builtinSource(sourceXForwardedFor))
+	}
+
+	return hasHeaderSource, hasChainSource, nil
 }
 
 var (
@@ -142,16 +239,22 @@ func clonePrefixes(prefixes []netip.Prefix) []netip.Prefix {
 	return slices.Clone(prefixes)
 }
 
-func cloneAddrs(addrs []netip.Addr) []netip.Addr {
-	return slices.Clone(addrs)
-}
-
-func cloneStrings(values []string) []string {
-	return slices.Clone(values)
-}
-
 func cloneSources(values []Source) []Source {
 	return slices.Clone(values)
+}
+
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 func normalizePrefixes(prefixes []netip.Prefix, kind string) ([]netip.Prefix, error) {
@@ -201,173 +304,67 @@ func mergeUniquePrefixes(existing []netip.Prefix, additions ...netip.Prefix) []n
 	return merged
 }
 
-func appendTrustedProxyCIDRs(c *config, prefixes ...netip.Prefix) {
-	if len(prefixes) == 0 {
-		return
-	}
-
-	c.trustedProxyCIDRs = mergeUniquePrefixes(c.trustedProxyCIDRs, prefixes...)
-}
-
 func defaultConfig() *config {
+	defaults := DefaultConfig()
 	return &config{
-		minTrustedProxies: 0,
-		maxTrustedProxies: 0,
-		allowPrivateIPs:   false,
-		maxChainLength:    DefaultMaxChainLength,
-		chainSelection:    RightmostUntrustedIP,
-		securityMode:      SecurityModeStrict,
+		minTrustedProxies: defaults.MinTrustedProxies,
+		maxTrustedProxies: defaults.MaxTrustedProxies,
+		allowPrivateIPs:   defaults.AllowPrivateIPs,
+		maxChainLength:    defaults.MaxChainLength,
+		chainSelection:    defaults.ChainSelection,
 		logger:            noopLogger{},
 		metrics:           noopMetrics{},
-		sourcePriority: []Source{
-			builtinSource(sourceRemoteAddr),
-		},
+		sourcePriority:    cloneSources(defaults.Sources),
 	}
 }
 
-func applyOptions(c *config, opts ...Option) error {
-	for _, opt := range opts {
-		if err := opt(c); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func configFromOptions(opts ...Option) (*config, error) {
+func configFromPublic(public Config) (*config, error) {
 	cfg := defaultConfig()
 
-	if err := applyOptions(cfg, opts...); err != nil {
-		return nil, err
-	}
-
-	cfg.sourceHeaderKeys = sourceHeaderKeys(cfg.sourcePriority)
-
-	appendTrustedProxyCIDRs(cfg, cfg.trustedProxyCIDRs...)
-	cfg.trustedProxyMatch = buildTrustedProxyMatcher(cfg.trustedProxyCIDRs)
-
-	if cfg.useMetricsFactory {
-		if cfg.metricsFactory == nil {
-			return nil, fmt.Errorf("metrics factory cannot be nil")
-		}
-	}
-
-	validationConfig := cfg
-	if cfg.useMetricsFactory {
-		validationConfig = cfg.clone()
-		validationConfig.metrics = noopMetrics{}
-	}
-
-	if err := validationConfig.validate(); err != nil {
-		return nil, err
-	}
-
-	if cfg.useMetricsFactory {
-		metrics, err := cfg.metricsFactory()
+	if public.TrustedProxyPrefixes != nil {
+		normalized, err := normalizeTrustedProxyPrefixes(public.TrustedProxyPrefixes)
 		if err != nil {
 			return nil, err
 		}
-		if isNilValue(metrics) {
-			return nil, fmt.Errorf("metrics cannot be nil")
-		}
-		cfg.metrics = metrics
+		cfg.trustedProxyCIDRs = mergeUniquePrefixes(nil, normalized...)
+	}
 
-		if err := cfg.validate(); err != nil {
+	if public.AllowedReservedClientPrefixes != nil {
+		normalized, err := normalizeReservedClientPrefixes(public.AllowedReservedClientPrefixes)
+		if err != nil {
 			return nil, err
 		}
+		cfg.allowReservedClientPrefixes = mergeUniquePrefixes(nil, normalized...)
+	}
+
+	if public.MaxChainLength != 0 {
+		cfg.maxChainLength = public.MaxChainLength
+	}
+	if public.ChainSelection != 0 {
+		cfg.chainSelection = public.ChainSelection
+	}
+	if public.Sources != nil {
+		cfg.sourcePriority = canonicalizeSources(cloneSources(public.Sources))
+	}
+
+	cfg.minTrustedProxies = public.MinTrustedProxies
+	cfg.maxTrustedProxies = public.MaxTrustedProxies
+	cfg.allowPrivateIPs = public.AllowPrivateIPs
+	cfg.debugMode = public.DebugInfo
+
+	if public.Logger != nil {
+		cfg.logger = public.Logger
+	}
+	if public.Metrics != nil {
+		cfg.metrics = public.Metrics
+	}
+
+	cfg.sourceHeaderKeys = sourceHeaderKeys(cfg.sourcePriority)
+	cfg.trustedProxyMatch = newPrefixMatcher(cfg.trustedProxyCIDRs)
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
-}
-
-func (c *config) clone() *config {
-	return &config{
-		trustedProxyCIDRs:           clonePrefixes(c.trustedProxyCIDRs),
-		trustedProxyMatch:           c.trustedProxyMatch,
-		minTrustedProxies:           c.minTrustedProxies,
-		maxTrustedProxies:           c.maxTrustedProxies,
-		allowPrivateIPs:             c.allowPrivateIPs,
-		allowReservedClientPrefixes: clonePrefixes(c.allowReservedClientPrefixes),
-		maxChainLength:              c.maxChainLength,
-		chainSelection:              c.chainSelection,
-		securityMode:                c.securityMode,
-		debugMode:                   c.debugMode,
-		sourcePriority:              cloneSources(c.sourcePriority),
-		sourceHeaderKeys:            cloneStrings(c.sourceHeaderKeys),
-		logger:                      c.logger,
-		metrics:                     c.metrics,
-		metricsFactory:              c.metricsFactory,
-		useMetricsFactory:           c.useMetricsFactory,
-	}
-}
-
-func (c *config) samePolicy(other *config) bool {
-	if other == nil {
-		return false
-	}
-
-	return slices.Equal(c.trustedProxyCIDRs, other.trustedProxyCIDRs) &&
-		c.minTrustedProxies == other.minTrustedProxies &&
-		c.maxTrustedProxies == other.maxTrustedProxies &&
-		c.allowPrivateIPs == other.allowPrivateIPs &&
-		slices.Equal(c.allowReservedClientPrefixes, other.allowReservedClientPrefixes) &&
-		c.maxChainLength == other.maxChainLength &&
-		c.chainSelection == other.chainSelection &&
-		c.securityMode == other.securityMode &&
-		c.debugMode == other.debugMode &&
-		slices.Equal(c.sourcePriority, other.sourcePriority) &&
-		slices.Equal(c.sourceHeaderKeys, other.sourceHeaderKeys)
-}
-
-func applyCallOptions(c *config, callOpts ...CallOption) error {
-	for _, callOpt := range callOpts {
-		if callOpt == nil {
-			return fmt.Errorf("call option cannot be nil")
-		}
-
-		if err := callOpt(c); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (c *config) withCallOptions(callOpts ...CallOption) (*config, error) {
-	if len(callOpts) == 0 {
-		return c, nil
-	}
-
-	effective := c.clone()
-
-	if err := applyCallOptions(effective, callOpts...); err != nil {
-		return nil, err
-	}
-
-	sourcePriorityChanged := !slices.Equal(effective.sourcePriority, c.sourcePriority)
-	if sourcePriorityChanged {
-		effective.sourcePriority = canonicalizeSources(effective.sourcePriority)
-		effective.sourceHeaderKeys = sourceHeaderKeys(effective.sourcePriority)
-	}
-
-	trustedProxyCIDRsChanged := !slices.Equal(effective.trustedProxyCIDRs, c.trustedProxyCIDRs)
-	if trustedProxyCIDRsChanged {
-		appendTrustedProxyCIDRs(effective, effective.trustedProxyCIDRs...)
-		trustedProxyCIDRsChanged = !slices.Equal(effective.trustedProxyCIDRs, c.trustedProxyCIDRs)
-	}
-
-	if trustedProxyCIDRsChanged {
-		effective.trustedProxyMatch = buildTrustedProxyMatcher(effective.trustedProxyCIDRs)
-	}
-
-	if err := effective.validate(); err != nil {
-		return nil, err
-	}
-
-	if c.samePolicy(effective) {
-		return c, nil
-	}
-
-	return effective, nil
 }

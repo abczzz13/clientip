@@ -1,176 +1,222 @@
 package clientip
 
 import (
-	"context"
-	"errors"
-	"net/http"
 	"net/netip"
-	"net/textproto"
 	"testing"
 )
 
-func TestSingleHeaderSource_Extract(t *testing.T) {
-	extractor := mustNewExtractor(t)
-
-	tests := []struct {
-		name        string
-		headerName  string
-		headerValue string
-		wantValid   bool
-		wantIP      string
-	}{
-		{
-			name:        "valid IP",
-			headerName:  "X-Real-IP",
-			headerValue: "1.1.1.1",
-			wantValid:   true,
-			wantIP:      "1.1.1.1",
-		},
-		{
-			name:        "IPv6",
-			headerName:  "X-Real-IP",
-			headerValue: "2606:4700:4700::1",
-			wantValid:   true,
-			wantIP:      "2606:4700:4700::1",
-		},
-		{
-			name:        "empty header",
-			headerName:  "X-Real-IP",
-			headerValue: "",
-			wantValid:   false,
-		},
-		{
-			name:        "invalid IP",
-			headerName:  "X-Real-IP",
-			headerValue: "not-an-ip",
-			wantValid:   false,
-		},
-		{
-			name:        "private IP rejected",
-			headerName:  "X-Real-IP",
-			headerValue: "192.168.1.1",
-			wantValid:   false,
-		},
-		{
-			name:        "custom header name",
-			headerName:  "CF-Connecting-IP",
-			headerValue: "1.1.1.1",
-			wantValid:   true,
-			wantIP:      "1.1.1.1",
+func TestSingleHeaderExtractor_ValidIP(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	source := SourceXRealIP
+	req := requestView{
+		remoteAddrValue: "10.0.0.1:1234",
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"8.8.8.8"},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			source := &singleHeaderSource{
-				extractor:  extractor,
-				headerName: tt.headerName,
-				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
-				sourceName: HeaderSource(tt.headerName),
-			}
-
-			req := &http.Request{
-				Header: make(http.Header),
-			}
-			if tt.headerValue != "" {
-				req.Header.Set(tt.headerName, tt.headerValue)
-			}
-
-			result, err := source.Extract(context.Background(), req)
-
-			if tt.wantValid {
-				if err != nil {
-					t.Errorf("Extract() error = %v, want nil", err)
-				}
-				want := netip.MustParseAddr(tt.wantIP)
-				if result.IP != want {
-					t.Errorf("Extract() IP = %v, want %v", result.IP, want)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("Extract() error = nil, want non-nil")
-				}
-			}
-		})
+	result, failure := ext.extract(req, source)
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	wantIP := netip.MustParseAddr("8.8.8.8")
+	if result.IP != wantIP {
+		t.Errorf("IP = %v, want %v", result.IP, wantIP)
+	}
+	if result.Source != source {
+		t.Errorf("Source = %v, want %v", result.Source, source)
 	}
 }
 
-func TestSingleHeaderSource_Extract_MultipleHeaderValues(t *testing.T) {
-	extractor, err := New()
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+func TestSingleHeaderExtractor_HeaderMissing(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		headerMap: map[string][]string{},
 	}
 
-	source := &singleHeaderSource{
-		extractor:  extractor,
-		headerName: "X-Real-IP",
-		headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
-		sourceName: HeaderSource("X-Real-IP"),
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
 	}
-
-	req := &http.Request{
-		RemoteAddr: "127.0.0.1:8080",
-		Header:     make(http.Header),
-	}
-	req.Header.Add("X-Real-IP", "1.1.1.1")
-	req.Header.Add("X-Real-IP", "8.8.8.8")
-
-	_, extractErr := source.Extract(context.Background(), req)
-	if extractErr == nil {
-		t.Fatal("Extract() error = nil, want error")
-	}
-
-	if !errors.Is(extractErr, ErrMultipleSingleIPHeaders) {
-		t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", extractErr)
-	}
-
-	var multipleHeadersErr *MultipleHeadersError
-	if !errors.As(extractErr, &multipleHeadersErr) {
-		t.Fatalf("error type = %T, want *MultipleHeadersError", extractErr)
-	}
-
-	if multipleHeadersErr.HeaderCount != 2 {
-		t.Fatalf("HeaderCount = %d, want 2", multipleHeadersErr.HeaderCount)
-	}
-
-	if multipleHeadersErr.HeaderName != "X-Real-IP" {
-		t.Fatalf("HeaderName = %q, want %q", multipleHeadersErr.HeaderName, "X-Real-IP")
+	if failure != errSourceUnavailable {
+		t.Errorf("failure = %+v, want errSourceUnavailable", failure)
 	}
 }
 
-func TestSingleHeaderSource_Name(t *testing.T) {
-	extractor := mustNewExtractor(t)
-
-	tests := []struct {
-		headerName string
-		wantName   string
-	}{
-		{
-			headerName: "X-Real-IP",
-			wantName:   "x_real_ip",
-		},
-		{
-			headerName: "CF-Connecting-IP",
-			wantName:   "cf_connecting_ip",
-		},
-		{
-			headerName: "X-Custom-Header",
-			wantName:   "x_custom_header",
+func TestSingleHeaderExtractor_EmptyHeaderValue(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		headerMap: map[string][]string{
+			"X-Real-Ip": {""},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.headerName, func(t *testing.T) {
-			source := &singleHeaderSource{
-				extractor:  extractor,
-				headerName: tt.headerName,
-				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
-				sourceName: HeaderSource(tt.headerName),
-			}
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
+	}
+	if failure != errSourceUnavailable {
+		t.Errorf("failure = %+v, want errSourceUnavailable", failure)
+	}
+}
 
-			if got := source.Source().String(); got != tt.wantName {
-				t.Errorf("Source().String() = %q, want %q", got, tt.wantName)
-			}
-		})
+func TestSingleHeaderExtractor_MultipleHeaderValues(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		remoteAddrValue: "10.0.0.1:1234",
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"8.8.4.4", "1.1.1.1"},
+		},
+	}
+
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
+	}
+	if failure.kind != failureMultipleHeaders {
+		t.Errorf("failure.kind = %v, want failureMultipleHeaders", failure.kind)
+	}
+	if failure.headerCount != 2 {
+		t.Errorf("failure.headerCount = %d, want 2", failure.headerCount)
+	}
+	if failure.headerName != "X-Real-Ip" {
+		t.Errorf("failure.headerName = %q, want %q", failure.headerName, "X-Real-Ip")
+	}
+}
+
+func TestSingleHeaderExtractor_UntrustedProxy(t *testing.T) {
+	trustedCIDR := netip.MustParsePrefix("10.0.0.0/8")
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+		trustedProxy: proxyPolicy{
+			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
+			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
+		},
+	}}
+	// Remote addr is not in trusted CIDR.
+	req := requestView{
+		remoteAddrValue: "5.5.5.5:4567",
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"9.9.9.9"},
+		},
+	}
+
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
+	}
+	if failure.kind != failureUntrustedProxy {
+		t.Errorf("failure.kind = %v, want failureUntrustedProxy", failure.kind)
+	}
+}
+
+func TestSingleHeaderExtractor_TrustedProxy(t *testing.T) {
+	trustedCIDR := netip.MustParsePrefix("10.0.0.0/8")
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+		trustedProxy: proxyPolicy{
+			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
+			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
+		},
+	}}
+	// Remote addr IS in trusted CIDR.
+	req := requestView{
+		remoteAddrValue: "10.0.0.1:4567",
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"9.9.9.9"},
+		},
+	}
+
+	result, failure := ext.extract(req, SourceXRealIP)
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	wantIP := netip.MustParseAddr("9.9.9.9")
+	if result.IP != wantIP {
+		t.Errorf("IP = %v, want %v", result.IP, wantIP)
+	}
+}
+
+func TestSingleHeaderExtractor_InvalidClientIP(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"not-an-ip"},
+		},
+	}
+
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
+	}
+	if failure.kind != failureInvalidClientIP {
+		t.Errorf("failure.kind = %v, want failureInvalidClientIP", failure.kind)
+	}
+	if failure.extractedIP != "not-an-ip" {
+		t.Errorf("failure.extractedIP = %q, want %q", failure.extractedIP, "not-an-ip")
+	}
+}
+
+func TestSingleHeaderExtractor_LoopbackIsInvalidClient(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"127.0.0.1"},
+		},
+	}
+
+	_, failure := ext.extract(req, SourceXRealIP)
+	if failure == nil {
+		t.Fatal("expected failure for loopback IP, got nil")
+	}
+	if failure.kind != failureInvalidClientIP {
+		t.Errorf("failure.kind = %v, want failureInvalidClientIP", failure.kind)
+	}
+}
+
+func TestSingleHeaderExtractor_IPv6(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+	}}
+	req := requestView{
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"2606:4700::1"},
+		},
+	}
+
+	result, failure := ext.extract(req, SourceXRealIP)
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	wantIP := netip.MustParseAddr("2606:4700::1")
+	if result.IP != wantIP {
+		t.Errorf("IP = %v, want %v", result.IP, wantIP)
+	}
+}
+
+func TestSingleHeaderExtractor_NoHeadersAtAll(t *testing.T) {
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Custom",
+	}}
+	req := requestView{}
+
+	_, failure := ext.extract(req, HeaderSource("X-Custom"))
+	if failure == nil {
+		t.Fatal("expected failure, got nil")
+	}
+	if failure != errSourceUnavailable {
+		t.Errorf("failure = %+v, want errSourceUnavailable", failure)
 	}
 }

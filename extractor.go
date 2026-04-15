@@ -1,7 +1,6 @@
 package clientip
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,72 +12,56 @@ import (
 //
 // Extractor instances are safe for concurrent reuse.
 type Extractor struct {
-	config *config
-	source sourceExtractor
+	config   *config
+	source   sourceExtractor
+	clientIP clientIPPolicy
+	proxy    proxyPolicy
 }
 
-// New creates an Extractor from one or more Option builders.
-func New(opts ...Option) (*Extractor, error) {
-	cfg, err := configFromOptions(opts...)
+// New creates an Extractor from a Config.
+func New(public Config) (*Extractor, error) {
+	cfg, err := configFromPublic(public)
 	if err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	extractor := &Extractor{config: cfg}
+	extractor := &Extractor{
+		config: cfg,
+		clientIP: clientIPPolicy{
+			AllowPrivateIPs:             cfg.allowPrivateIPs,
+			AllowReservedClientPrefixes: cfg.allowReservedClientPrefixes,
+		},
+		proxy: proxyPolicy{
+			TrustedProxyCIDRs: cfg.trustedProxyCIDRs,
+			TrustedProxyMatch: cfg.trustedProxyMatch,
+			MinTrustedProxies: cfg.minTrustedProxies,
+			MaxTrustedProxies: cfg.maxTrustedProxies,
+		},
+	}
 	extractor.source = extractor.buildSourceChain(cfg)
 
 	return extractor, nil
 }
 
-func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
-	sources := make([]sourceExtractor, 0, len(cfg.sourcePriority))
-	for _, configuredSource := range cfg.sourcePriority {
-		var source sourceExtractor
-		switch configuredSource.kind {
-		case sourceForwarded:
-			source = newForwardedSource(e)
-		case sourceXForwardedFor:
-			source = newForwardedForSource(e)
-		case sourceXRealIP:
-			source = newSingleHeaderSource(e, "X-Real-IP")
-		case sourceRemoteAddr:
-			source = newRemoteAddrSource(e)
-		default:
-			headerName, _ := configuredSource.headerKey()
-			source = newSingleHeaderSource(e, headerName)
-		}
-		sources = append(sources, source)
-	}
-
-	return newChainedSource(e, sources...)
-}
-
 // Extract resolves client IP and metadata for the request.
-//
-// When call options are provided, they are applied left-to-right and applied only
-// for this call.
-func (e *Extractor) Extract(r *http.Request, callOpts ...CallOption) (Extraction, error) {
+func (e *Extractor) Extract(r *http.Request) (Extraction, error) {
 	if r == nil {
 		return Extraction{}, ErrNilRequest
 	}
 
-	ctx := r.Context()
-
-	if len(callOpts) == 0 {
-		return e.extractWithSource(e.source, ctx, r)
+	if len(e.config.sourceHeaderKeys) == 0 {
+		if ctx := r.Context(); ctx.Err() != nil {
+			return Extraction{}, ctx.Err()
+		}
+		return e.extractFromRemoteAddr(r.RemoteAddr)
 	}
 
-	activeExtractor, activeSource, err := e.prepareCall(callOpts...)
-	if err != nil {
-		return Extraction{}, err
-	}
-
-	return activeExtractor.extractWithSource(activeSource, ctx, r)
+	return e.extractWithSource(e.source, requestViewFromRequest(r))
 }
 
 // ExtractAddr resolves only the client IP address.
-func (e *Extractor) ExtractAddr(r *http.Request, callOpts ...CallOption) (netip.Addr, error) {
-	extraction, err := e.Extract(r, callOpts...)
+func (e *Extractor) ExtractAddr(r *http.Request) (netip.Addr, error) {
+	extraction, err := e.Extract(r)
 	if err != nil {
 		return netip.Addr{}, err
 	}
@@ -86,41 +69,25 @@ func (e *Extractor) ExtractAddr(r *http.Request, callOpts ...CallOption) (netip.
 	return extraction.IP, nil
 }
 
-// ExtractFrom resolves client IP and metadata from framework-agnostic request
+// ExtractInput resolves client IP and metadata from framework-agnostic request
 // input.
-//
-// When call options are provided, they are applied left-to-right and applied only
-// for this call.
-func (e *Extractor) ExtractFrom(input RequestInput, callOpts ...CallOption) (Extraction, error) {
-	activeExtractor := e
-	activeSource := e.source
-
-	if len(callOpts) > 0 {
-		var err error
-		activeExtractor, activeSource, err = e.prepareCall(callOpts...)
-		if err != nil {
-			return Extraction{}, err
-		}
-	}
-
+func (e *Extractor) ExtractInput(input Input) (Extraction, error) {
 	ctx := requestInputContext(input)
 	if err := ctx.Err(); err != nil {
 		return Extraction{}, err
 	}
 
-	if len(activeExtractor.config.sourceHeaderKeys) == 0 {
-		return activeExtractor.extractFromRemoteAddr(input.RemoteAddr)
+	if len(e.config.sourceHeaderKeys) == 0 {
+		return e.extractFromRemoteAddr(input.RemoteAddr)
 	}
 
-	req := requestFromInput(input, activeExtractor.config.sourceHeaderKeys)
-
-	return activeExtractor.extractWithSource(activeSource, ctx, req)
+	return e.extractWithSource(e.source, requestViewFromInput(input))
 }
 
-// ExtractAddrFrom resolves only the client IP address from framework-agnostic
+// ExtractInputAddr resolves only the client IP address from framework-agnostic
 // request input.
-func (e *Extractor) ExtractAddrFrom(input RequestInput, callOpts ...CallOption) (netip.Addr, error) {
-	extraction, err := e.ExtractFrom(input, callOpts...)
+func (e *Extractor) ExtractInputAddr(input Input) (netip.Addr, error) {
+	extraction, err := e.ExtractInput(input)
 	if err != nil {
 		return netip.Addr{}, err
 	}
@@ -128,73 +95,45 @@ func (e *Extractor) ExtractAddrFrom(input RequestInput, callOpts ...CallOption) 
 	return extraction.IP, nil
 }
 
-func (e *Extractor) prepareCall(callOpts ...CallOption) (*Extractor, sourceExtractor, error) {
-	activeExtractor := e
-	activeSource := e.source
-
-	if len(callOpts) == 0 {
-		return activeExtractor, activeSource, nil
+func (e *Extractor) extractWithSource(source sourceExtractor, r requestView) (Extraction, error) {
+	if err := r.context().Err(); err != nil {
+		return Extraction{}, err
 	}
 
-	effectiveConfig, err := e.config.withCallOptions(callOpts...)
+	result, err := source.extract(r)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid call options: %w", err)
-	}
-	if effectiveConfig == e.config {
-		return activeExtractor, activeSource, nil
-	}
-
-	activeExtractor = &Extractor{config: effectiveConfig}
-	activeExtractor.source = activeExtractor.buildSourceChain(effectiveConfig)
-	activeSource = activeExtractor.source
-
-	return activeExtractor, activeSource, nil
-}
-
-func (e *Extractor) extractWithSource(source sourceExtractor, ctx context.Context, r *http.Request) (Extraction, error) {
-	extractionResult, err := source.Extract(ctx, r)
-	if err != nil {
-		sourceValue := e.getSource(extractionResult, err)
-		return Extraction{
-			Source:            sourceValue,
-			TrustedProxyCount: extractionResult.TrustedProxyCount,
-			DebugInfo:         extractionResult.DebugInfo,
-		}, err
+		fallbackSource := source.sourceInfo()
+		if !result.Source.valid() {
+			result.Source = fallbackSource
+		}
+		result.Source = e.getSource(result, err)
+		return result, err
 	}
 
-	sourceValue := extractionResult.Source
-	if !sourceValue.valid() {
-		sourceValue = source.Source()
-	}
-
-	return Extraction{
-		IP:                normalizeIP(extractionResult.IP),
-		Source:            sourceValue,
-		TrustedProxyCount: extractionResult.TrustedProxyCount,
-		DebugInfo:         extractionResult.DebugInfo,
-	}, nil
+	return result, nil
 }
 
 func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
-	result, err := e.extractRemoteAddr(remoteAddr)
-	if err != nil {
-		sourceValue := e.getSource(result, err)
-		return Extraction{
-			Source:            sourceValue,
-			TrustedProxyCount: result.TrustedProxyCount,
-			DebugInfo:         result.DebugInfo,
-		}, err
+	source := builtinSource(sourceRemoteAddr)
+	result, failure := remoteAddrExtractor{clientIPPolicy: e.clientIP}.extract(remoteAddr, source)
+	if failure != nil {
+		if failure.kind != failureSourceUnavailable {
+			e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
+			e.config.metrics.RecordExtractionFailure(source.String())
+		}
+		err := adaptRemoteAddrFailure(failure, source)
+		result.Source = e.getSource(result, err)
+		return result, err
 	}
 
-	return Extraction{
-		IP:                normalizeIP(result.IP),
-		Source:            result.Source,
-		TrustedProxyCount: result.TrustedProxyCount,
-		DebugInfo:         result.DebugInfo,
-	}, nil
+	e.config.metrics.RecordExtractionSuccess(source.String())
+	return result, nil
 }
 
-func (e *Extractor) getSource(result extractionResult, err error) Source {
+// getSource resolves the authoritative source for a result.
+//
+// Precedence: error-embedded source > result source > extractor default.
+func (e *Extractor) getSource(result Extraction, err error) Source {
 	if err != nil {
 		var sourceErr interface{ SourceValue() Source }
 		if errors.As(err, &sourceErr) {
@@ -205,5 +144,5 @@ func (e *Extractor) getSource(result extractionResult, err error) Source {
 	if result.Source.valid() {
 		return result.Source
 	}
-	return e.source.Source()
+	return e.source.sourceInfo()
 }

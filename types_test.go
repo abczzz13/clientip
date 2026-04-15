@@ -193,6 +193,7 @@ func TestSource_StringAndCanonicalization(t *testing.T) {
 		{name: "x-real-ip alias", got: HeaderSource("X_Real_IP"), want: SourceXRealIP, text: "x_real_ip"},
 		{name: "remote addr alias", got: HeaderSource("Remote-Addr"), want: SourceRemoteAddr, text: "remote_addr"},
 		{name: "custom header", got: HeaderSource("CF-Connecting-IP"), want: HeaderSource("cf-connecting-ip"), text: "cf_connecting_ip"},
+		{name: "static fallback alias", got: HeaderSource("Static-Fallback"), want: SourceStaticFallback, text: "static_fallback"},
 		{name: "blank header invalid", got: HeaderSource("  "), want: Source{}, text: ""},
 	}
 
@@ -204,6 +205,29 @@ func TestSource_StringAndCanonicalization(t *testing.T) {
 
 			if got, want := tt.got.String(), tt.text; got != want {
 				t.Fatalf("String() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestHeaderSource_String(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "X-Forwarded-For", want: "x_forwarded_for"},
+		{input: "Forwarded", want: "forwarded"},
+		{input: "X-Real-IP", want: "x_real_ip"},
+		{input: "CF-Connecting-IP", want: "cf_connecting_ip"},
+		{input: "UPPERCASE-HEADER", want: "uppercase_header"},
+		{input: "already_underscored", want: "already_underscored"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := HeaderSource(tt.input).String()
+			if got != tt.want {
+				t.Errorf("HeaderSource(%q).String() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -287,15 +311,15 @@ func TestSource_BuiltinsIgnoreExportedValueMutation(t *testing.T) {
 		t.Fatalf("HeaderSource(Remote-Addr) = %q, want %q", got, want)
 	}
 
-	extractor := mustNewExtractor(t)
+	extractor := mustNewExtractor(t, DefaultConfig())
 	if diff := cmp.Diff([]Source{builtinSource(sourceRemoteAddr)}, extractor.config.sourcePriority); diff != "" {
 		t.Fatalf("default source priority mismatch (-want +got):\n%s", diff)
 	}
 
-	forwardedExtractor := mustNewExtractor(t,
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(HeaderSource("Forwarded")),
-	)
+	forwardedConfig := DefaultConfig()
+	forwardedConfig.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	forwardedConfig.Sources = []Source{HeaderSource("Forwarded")}
+	forwardedExtractor := mustNewExtractor(t, forwardedConfig)
 	if diff := cmp.Diff([]Source{builtinSource(sourceForwarded)}, forwardedExtractor.config.sourcePriority); diff != "" {
 		t.Fatalf("canonicalized source priority mismatch (-want +got):\n%s", diff)
 	}

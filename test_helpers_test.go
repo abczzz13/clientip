@@ -62,13 +62,6 @@ func asError(err error, target any) bool {
 	}
 }
 
-func errorContains(err, target error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, target)
-}
-
 func extractionStateOf(extraction Extraction) extractionState {
 	state := extractionState{
 		HasIP:  extraction.IP.IsValid(),
@@ -89,15 +82,26 @@ func errorTextStateOf(err error, contains string) errorTextState {
 	}
 }
 
-func mustNewExtractor(t *testing.T, opts ...Option) *Extractor {
+func mustNewExtractor(t *testing.T, cfg Config) *Extractor {
 	t.Helper()
 
-	extractor, err := New(opts...)
+	extractor, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	return extractor
+}
+
+func mustProxyPrefixesFromAddrs(t *testing.T, addrs ...netip.Addr) []netip.Prefix {
+	t.Helper()
+
+	prefixes, err := ProxyPrefixesFromAddrs(addrs...)
+	if err != nil {
+		t.Fatalf("ProxyPrefixesFromAddrs() error = %v", err)
+	}
+
+	return prefixes
 }
 
 func mustParseCIDRs(t *testing.T, cidrs ...string) []netip.Prefix {

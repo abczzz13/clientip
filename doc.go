@@ -1,143 +1,93 @@
 // Package clientip provides secure client IP extraction from HTTP requests and
-// framework-agnostic request inputs with support for proxy chains, trusted
-// proxy validation, and multiple header sources.
+// framework-agnostic inputs with trusted proxy validation, explicit source
+// modeling, and request-scoped resolver caching.
 //
-// # Features
+// # Choose The API
 //
-//   - Security-first design with protection against IP spoofing and header injection
-//   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
-//   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
-//   - Framework-friendly RequestInput API for non-net/http integrations
-//   - Typed source configuration via opaque Source values, built-in Source variables, and HeaderSource(...)
-//   - Safe defaults: RemoteAddr-only unless header sources are explicitly configured
-//   - Deployment presets for common topologies (direct, loopback proxy, VM proxy)
-//   - Per-call policy overrides via CallOption builders such as WithCallSecurityMode
-//   - Optional observability with context-aware logging and pluggable metrics
-//   - Type-safe using modern Go netip.Addr
+// Resolver is the primary integration-facing API.
+//
+// Use Resolver when you want to:
+//
+//   - resolve once per request or Input
+//   - reuse the result later from context
+//   - choose between strict and preferred semantics
+//   - keep explicit fallback behavior on a separate layer from extraction
+//
+// Extractor remains the low-level strict primitive.
+//
+// Use Extractor when you want one direct extraction call without request-scoped
+// caching or preferred fallback.
+//
+// Input is the framework-agnostic carrier for non-net/http integrations.
+//
+// ParseRemoteAddr and ClassifyError are small helpers for explicit fallback and
+// policy code. ClassifyError keeps typed errors intact while providing a
+// smaller ResultKind layer for middleware and policy branches.
 //
 // # Basic Usage
 //
-// Simple extraction without proxy configuration:
-//
-//	extractor, err := clientip.New()
+//	extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	extraction, err := extractor.Extract(req)
+//	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
 //	if err != nil {
-//	    log.Printf("extract failed: %v", err)
+//	    log.Fatal(err)
+//	}
+//
+//	req, resolution := resolver.ResolveStrict(req)
+//	if resolution.Err != nil {
+//	    log.Printf("resolve failed: %v", resolution.Err)
 //	    return
 //	}
 //
-//	fmt.Printf("Client IP: %s from %s\n", extraction.IP, extraction.Source)
+//	fmt.Printf("Client IP: %s from %s\n", resolution.IP, resolution.Source)
 //
-// Framework-agnostic input is available via ExtractFrom:
+//	if cached, ok := clientip.StrictResolutionFromContext(req.Context()); ok {
+//	    fmt.Printf("Cached client IP: %s\n", cached.IP)
+//	}
 //
-//	extraction, err := extractor.ExtractFrom(clientip.RequestInput{
+// Framework-agnostic input is available through ExtractInput and Resolver's
+// input methods. Resolver methods return the updated request or Input so cached
+// resolution state can flow through the call path:
+//
+//	input, resolution := resolver.ResolveInputStrict(clientip.Input{
 //	    Context:    ctx,
 //	    RemoteAddr: remoteAddr,
 //	    Path:       path,
 //	    Headers:    headerProvider,
 //	})
+//	_ = input
 //
-// Call options work with both Extract and ExtractFrom:
+// # Config, Sources, And Security
 //
-//	extraction, err := extractor.ExtractFrom(input,
-//	    clientip.WithCallSourcePriority(
-//	        clientip.HeaderSource("CF-Connecting-IP"),
-//	        clientip.SourceRemoteAddr,
-//	    ),
-//	)
+// Config stays flat in the current public API. Presets return Config values and
+// can be tweaked before construction.
 //
-// # Behind Reverse Proxy
+// Source values stay public and opaque. Use the built-in extractor sources for
+// request-derived extraction, SourceStaticFallback for resolver static fallback
+// results, and HeaderSource for custom headers.
 //
-// Configure trusted proxy prefixes with flexible min/max proxy count:
+// Extractor walks Config.Sources in order. Source-unavailable errors allow the
+// next source to run, while malformed headers, proxy-trust failures, chain
+// limits, and implausible client IPs remain terminal.
 //
-//	cidrs, _ := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
-//	extractor, err := clientip.New(
-//	    clientip.WithTrustedProxyPrefixes(cidrs...), // Trust upstream proxy ranges
-//	    clientip.WithMinTrustedProxies(0),         // Count trusted proxies present in proxy headers
-//	    clientip.WithMaxTrustedProxies(2),
-//	    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-//	    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
-//	    clientip.WithAllowPrivateIPs(false),
-//	)
+// Header-based sources require trusted upstream proxy ranges. Configure
+// TrustedProxyPrefixes directly, optionally using LoopbackProxyPrefixes,
+// PrivateProxyPrefixes, LocalProxyPrefixes, or ProxyPrefixesFromAddrs.
 //
-// # Custom Headers
-//
-// Support for cloud providers and custom proxy headers:
-//
-//	extractor, _ := clientip.New(
-//	    clientip.WithTrustedLoopbackProxy(),
-//	    clientip.WithSourcePriority(
-//	        clientip.HeaderSource("CF-Connecting-IP"), // Cloudflare
-//	        clientip.SourceXForwardedFor,
-//	        clientip.SourceRemoteAddr,
-//	    ),
-//	)
-//
-// Header sources require trusted upstream proxy ranges. Use
-// WithTrustedProxyPrefixes(with ParseCIDRs for string inputs) or helper options like
-// WithTrustedLoopbackProxy, WithTrustedPrivateProxyRanges,
-// WithTrustedLocalProxyDefaults, or WithTrustedProxyAddrs.
-//
-// Presets are available for common setups:
-//
-//	extractor, _ := clientip.New(clientip.PresetVMReverseProxy())
+// Preferred resolver fallback is explicit and operationally useful, but it is
+// not suitable for authorization or trust-boundary enforcement.
 //
 // # Observability
 //
-// Add logging and metrics for production monitoring:
-// (Prometheus adapter package: github.com/abczzz13/clientip/prometheus)
-// The logger receives req.Context(), allowing trace/span IDs to flow through.
+// Logger and Metrics remain separate public interfaces.
 //
-//	import clientipprom "github.com/abczzz13/clientip/prometheus"
+// Security event labels are exported as SecurityEvent... constants so adapters
+// can depend on stable names.
 //
-//	metrics, _ := clientipprom.New()
-//
-//	extractor, err := clientip.New(
-//	    clientip.WithTrustedProxyPrefixes(cidrs...),
-//	    clientip.WithMinTrustedProxies(0),
-//	    clientip.WithMaxTrustedProxies(3),
-//	    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-//	    clientip.WithLogger(slog.Default()),
-//	    clientip.WithMetrics(metrics),
-//	)
-//
-// # Security Considerations
-//
-// The package includes several security features:
-//
-//   - Detection of malformed Forwarded headers and duplicate single-IP header values
-//   - Immediate proxy trust enforcement before honoring Forwarded/X-Forwarded-For
-//   - Validation of proxy counts (min/max enforcement)
-//   - Chain length limits to prevent DoS
-//   - Rejection of invalid/implausible IPs (loopback, multicast, etc.)
-//   - Optional private IP filtering and explicit reserved CIDR allowlisting
-//   - Strict fail-closed behavior by default (SecurityModeStrict)
-//
-// # Security Anti-Patterns
-//
-//   - Do not combine multiple competing header sources for security decisions.
-//   - Do not use SecurityModeLax for ACL/risk/authz enforcement paths.
-//   - Do not trust broad proxy CIDRs unless they are truly controlled by your edge.
-//
-// # Security Modes
-//
-// Security behavior can be configured per extractor:
-//
-//   - SecurityModeStrict (default): fail closed on security-significant errors and invalid present source values.
-//   - SecurityModeLax: allow fallback to lower-priority sources for those errors.
-//
-// Example:
-//
-//	extractor, _ := clientip.New(
-//	    clientip.WithSecurityMode(clientip.SecurityModeLax),
-//	)
-//
-// # Thread Safety
-//
-// Extractor instances are safe for concurrent use. They are typically created
-// once at application startup and reused across all requests.
+// Preferred resolver fallback remains result-only in this phase. Inspect
+// Resolution.FallbackUsed rather than expecting separate fallback log or metric
+// signals.
 package clientip

@@ -2,210 +2,148 @@ package clientip_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/netip"
 	"net/textproto"
-	"os"
 
 	"github.com/abczzz13/clientip"
 )
 
-func ExampleNew_simple() {
-	extractor, err := clientip.New()
+func ExampleResolver_ResolveStrict() {
+	extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
+	if err != nil {
+		panic(err)
+	}
+
+	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+	if err != nil {
+		panic(err)
+	}
+
+	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+
+	req, resolution := resolver.ResolveStrict(req)
+	if resolution.Err != nil {
+		panic(resolution.Err)
+	}
+
+	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
+
+	cached, ok := clientip.StrictResolutionFromContext(req.Context())
+	fmt.Println(ok, cached.IP)
+	// Output:
+	// 8.8.8.8 x_forwarded_for false
+	// true 8.8.8.8
+}
+
+func ExampleResolver_ResolvePreferred() {
+	extractor, err := clientip.New(clientip.Config{
+		TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
+		Sources:              []clientip.Source{clientip.SourceXForwardedFor},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{PreferredFallback: clientip.PreferredFallbackRemoteAddr})
+	if err != nil {
+		panic(err)
+	}
+
+	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
+
+	_, resolution := resolver.ResolvePreferred(req)
+	if resolution.Err != nil {
+		panic(resolution.Err)
+	}
+
+	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
+	// Output:
+	// 1.1.1.1 remote_addr true
+}
+
+func ExamplePreferredResolutionFromContext() {
+	extractor, err := clientip.New(clientip.DefaultConfig())
+	if err != nil {
+		panic(err)
+	}
+
+	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
 	if err != nil {
 		panic(err)
 	}
 
 	req := &http.Request{RemoteAddr: "8.8.4.4:12345", Header: make(http.Header)}
 
-	ip, err := extractor.ExtractAddr(req)
+	req, resolution := resolver.ResolvePreferred(req)
+	if resolution.Err != nil {
+		panic(resolution.Err)
+	}
+
+	cached, ok := clientip.PreferredResolutionFromContext(req.Context())
+	fmt.Println(ok, cached.IP == resolution.IP, cached.Source)
+	// Output:
+	// true true remote_addr
+}
+
+func ExampleExtractor_Extract() {
+	extractor, err := clientip.New(clientip.DefaultConfig())
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Client IP: %s\n", ip)
+	req := &http.Request{RemoteAddr: "8.8.4.4:12345", Header: make(http.Header)}
+
+	extraction, err := extractor.Extract(req)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(extraction.IP, extraction.Source)
+	// Output:
+	// 8.8.4.4 remote_addr
 }
 
 func ExamplePresetVMReverseProxy() {
-	extractor, _ := clientip.New(clientip.PresetVMReverseProxy())
+	extractor, err := clientip.New(clientip.PresetVMReverseProxy())
+	if err != nil {
+		panic(err)
+	}
+
+	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+	if err != nil {
+		panic(err)
+	}
 
 	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
-	extraction, _ := extractor.Extract(req)
-	fmt.Println(extraction.IP, extraction.Source)
+	_, resolution := resolver.ResolveStrict(req)
+	if resolution.Err != nil {
+		panic(resolution.Err)
+	}
+
+	fmt.Println(resolution.IP, resolution.Source)
 	// Output: 1.1.1.1 x_forwarded_for
 }
 
-func ExamplePresetPreferredHeaderThenXFFLax() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedLoopbackProxy(),
-		clientip.PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
-	)
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
-	req.Header.Set("X-Frontend-IP", "not-an-ip")
-	req.Header.Set("X-Forwarded-For", "8.8.8.8")
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output: 8.8.8.8 x_forwarded_for
-}
-
-func ExampleNew_forwarded() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedLoopbackProxy(),
-		clientip.WithSourcePriority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
-	)
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
-	req.Header.Set("Forwarded", "for=1.1.1.1")
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output: 1.1.1.1 forwarded
-}
-
-func ExampleNew_withOptions() {
-	cidrs, _ := netip.ParsePrefix("10.0.0.0/8")
-
-	extractor, err := clientip.New(
-		clientip.WithTrustedProxyPrefixes(cidrs),
-		clientip.WithMinTrustedProxies(1),
-		clientip.WithMaxTrustedProxies(2),
-		clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-		clientip.WithAllowPrivateIPs(false),
-		clientip.WithLogger(slog.New(slog.NewTextHandler(os.Stdout, nil))),
-	)
+func ExampleResolver_ResolveInputPreferred() {
+	extractor, err := clientip.New(clientip.Config{
+		TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
+		Sources:              []clientip.Source{clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr},
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	req := &http.Request{RemoteAddr: "10.0.1.5:12345", Header: make(http.Header)}
-	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.1.5")
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Printf("Client IP: %s from source: %s\n", extraction.IP, extraction.Source)
-}
-
-func ExampleWithAllowedReservedClientPrefixes() {
-	extractor, _ := clientip.New(
-		clientip.WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
-	)
-
-	req := &http.Request{RemoteAddr: "198.51.100.10:12345", Header: make(http.Header)}
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output: 198.51.100.10 remote_addr
-}
-
-func ExampleNew_flexibleProxyRange() {
-	cidrs, _ := netip.ParsePrefix("10.0.0.0/8")
-
-	extractor, _ := clientip.New(
-		clientip.WithTrustedProxyPrefixes(cidrs),
-		clientip.WithMinTrustedProxies(1),
-		clientip.WithMaxTrustedProxies(3),
-		clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-	)
-
-	req1 := &http.Request{RemoteAddr: "10.0.0.1:12345", Header: make(http.Header)}
-	req1.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
-	extraction1, _ := extractor.Extract(req1)
-	fmt.Printf("1 proxy: %s\n", extraction1.IP)
-
-	req2 := &http.Request{RemoteAddr: "10.0.0.3:12345", Header: make(http.Header)}
-	req2.Header.Set("X-Forwarded-For", "8.8.8.8, 10.0.0.2, 10.0.0.3")
-	extraction2, _ := extractor.Extract(req2)
-	fmt.Printf("2 proxies: %s\n", extraction2.IP)
-}
-
-func ExampleNew_cloudflare() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedLoopbackProxy(),
-		clientip.WithSourcePriority(clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-	)
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
-	req.Header.Set("CF-Connecting-IP", "1.1.1.1")
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Printf("Client IP: %s (from %s)\n", extraction.IP, extraction.Source)
-}
-
-func ExampleHeader() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedLoopbackProxy(),
-		clientip.WithSourcePriority(clientip.HeaderSource("X-Custom-IP"), clientip.SourceRemoteAddr),
-	)
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
-	req.Header.Set("X-Custom-IP", "8.8.8.8")
-
-	ip, _ := extractor.ExtractAddr(req)
-	fmt.Printf("IP: %s\n", ip)
-}
-
-func ExampleWithChainSelection_leftmostUntrusted() {
-	cloudflareCIDRs, _ := netip.ParsePrefix("173.245.48.0/20")
-
-	extractor, _ := clientip.New(
-		clientip.WithTrustedProxyPrefixes(cloudflareCIDRs),
-		clientip.WithMinTrustedProxies(1),
-		clientip.WithMaxTrustedProxies(3),
-		clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-		clientip.WithChainSelection(clientip.LeftmostUntrustedIP),
-	)
-
-	req := &http.Request{RemoteAddr: "173.245.48.5:443", Header: make(http.Header)}
-	req.Header.Set("X-Forwarded-For", "1.1.1.1, 173.245.48.5")
-
-	ip, _ := extractor.ExtractAddr(req)
-	fmt.Printf("Client IP: %s\n", ip)
-}
-
-func ExampleWithSecurityMode_strict() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		clientip.WithSourcePriority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
-		clientip.WithSecurityMode(clientip.SecurityModeStrict),
-	)
-
-	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-	req.Header.Set("Forwarded", `for="1.1.1.1`)
-
-	extraction, err := extractor.Extract(req)
-	fmt.Println(err == nil, errors.Is(err, clientip.ErrInvalidForwardedHeader), extraction.Source)
-	// Output: false true forwarded
-}
-
-func ExampleWithSecurityMode_lax() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		clientip.WithSourcePriority(clientip.SourceForwarded, clientip.SourceRemoteAddr),
-		clientip.WithSecurityMode(clientip.SecurityModeLax),
-	)
-
-	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-	req.Header.Set("Forwarded", `for="1.1.1.1`)
-
-	extraction, _ := extractor.Extract(req)
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output: 1.1.1.1 remote_addr
-}
-
-func ExampleExtractor_ExtractFrom() {
-	extractor, _ := clientip.New(
-		clientip.WithTrustedLoopbackProxy(),
-		clientip.WithSourcePriority(clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr),
-	)
+	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+	if err != nil {
+		panic(err)
+	}
 
 	cfHeader := textproto.CanonicalMIMEHeaderKey("CF-Connecting-IP")
-	input := clientip.RequestInput{
+	input := clientip.Input{
 		Context:    context.Background(),
 		RemoteAddr: "127.0.0.1:12345",
 		Path:       "/framework-request",
@@ -217,7 +155,15 @@ func ExampleExtractor_ExtractFrom() {
 		}),
 	}
 
-	extraction, _ := extractor.ExtractFrom(input)
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output: 8.8.8.8 cf_connecting_ip
+	input, resolution := resolver.ResolveInputPreferred(input)
+	if resolution.Err != nil {
+		panic(resolution.Err)
+	}
+
+	cached, ok := clientip.PreferredResolutionFromContext(input.Context)
+	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
+	fmt.Println(ok, cached.Source)
+	// Output:
+	// 8.8.8.8 cf_connecting_ip false
+	// true cf_connecting_ip
 }

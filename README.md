@@ -4,12 +4,12 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/abczzz13/clientip.svg)](https://pkg.go.dev/github.com/abczzz13/clientip)
 [![License](https://img.shields.io/github/license/abczzz13/clientip)](LICENSE)
 
-Secure client IP extraction for `net/http` and framework-agnostic request inputs with trusted proxy validation, configurable source priority, and optional logging/metrics.
+Secure client IP extraction for `net/http` and framework-agnostic request inputs with trusted proxy validation, explicit source modeling, and request-scoped resolver caching.
 
 ## Stability
 
 This project is pre-`v1.0.0` and still before `v0.1.0`, so public APIs may change as the package evolves.
-Any breaking changes will be called out in `CHANGELOG.md`.
+Any breaking changes are called out in `CHANGELOG.md`.
 
 ## Install
 
@@ -23,114 +23,112 @@ Optional Prometheus adapter:
 go get github.com/abczzz13/clientip/prometheus
 ```
 
-```go
-import "github.com/abczzz13/clientip"
-```
+## Choose the API
 
-## Compatibility
+- `Resolver` is the primary API. Use it when middleware, handlers, or framework adapters need to resolve the client IP once and reuse the result on the same request.
+- `Extractor` is the low-level strict primitive. Use it when you only need one extraction call and do not need request-scoped caching or preferred fallback.
+- `Input` is the framework-agnostic carrier for non-`net/http` integrations.
+- `ParseRemoteAddr` and `ClassifyError` are small helpers for explicit fallback and policy code.
 
-- Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
-- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x`.
-- Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
+Construct an `Extractor` once and reuse it. Build a `Resolver` on top when you want strict or preferred request-scoped resolution.
 
-## Quick start
+## Quick Start
 
-By default, `New()` extracts from `RemoteAddr` only.
-
-### Presets (recommended)
-
-Use these when you want setup by deployment type instead of low-level options:
-
-- `PresetDirectConnection()` app receives traffic directly (no trusted proxy headers)
-- `PresetLoopbackReverseProxy()` reverse proxy on same host (`127.0.0.1` / `::1`)
-- `PresetVMReverseProxy()` typical VM/private-network reverse proxy setup
-- `PresetPreferredHeaderThenXFFLax("X-Frontend-IP")` prefer custom header, then `X-Forwarded-For`, then `RemoteAddr` (lax fallback)
-
-#### Which preset should I use?
-
-| If your setup looks like... | Start with... |
-| --- | --- |
-| App is directly internet-facing (no reverse proxy) | `PresetDirectConnection()` |
-| NGINX/Caddy runs on the same host and proxies to your app | `PresetLoopbackReverseProxy()` |
-| App runs on a VM/private network behind one or more internal proxies | `PresetVMReverseProxy()` |
-| You have a best-effort custom header and want fallback to XFF | `PresetPreferredHeaderThenXFFLax("X-Frontend-IP")` |
-
-Preset examples:
+Use `Resolver.ResolveStrict` for security-sensitive or audit-oriented decisions.
 
 ```go
-// Typical VM setup (reverse proxy + private networking)
-vmExtractor, err := clientip.New(
-    clientip.PresetVMReverseProxy(),
-)
-
-// Prefer a best-effort header, then fallback to XFF and RemoteAddr
-fallbackExtractor, err := clientip.New(
-    clientip.WithTrustedLoopbackProxy(),
-    clientip.PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
-)
-
-_ = vmExtractor
-_ = fallbackExtractor
-```
-
-### Simple (no proxy configuration)
-
-```go
-extractor, err := clientip.New()
+extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
 if err != nil {
     log.Fatal(err)
 }
 
-ip, err := extractor.ExtractAddr(req)
+resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
 if err != nil {
-    fmt.Printf("Failed: %v\n", err)
-    return
+    log.Fatal(err)
 }
 
-fmt.Printf("Client IP: %s\n", ip)
+req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
+req.Header.Set("X-Forwarded-For", "8.8.8.8")
+
+req, resolution := resolver.ResolveStrict(req)
+if resolution.Err != nil {
+    log.Fatal(resolution.Err)
+}
+
+fmt.Printf("Client IP: %s from %s\n", resolution.IP, resolution.Source)
+
+if cached, ok := clientip.StrictResolutionFromContext(req.Context()); ok {
+    fmt.Printf("Cached: %s\n", cached.IP)
+}
 ```
 
-### Framework-friendly input API
+## Preferred Resolution And Fallback
 
-Use `ExtractFrom` when your framework does not expose `*http.Request` directly.
+Use `Resolver.ResolvePreferred` when best-effort client IPs are operationally useful, such as rate limiting, analytics, or request tracing.
 
 ```go
-input := clientip.RequestInput{
+extractor, err := clientip.New(clientip.Config{
+    TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
+    Sources:              []clientip.Source{clientip.SourceXForwardedFor},
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{
+    PreferredFallback: clientip.PreferredFallbackRemoteAddr,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
+
+_, resolution := resolver.ResolvePreferred(req)
+if resolution.Err != nil {
+    log.Fatal(resolution.Err)
+}
+
+fmt.Printf("Client IP: %s from %s (fallback=%t)\n", resolution.IP, resolution.Source, resolution.FallbackUsed)
+```
+
+Important fallback guidance:
+
+- Preferred fallback is explicit and only lives on `Resolver`.
+- `PreferredFallbackRemoteAddr` is operationally useful, but it is not equivalent to validated proxy-header extraction.
+- Preferred resolution is not suitable for authorization, ACLs, or other trust-boundary decisions.
+- Fallback observability is result-only in this phase. Inspect `Resolution.FallbackUsed`; do not expect a separate fallback metric or log event.
+
+If you want a synthetic fallback value instead of `RemoteAddr`, set `ResolverConfig{PreferredFallback: clientip.PreferredFallbackStaticIP, StaticFallbackIP: ...}`. Successful static fallback reports `SourceStaticFallback`.
+
+## Framework-Agnostic Input
+
+Use `Input` with either `Extractor` or `Resolver` when your framework does not expose `*http.Request` directly.
+
+```go
+input := clientip.Input{
     Context:    ctx,
     RemoteAddr: remoteAddr,
     Path:       path,
-    Headers:    headersProvider, // any type implementing Values(name string) []string
+    Headers:    headersProvider,
 }
 
-extraction, err := extractor.ExtractFrom(input)
-if err != nil {
+input, resolution := resolver.ResolveInputStrict(input)
+if resolution.Err != nil {
     // handle error
 }
+
+if cached, ok := clientip.StrictResolutionFromContext(input.Context); ok {
+    _ = cached
+}
 ```
 
-`http.Header` already implements the required header interface, so for `net/http`
-style frameworks (Gin, Echo, Chi) you can keep using `Extract(req)` directly.
+`Input.Headers` must preserve repeated header lines as separate slice entries. Do not merge duplicate lines into a single comma-joined string.
 
-`ExtractFrom` only requests header names required by the configured
-`WithSourcePriority(...)` sources.
-
-Call-time overrides apply to `ExtractFrom(...)` as well, so middleware can
-switch to a different trusted header or fall back to `SourceRemoteAddr`
-without constructing a second extractor.
+For `fasthttp`/Fiber style integrations:
 
 ```go
-// Gin
-extraction, err := extractor.Extract(c.Request)
-
-// Echo
-extraction, err := extractor.Extract(c.Request())
-```
-
-For `fasthttp`/Fiber style frameworks, provide a header adapter with
-`HeaderValuesFunc` and preserve duplicate header lines:
-
-```go
-input := clientip.RequestInput{
+input := clientip.Input{
     Context:    c.UserContext(),
     RemoteAddr: c.Context().RemoteAddr().String(),
     Path:       c.Path(),
@@ -149,69 +147,158 @@ input := clientip.RequestInput{
 }
 ```
 
-Important: do not merge repeated header lines into a single comma-joined value.
-Single-IP sources (for example `X-Real-IP` or custom headers) rely on per-line
-values to detect duplicates in strict mode.
+## Presets
 
-### Behind reverse proxies
+Presets return a flat `clientip.Config` that you can pass directly to `New` or tweak before construction.
+
+- `PresetDirectConnection()` uses `RemoteAddr` only.
+- `PresetLoopbackReverseProxy()` trusts loopback proxies and prioritizes `X-Forwarded-For` before `RemoteAddr`.
+- `PresetVMReverseProxy()` trusts loopback and common private-network proxy ranges and prioritizes `X-Forwarded-For` before `RemoteAddr`.
 
 ```go
-cidrs, err := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
-if err != nil {
-    log.Fatal(err)
-}
-
-extractor, err := clientip.New(
-    // min=0 allows requests where proxy headers contain only the client IP
-    // (trusted RemoteAddr is validated separately).
-    clientip.WithTrustedProxyPrefixes(cidrs...),
-    clientip.WithMinTrustedProxies(0),
-    clientip.WithMaxTrustedProxies(3),
-    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
-)
+extractor, err := clientip.New(clientip.PresetVMReverseProxy())
 if err != nil {
     log.Fatal(err)
 }
 ```
 
-### Custom header priority
+If you need to tweak a preset, modify the returned config before calling `New`:
 
 ```go
-extractor, err := clientip.New(
-    clientip.WithTrustedPrivateProxyRanges(),
-    clientip.WithSourcePriority(
-        clientip.HeaderSource("CF-Connecting-IP"),
-        clientip.SourceXForwardedFor,
-        clientip.SourceRemoteAddr,
-    ),
-)
+cfg := clientip.PresetVMReverseProxy()
+cfg.Sources = []clientip.Source{clientip.SourceForwarded, clientip.SourceRemoteAddr}
+
+extractor, err := clientip.New(cfg)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
-### Security mode (strict vs lax)
+Presets configure `Config`, not `ResolverConfig`. Preferred resolver fallback stays an explicit resolver-level choice.
+
+## Config
+
+`Config` stays flat in the current API.
+
+Important fields:
+
+- `TrustedProxyPrefixes []netip.Prefix`
+- `MinTrustedProxies int`
+- `MaxTrustedProxies int`
+- `AllowPrivateIPs bool`
+- `AllowedReservedClientPrefixes []netip.Prefix`
+- `MaxChainLength int`
+- `ChainSelection ChainSelection`
+- `DebugInfo bool`
+- `Sources []Source`
+- `Logger Logger`
+- `Metrics Metrics`
+
+Useful helpers:
+
+- `DefaultConfig()`
+- `ParseCIDRs(...string)`
+- `LoopbackProxyPrefixes()`
+- `PrivateProxyPrefixes()`
+- `LocalProxyPrefixes()`
+- `ProxyPrefixesFromAddrs(...netip.Addr)`
+
+Built-in extractor sources:
+
+- `SourceForwarded`
+- `SourceXForwardedFor`
+- `SourceXRealIP`
+- `SourceRemoteAddr`
+- `HeaderSource(name)` for custom headers
+
+Resolver-only result source:
+
+- `SourceStaticFallback`
+
+`Extractor` walks `Config.Sources` in order. `ErrSourceUnavailable` allows the next source to run, while security-significant failures remain terminal.
+
+## Low-Level Extraction
+
+Use `Extractor` directly when you want strict extraction without request-scoped caching or preferred fallback.
 
 ```go
-// Strict is default and fails closed on security errors
-// (including malformed Forwarded and invalid present source values).
-strictExtractor, _ := clientip.New(
-    clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-    clientip.WithSourcePriority(clientip.HeaderSource("X-Frontend-IP"), clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-    clientip.WithSecurityMode(clientip.SecurityModeStrict),
-)
+extractor, err := clientip.New(clientip.DefaultConfig())
+if err != nil {
+    log.Fatal(err)
+}
 
-// Lax mode allows fallback to lower-priority sources after those errors.
-laxExtractor, _ := clientip.New(
-    clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-    clientip.WithSourcePriority(clientip.HeaderSource("X-Frontend-IP"), clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-    clientip.WithSecurityMode(clientip.SecurityModeLax),
-)
+extraction, err := extractor.Extract(req)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Client IP: %s from %s\n", extraction.IP, extraction.Source)
 ```
 
-### Logging (bring your own)
+Framework-agnostic extraction is also available:
 
-By default, logging is disabled. Use `WithLogger` to opt in.
+```go
+extraction, err := extractor.ExtractInput(input)
+if err != nil {
+    log.Fatal(err)
+}
+```
 
-`WithLogger` accepts any implementation of:
+## Errors
+
+Typed errors remain the detailed error surface:
+
+```go
+_, resolution := resolver.ResolveStrict(req)
+if resolution.Err != nil {
+    switch {
+    case errors.Is(resolution.Err, clientip.ErrMultipleSingleIPHeaders):
+    case errors.Is(resolution.Err, clientip.ErrInvalidForwardedHeader):
+    case errors.Is(resolution.Err, clientip.ErrUntrustedProxy):
+    case errors.Is(resolution.Err, clientip.ErrNoTrustedProxies):
+    case errors.Is(resolution.Err, clientip.ErrTooFewTrustedProxies):
+    case errors.Is(resolution.Err, clientip.ErrTooManyTrustedProxies):
+    case errors.Is(resolution.Err, clientip.ErrInvalidIP):
+    case errors.Is(resolution.Err, clientip.ErrSourceUnavailable):
+    case errors.Is(resolution.Err, clientip.ErrNilRequest):
+    }
+}
+```
+
+`ClassifyError` provides a smaller policy-oriented layer on top of those typed errors:
+
+```go
+switch clientip.ClassifyError(resolution.Err) {
+case clientip.ResultSuccess:
+case clientip.ResultUnavailable:
+case clientip.ResultInvalid:
+case clientip.ResultUntrusted:
+case clientip.ResultMalformed:
+case clientip.ResultCanceled:
+case clientip.ResultUnknown:
+}
+```
+
+`ResultUnknown` covers non-nil errors outside the package's standard extraction and resolution categories.
+
+Typed chain-related errors expose additional context:
+
+- `ProxyValidationError`: `Chain`, `TrustedProxyCount`, `MinTrustedProxies`, `MaxTrustedProxies`
+- `InvalidIPError`: `Chain`, `ExtractedIP`, `Index`, `TrustedProxies`
+- `RemoteAddrError`: `RemoteAddr`
+- `ChainTooLongError`: `ChainLength`, `MaxLength`
+
+## Logging
+
+Logging is disabled by default. Set `Config.Logger` to opt in.
+
+```go
+extractor, err := clientip.New(clientip.Config{
+    Logger: slog.Default(),
+})
+```
+
+The logger interface intentionally matches `slog.Logger.WarnContext`:
 
 ```go
 type Logger interface {
@@ -219,306 +306,65 @@ type Logger interface {
 }
 ```
 
-This intentionally mirrors `slog.Logger.WarnContext`, so `*slog.Logger`
-works directly with `WithLogger` (no adapter needed).
+The context passed to logger calls comes from `req.Context()` (`Extract`) or `Input.Context` (`ExtractInput`).
 
-The context passed to logger calls comes from `req.Context()` (`Extract`) or
-`RequestInput.Context` (`ExtractFrom`), so trace/span IDs added by middleware
-remain available in logs.
+Security event labels passed through `Metrics.RecordSecurityEvent(...)` are the stable exported `clientip.SecurityEvent...` constants.
 
-Structured log attributes are passed as alternating key/value pairs, matching
-the style used by `slog`.
+## Prometheus Metrics
 
-When configured, the extractor emits warning logs for security-significant
-conditions such as `multiple_headers`, `malformed_forwarded`, `chain_too_long`,
-`untrusted_proxy`, `no_trusted_proxies`, `too_few_trusted_proxies`, and `too_many_trusted_proxies`.
-
-```go
-extractor, err := clientip.New(
-    clientip.WithLogger(slog.Default()),
-)
-```
-
-For loggers without context-aware APIs, adapters can simply ignore `ctx`:
-
-```go
-type stdLoggerAdapter struct{ l *log.Logger }
-
-func (a stdLoggerAdapter) WarnContext(_ context.Context, msg string, args ...any) {
-    a.l.Printf("WARN %s %v", msg, args)
-}
-
-extractor, err := clientip.New(
-    clientip.WithLogger(stdLoggerAdapter{l: log.Default()}),
-)
-```
-
-Tiny adapters for other popular loggers:
-
-```go
-type zapAdapter struct{ l *zap.SugaredLogger }
-
-func (a zapAdapter) WarnContext(_ context.Context, msg string, args ...any) {
-    a.l.With(args...).Warn(msg)
-}
-```
-
-```go
-type logrusAdapter struct{ l *logrus.Logger }
-
-func (a logrusAdapter) WarnContext(_ context.Context, msg string, args ...any) {
-    fields := logrus.Fields{}
-    for i := 0; i+1 < len(args); i += 2 {
-        key, ok := args[i].(string)
-        if !ok {
-            continue
-        }
-        fields[key] = args[i+1]
-    }
-    a.l.WithFields(fields).Warn(msg)
-}
-```
-
-```go
-type zerologAdapter struct{ l zerolog.Logger }
-
-func (a zerologAdapter) WarnContext(_ context.Context, msg string, args ...any) {
-    event := a.l.Warn()
-    for i := 0; i+1 < len(args); i += 2 {
-        key, ok := args[i].(string)
-        if !ok {
-            continue
-        }
-        event = event.Interface(key, args[i+1])
-    }
-    event.Msg(msg)
-}
-```
-
-If your stack stores trace metadata in `context.Context`, enrich the adapter by
-extracting that value and appending it to `args`.
-
-### Prometheus metrics (simple setup)
+Construct Prometheus metrics explicitly and pass them through `Config.Metrics`.
 
 ```go
 import clientipprom "github.com/abczzz13/clientip/prometheus"
 
-extractor, err := clientip.New(
-    clientipprom.WithMetrics(),
-)
+metrics, err := clientipprom.New()
+if err != nil {
+    panic(err)
+}
+
+extractor, err := clientip.New(clientip.Config{Metrics: metrics})
+if err != nil {
+    panic(err)
+}
+
+resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+if err != nil {
+    panic(err)
+}
 ```
 
-### Prometheus metrics (custom registerer)
+With a custom registerer:
 
 ```go
-import (
-    clientipprom "github.com/abczzz13/clientip/prometheus"
-    "github.com/prometheus/client_golang/prometheus"
-)
-
 registry := prometheus.NewRegistry()
 
-extractor, err := clientip.New(
-    clientipprom.WithRegisterer(registry),
-)
-```
-
-You can also construct metrics explicitly with `clientipprom.New()` or
-`clientipprom.NewWithRegisterer(...)` and pass them via
-`clientip.WithMetrics(...)`.
-
-## Options
-
-`New(opts...)` accepts one or more `Option` builders.
-
-Construct an extractor once and reuse it for all requests.
-
-- `WithTrustedProxyPrefixes(...netip.Prefix)` add trusted proxy network prefixes
-- `WithTrustedLoopbackProxy()` trust loopback upstream proxies (`127.0.0.0/8`, `::1/128`)
-- `WithTrustedPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
-- `WithTrustedLocalProxyDefaults()` trust loopback + private proxy ranges
-- `WithTrustedProxyAddrs(...netip.Addr)` add trusted upstream proxy host addresses
-- `PresetDirectConnection()` remote-address only extraction preset
-- `PresetLoopbackReverseProxy()` loopback reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
-- `PresetVMReverseProxy()` VM/private-network reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
-- `PresetPreferredHeaderThenXFFLax(string)` preferred-header fallback preset in lax mode
-- `WithMinTrustedProxies(int)` / `WithMaxTrustedProxies(int)` set trusted-proxy count bounds for chain headers
-- `WithAllowPrivateIPs(bool)` allow private client IPs
-- `WithAllowedReservedClientPrefixes(...netip.Prefix)` explicitly allow selected reserved/special-use client ranges
-- `ParseCIDRs(...string)` parse CIDR strings to `[]netip.Prefix` for typed options
-- `WithMaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
-- `WithChainSelection(ChainSelection)` choose `RightmostUntrustedIP` (default) or `LeftmostUntrustedIP`
-- `WithSourcePriority(...Source)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`; use `HeaderSource("CF-Connecting-IP")` for custom headers
-- `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
-- `WithLogger(Logger)` inject logger implementation
-- `WithMetrics(Metrics)` inject custom metrics implementation directly
-- `WithMetricsFactory(func() (Metrics, error))` lazily construct metrics after option validation (last metrics option wins)
-- `WithDebugInfo(bool)` include chain analysis in `Extraction.DebugInfo`
-
-Default source order is `SourceRemoteAddr`.
-
-Any header-based source requires trusted upstream proxy ranges (`WithTrustedProxyPrefixes` or one of the trust helpers).
-
-Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
-
-- `WithMetrics()` install Prometheus metrics on default registerer
-- `WithRegisterer(prometheus.Registerer)` install Prometheus metrics on custom registerer
-- `New()` / `NewWithRegisterer(prometheus.Registerer)` for explicit metrics construction
-
-Proxy count bounds (`min`/`max`) apply to trusted proxies present in `Forwarded` (from `for=` values) and `X-Forwarded-For`.
-The immediate proxy (`RemoteAddr`) is validated for trust separately before either header is trusted.
-
-`WithAllowedReservedClientPrefixes` only bypasses reserved/special-use filtering for matching ranges.
-It does not bypass loopback/link-local/multicast/unspecified rejection, and private-IP policy remains controlled by `WithAllowPrivateIPs`.
-
-## Extraction
-
-```go
-type Source struct { /* opaque */ }
-
-type Extraction struct {
-    IP                netip.Addr
-    Source            Source
-    TrustedProxyCount int
-    DebugInfo         *ChainDebugInfo
-}
-
-type HeaderValues interface {
-    Values(name string) []string
-}
-
-type RequestInput struct {
-    Context    context.Context
-    RemoteAddr string
-    Path       string
-    Headers    HeaderValues
-}
-
-func (e *Extractor) Extract(req *http.Request, callOpts ...CallOption) (Extraction, error)
-func (e *Extractor) ExtractAddr(req *http.Request, callOpts ...CallOption) (netip.Addr, error)
-func (e *Extractor) ExtractFrom(input RequestInput, callOpts ...CallOption) (Extraction, error)
-func (e *Extractor) ExtractAddrFrom(input RequestInput, callOpts ...CallOption) (netip.Addr, error)
-```
-
-When `Extract` returns a non-nil error, the returned `Extraction` value is
-best-effort metadata only (typically `Source` when available). For chain
-diagnostics, inspect typed errors like `ProxyValidationError` and
-`InvalidIPError`.
-
-`Source` is an opaque value type. Use the built-ins (`SourceForwarded`,
-`SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`) or
-`HeaderSource(...)` to construct it, compare `Source` values directly, and use
-`Source.String()` when you need the canonical identifier.
-For text/JSON encoding, built-ins use canonical identifiers while custom
-headers preserve canonical MIME header names for lossless round-tripping.
-
-```go
-source := clientip.HeaderSource("CF-Connecting-IP")
-text, _ := source.MarshalText()
-
-source.String() // "cf_connecting_ip"
-string(text)    // "Cf-Connecting-Ip"
-```
-
-That means custom-header `Source.String()` values are for canonical identifiers
-inside this package, while text/JSON encoding preserves the actual header name.
-
-Per-call options let you temporarily adjust policy for a single extraction:
-
-```go
-extraction, err := extractor.Extract(
-    req,
-    clientip.WithCallSecurityMode(clientip.SecurityModeLax),
-)
-```
-
-```go
-extraction, err := extractor.ExtractFrom(
-    input,
-    clientip.WithCallSourcePriority(
-        clientip.HeaderSource("CF-Connecting-IP"),
-        clientip.SourceRemoteAddr,
-    ),
-)
-```
-
-Multiple `CallOption` values are applied left-to-right; later values
-win. Only policy fields are overrideable (logger and metrics stay fixed per
-extractor instance).
-
-Available call options:
-
-- `WithCallTrustedProxyPrefixes(...netip.Prefix)` replaces the extractor's trusted proxy prefixes for that call
-- `WithCallMinTrustedProxies(int)` / `WithCallMaxTrustedProxies(int)`
-- `WithCallAllowPrivateIPs(bool)`
-- `WithCallAllowedReservedClientPrefixes(...netip.Prefix)` replaces the extractor's reserved-prefix allowlist for that call
-- `WithCallMaxChainLength(int)`
-- `WithCallChainSelection(ChainSelection)`
-- `WithCallSecurityMode(SecurityMode)`
-- `WithCallDebugInfo(bool)`
-- `WithCallSourcePriority(...Source)`
-
-## Errors
-
-```go
-_, err := extractor.Extract(req)
+metrics, err := clientipprom.NewWithRegisterer(registry)
 if err != nil {
-    switch {
-    case errors.Is(err, clientip.ErrMultipleSingleIPHeaders):
-        // Duplicate single-IP header values received
-    case errors.Is(err, clientip.ErrInvalidForwardedHeader):
-        // Malformed Forwarded header
-    case errors.Is(err, clientip.ErrUntrustedProxy):
-        // Forwarded/XFF came from an untrusted immediate proxy
-    case errors.Is(err, clientip.ErrNoTrustedProxies):
-        // No trusted proxies found in the chain
-    case errors.Is(err, clientip.ErrTooFewTrustedProxies):
-        // Trusted proxy count is below configured minimum
-    case errors.Is(err, clientip.ErrTooManyTrustedProxies):
-        // Trusted proxy count exceeds configured maximum
-    case errors.Is(err, clientip.ErrInvalidIP):
-        // Invalid or implausible client IP
-    case errors.Is(err, clientip.ErrSourceUnavailable):
-        // Requested source was not present on this request
-    case errors.Is(err, clientip.ErrNilRequest):
-        // Extract/ExtractAddr received a nil *http.Request
-    }
-
-    var mh *clientip.MultipleHeadersError
-    if errors.As(err, &mh) {
-        // Inspect mh.HeaderName, mh.HeaderCount, or mh.RemoteAddr
-    }
+    panic(err)
 }
 ```
 
-Typed chain-related errors expose additional context:
+## Security Guidance
 
-- `ProxyValidationError`: `Chain`, `TrustedProxyCount`, `MinTrustedProxies`, `MaxTrustedProxies`
-- `InvalidIPError`: `Chain`, `ExtractedIP`, `Index`, `TrustedProxies`
+- Use `ResolveStrict` or `Extractor` for security-sensitive and audit-oriented behavior.
+- Use `ResolvePreferred` only when explicit fallback is acceptable for operational reasons.
+- Do not use preferred fallback for authorization, ACLs, or trust-boundary enforcement.
+- Do not include multiple competing header-based sources for security decisions.
+- Do not trust broad proxy CIDRs unless they are truly under your control.
+- Header-based sources require `TrustedProxyPrefixes`.
+- `LeftmostUntrustedIP` only makes sense when trusted proxy prefixes are configured.
 
-## Security notes
+## Compatibility
 
-- Parses RFC7239 `Forwarded` header (`for=` chain) and rejects malformed values
-- Parses multiple `X-Forwarded-For` header lines as one chain (wire order preserved)
-- Rejects multiple values for single-IP headers (for example repeated `X-Real-IP`)
-- Requires the immediate proxy (`RemoteAddr`) to be trusted before honoring `Forwarded` or `X-Forwarded-For` (when trusted proxy prefixes are configured)
-- Requires trusted proxy prefixes for any header-based source
-- Allows at most one chain-header source (`Forwarded` or `X-Forwarded-For`) per extractor configuration
-- Enforces trusted proxy count bounds and chain length
-- Filters implausible IPs (loopback, multicast, reserved); optional private-IP and reserved-prefix allowlists
-- Strict fail-closed behavior is the default (`SecurityModeStrict`) for security-significant errors and invalid present source values
-- Set `WithSecurityMode(SecurityModeLax)` to continue fallback after security errors
-
-## Security anti-patterns
-
-- Do not include multiple competing header-based sources in `WithSourcePriority(...)` for security decisions (for example custom header + chain header fallback). Prefer one canonical trusted header plus `SourceRemoteAddr` fallback only when required.
-- Do not enable `SecurityModeLax` for security-enforcement decisions (ACLs, fraud/risk controls, authz). Use strict mode and fail closed.
-- Do not trust broad proxy CIDRs unless they are truly under your control. Keep trusted ranges minimal and explicit.
-- Do not treat a missing/invalid source as benign in critical paths; monitor and remediate extraction errors.
+- Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
+- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x`.
+- Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
 
 ## Performance
 
-- O(n) in chain length; extractor is safe for concurrent reuse
+- Extraction is `O(n)` in proxy-chain length.
+- `Extractor` is safe for concurrent reuse.
+- `Resolver` adds request-scoped caching on top of a reusable extractor.
 
 Benchmark workflow with `just`:
 
@@ -535,7 +381,7 @@ just bench-compare-saved before after
 
 You can compare arbitrary files directly via `just bench-compare <before-file> <after-file>`.
 
-## Maintainer notes (multi-module)
+## Maintainer Notes (Multi-Module)
 
 - `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.
 - For local co-development, create an uncommitted workspace with `go work init . ./prometheus`.
