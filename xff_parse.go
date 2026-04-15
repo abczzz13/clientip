@@ -21,7 +21,7 @@ func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
 					return nil, &ChainTooLongError{
 						ExtractionError: ExtractionError{
 							Err:    ErrChainTooLong,
-							Source: SourceXForwardedFor,
+							Source: builtinSource(sourceXForwardedFor),
 						},
 						ChainLength: len(parts) + 1,
 						MaxLength:   maxChainLength,

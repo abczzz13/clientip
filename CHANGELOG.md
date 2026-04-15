@@ -18,18 +18,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - No-op call options now reuse the existing config and source chain when policy is unchanged.
 - Typed-nil `RequestInput.Headers` providers are treated as absent instead of being invoked.
 - The optional Prometheus adapter module now depends on `github.com/abczzz13/clientip v0.0.6`.
-- Typed source API with `Source`, `HeaderSource(string)`, and `WithSourcePriority(...Source)`.
+- Typed source API with an opaque `Source` type, `HeaderSource(string)`, fully typed `Extraction.Source` / `ExtractionError.Source`, and `WithSourcePriority(...Source)`.
 - Per-call policy API via `CallOption` and helpers such as `WithCallSecurityMode`, `WithCallSourcePriority`, and `WithCallTrustedProxyPrefixes`.
+- **BREAKING:** `Extractor.Extract`, `Extractor.ExtractAddr`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom` now accept `...CallOption` (instead of `...OverrideOptions`).
+- **BREAKING:** `Extractor.Extract(nil)` and `Extractor.ExtractAddr(nil)` now return `ErrNilRequest`.
+- **BREAKING:** `NormalizeSourceName` has been removed; use `HeaderSource(name).String()` when you need the canonical identifier for an arbitrary header name.
+- **BREAKING:** custom `Source` text/JSON encoding now uses canonical MIME header names (for example `Cf-Connecting-Ip`) instead of underscore-normalized identifiers such as `cf_connecting_ip`; `Source.String()` still returns the underscore-normalized identifier.
 
 ### Removed
 
 - Per-call `OverrideOptions` and `Set(...)` in favor of `CallOption`.
 - One-shot helpers `ExtractWithOptions`, `ExtractAddrWithOptions`, `ExtractFromWithOptions`, and `ExtractAddrFromWithOptions`.
-
-### Breaking
-
-- `Extractor.Extract`, `Extractor.ExtractAddr`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom` now accept `...CallOption` (instead of `...OverrideOptions`).
-- `Extractor.Extract(nil)` and `Extractor.ExtractAddr(nil)` now return `ErrNilRequest`.
 
 ## [0.0.6] - 2026-02-18
 

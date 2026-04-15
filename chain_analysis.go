@@ -11,11 +11,11 @@ type chainAnalysis struct {
 	trustedIndices []int
 }
 
-func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
+func (e *Extractor) clientIPFromChainWithDebug(source Source, parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
 	if len(parts) == 0 {
 		return netip.Addr{}, 0, nil, &ExtractionError{
 			Err:    ErrInvalidIP,
-			Source: sourceName,
+			Source: source,
 		}
 	}
 
@@ -35,7 +35,7 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 		return netip.Addr{}, analysis.trustedCount, debugInfo, &ProxyValidationError{
 			ExtractionError: ExtractionError{
 				Err:    err,
-				Source: sourceName,
+				Source: source,
 			},
 			Chain:             chain,
 			TrustedProxyCount: analysis.trustedCount,
@@ -51,7 +51,7 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 		return netip.Addr{}, analysis.trustedCount, debugInfo, &InvalidIPError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
-				Source: sourceName,
+				Source: source,
 			},
 			Chain:          chain,
 			ExtractedIP:    clientIPStr,

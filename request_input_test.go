@@ -275,6 +275,11 @@ func TestSourceHeaderKeys_DedupesAndCanonicalizes(t *testing.T) {
 			sourcePriority: []Source{HeaderSource("CF-Connecting-IP"), HeaderSource("cf-connecting-ip"), HeaderSource("Cf-Connecting-Ip")},
 			want:           []string{"Cf-Connecting-Ip"},
 		},
+		{
+			name:           "distinct custom headers preserve different runtime keys",
+			sourcePriority: []Source{HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar")},
+			want:           []string{"Foo-Bar", "Foo_bar"},
+		},
 	}
 
 	for _, tt := range tests {

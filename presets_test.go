@@ -28,7 +28,7 @@ func TestPresets_Config(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceRemoteAddr},
+				SourcePriority:        []string{SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -44,7 +44,7 @@ func TestPresets_Config(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -60,7 +60,7 @@ func TestPresets_Config(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -120,7 +120,7 @@ func TestPresetPreferredHeaderThenXFFLax_EndToEnd(t *testing.T) {
 
 	want := struct {
 		IP                string
-		Source            string
+		Source            Source
 		TrustedProxyCount int
 		HasDebugInfo      bool
 	}{
@@ -131,7 +131,7 @@ func TestPresetPreferredHeaderThenXFFLax_EndToEnd(t *testing.T) {
 	}
 	got := struct {
 		IP                string
-		Source            string
+		Source            Source
 		TrustedProxyCount int
 		HasDebugInfo      bool
 	}{

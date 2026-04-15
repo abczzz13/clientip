@@ -8,7 +8,7 @@
 //   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
 //   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
 //   - Framework-friendly RequestInput API for non-net/http integrations
-//   - Typed source configuration via Source constants and HeaderSource(...)
+//   - Typed source configuration via opaque Source values, built-in Source variables, and HeaderSource(...)
 //   - Safe defaults: RemoteAddr-only unless header sources are explicitly configured
 //   - Deployment presets for common topologies (direct, loopback proxy, VM proxy)
 //   - Per-call policy overrides via CallOption builders such as WithCallSecurityMode

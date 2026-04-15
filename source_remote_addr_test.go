@@ -75,7 +75,7 @@ func TestRemoteAddrSource_Name(t *testing.T) {
 	extractor := mustNewExtractor(t)
 	source := &remoteAddrSource{extractor: extractor}
 
-	if source.Name() != SourceRemoteAddr {
-		t.Errorf("Name() = %q, want %q", source.Name(), SourceRemoteAddr)
+	if source.Source() != SourceRemoteAddr {
+		t.Errorf("Source() = %q, want %q", source.Source(), SourceRemoteAddr)
 	}
 }

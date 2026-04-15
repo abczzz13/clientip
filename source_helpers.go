@@ -2,7 +2,7 @@ package clientip
 
 import "errors"
 
-func sourceUnavailableError(unavailableErr error, sourceName string) error {
+func sourceUnavailableError(unavailableErr error, sourceName Source) error {
 	if unavailableErr != nil {
 		return unavailableErr
 	}
@@ -10,7 +10,7 @@ func sourceUnavailableError(unavailableErr error, sourceName string) error {
 	return &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName}
 }
 
-func wrapSourceUnavailableError(err, unavailableErr error, sourceName string) error {
+func wrapSourceUnavailableError(err, unavailableErr error, sourceName Source) error {
 	if !errors.Is(err, ErrSourceUnavailable) {
 		return err
 	}

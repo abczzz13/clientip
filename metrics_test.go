@@ -39,16 +39,16 @@ func (m *mockMetrics) RecordSecurityEvent(event string) {
 	m.securityEvents[event]++
 }
 
-func (m *mockMetrics) getSuccessCount(source string) int {
+func (m *mockMetrics) getSuccessCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.successCount[source]
+	return m.successCount[source.String()]
 }
 
-func (m *mockMetrics) getFailureCount(source string) int {
+func (m *mockMetrics) getFailureCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.failureCount[source]
+	return m.failureCount[source.String()]
 }
 
 func (m *mockMetrics) getSecurityEventCount(event string) int {

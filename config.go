@@ -220,7 +220,7 @@ func defaultConfig() *config {
 		logger:            noopLogger{},
 		metrics:           noopMetrics{},
 		sourcePriority: []Source{
-			SourceRemoteAddr,
+			builtinSource(sourceRemoteAddr),
 		},
 	}
 }

@@ -140,7 +140,7 @@ func sourceHeaderKeys(sourcePriority []Source) []string {
 
 func sourceHeaderKey(source Source) (string, bool) {
 	source = canonicalSource(source)
-	if source == "" {
+	if !source.valid() {
 		return "", false
 	}
 

@@ -101,8 +101,8 @@ func TestForwardedForSource_Name(t *testing.T) {
 	extractor := mustNewExtractor(t)
 	source := &forwardedForSource{extractor: extractor}
 
-	if source.Name() != SourceXForwardedFor {
-		t.Errorf("Name() = %q, want %q", source.Name(), SourceXForwardedFor)
+	if source.Source() != SourceXForwardedFor {
+		t.Errorf("Source() = %q, want %q", source.Source(), SourceXForwardedFor)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestForwardedSource_Name(t *testing.T) {
 	extractor := mustNewExtractor(t)
 	source := &forwardedSource{extractor: extractor}
 
-	if source.Name() != SourceForwarded {
-		t.Errorf("Name() = %q, want %q", source.Name(), SourceForwarded)
+	if source.Source() != SourceForwarded {
+		t.Errorf("Source() = %q, want %q", source.Source(), SourceForwarded)
 	}
 }

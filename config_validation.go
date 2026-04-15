@@ -40,7 +40,7 @@ func (c *config) validate() error {
 	}
 
 	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure WithTrustedProxyPrefixes or trust helpers such as WithTrustedLoopbackProxy, WithTrustedPrivateProxyRanges, WithTrustedLocalProxyDefaults, or WithTrustedProxyAddrs")
+		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure WithTrustedProxyPrefixes or trust helpers such as WithTrustedLoopbackProxy, WithTrustedPrivateProxyRanges, WithTrustedLocalProxyDefaults, or WithTrustedProxyAddrs, or use WithCallTrustedProxyPrefixes for a single extraction")
 	}
 
 	if isNilValue(c.logger) {
@@ -53,38 +53,37 @@ func (c *config) validate() error {
 }
 
 func (c *config) validateSourcePriority() (hasHeaderSource, hasChainSource bool, err error) {
-	seen := make(map[string]struct{}, len(c.sourcePriority))
+	seen := make(map[Source]struct{}, len(c.sourcePriority))
 	seenForwarded := false
 	seenXFF := false
 
 	for _, source := range c.sourcePriority {
 		source = canonicalSource(source)
-		normalized := source.name()
-		if normalized == "" {
+		if !source.valid() {
 			return false, false, fmt.Errorf("source names cannot be empty")
 		}
 
-		if _, ok := seen[normalized]; ok {
+		if _, ok := seen[source]; ok {
 			return false, false, fmt.Errorf("duplicate source %q in priority list", source)
 		}
-		seen[normalized] = struct{}{}
+		seen[source] = struct{}{}
 
-		if source != SourceRemoteAddr {
+		if source.kind != sourceRemoteAddr {
 			hasHeaderSource = true
 		}
 
-		switch source {
-		case SourceForwarded:
+		switch source.kind {
+		case sourceForwarded:
 			seenForwarded = true
 			hasChainSource = true
-		case SourceXForwardedFor:
+		case sourceXForwardedFor:
 			seenXFF = true
 			hasChainSource = true
 		}
 	}
 
 	if seenForwarded && seenXFF {
-		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", SourceForwarded, SourceXForwardedFor)
+		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", builtinSource(sourceForwarded), builtinSource(sourceXForwardedFor))
 	}
 
 	return hasHeaderSource, hasChainSource, nil

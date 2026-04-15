@@ -64,11 +64,11 @@ func assertAttr(t *testing.T, attrs map[string]any, key string, want any) {
 	}
 }
 
-func assertCommonSecurityWarningAttrs(t *testing.T, attrs map[string]any, event, source, path, remoteAddr string) {
+func assertCommonSecurityWarningAttrs(t *testing.T, attrs map[string]any, event string, source Source, path, remoteAddr string) {
 	t.Helper()
 
 	assertAttr(t, attrs, "event", event)
-	assertAttr(t, attrs, "source", source)
+	assertAttr(t, attrs, "source", source.String())
 	assertAttr(t, attrs, "path", path)
 	assertAttr(t, attrs, "remote_addr", remoteAddr)
 }

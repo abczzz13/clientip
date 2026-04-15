@@ -374,9 +374,11 @@ It does not bypass loopback/link-local/multicast/unspecified rejection, and priv
 ## Extraction
 
 ```go
+type Source struct { /* opaque */ }
+
 type Extraction struct {
     IP                netip.Addr
-    Source            string // "forwarded", "x_forwarded_for", "x_real_ip", "remote_addr", or normalized custom header
+    Source            Source
     TrustedProxyCount int
     DebugInfo         *ChainDebugInfo
 }
@@ -403,6 +405,24 @@ best-effort metadata only (typically `Source` when available). For chain
 diagnostics, inspect typed errors like `ProxyValidationError` and
 `InvalidIPError`.
 
+`Source` is an opaque value type. Use the built-ins (`SourceForwarded`,
+`SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`) or
+`HeaderSource(...)` to construct it, compare `Source` values directly, and use
+`Source.String()` when you need the canonical identifier.
+For text/JSON encoding, built-ins use canonical identifiers while custom
+headers preserve canonical MIME header names for lossless round-tripping.
+
+```go
+source := clientip.HeaderSource("CF-Connecting-IP")
+text, _ := source.MarshalText()
+
+source.String() // "cf_connecting_ip"
+string(text)    // "Cf-Connecting-Ip"
+```
+
+That means custom-header `Source.String()` values are for canonical identifiers
+inside this package, while text/JSON encoding preserves the actual header name.
+
 Per-call options let you temporarily adjust policy for a single extraction:
 
 ```go
@@ -428,17 +448,15 @@ extractor instance).
 
 Available call options:
 
-- `WithCallTrustedProxyPrefixes(...netip.Prefix)`
+- `WithCallTrustedProxyPrefixes(...netip.Prefix)` replaces the extractor's trusted proxy prefixes for that call
 - `WithCallMinTrustedProxies(int)` / `WithCallMaxTrustedProxies(int)`
 - `WithCallAllowPrivateIPs(bool)`
-- `WithCallAllowedReservedClientPrefixes(...netip.Prefix)`
+- `WithCallAllowedReservedClientPrefixes(...netip.Prefix)` replaces the extractor's reserved-prefix allowlist for that call
 - `WithCallMaxChainLength(int)`
 - `WithCallChainSelection(ChainSelection)`
 - `WithCallSecurityMode(SecurityMode)`
 - `WithCallDebugInfo(bool)`
 - `WithCallSourcePriority(...Source)`
-
-Custom header names are normalized via `NormalizeSourceName` (lowercase with underscores).
 
 ## Errors
 

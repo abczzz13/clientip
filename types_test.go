@@ -1,6 +1,7 @@
 package clientip
 
 import (
+	"encoding/json"
 	"net/netip"
 	"testing"
 
@@ -177,5 +178,125 @@ func TestTypedErrors_ErrorFormatting(t *testing.T) {
 				t.Fatalf("error string mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestSource_StringAndCanonicalization(t *testing.T) {
+	tests := []struct {
+		name string
+		got  Source
+		want Source
+		text string
+	}{
+		{name: "forwarded alias", got: HeaderSource("Forwarded"), want: SourceForwarded, text: "forwarded"},
+		{name: "xff alias", got: HeaderSource("X-Forwarded-For"), want: SourceXForwardedFor, text: "x_forwarded_for"},
+		{name: "x-real-ip alias", got: HeaderSource("X_Real_IP"), want: SourceXRealIP, text: "x_real_ip"},
+		{name: "remote addr alias", got: HeaderSource("Remote-Addr"), want: SourceRemoteAddr, text: "remote_addr"},
+		{name: "custom header", got: HeaderSource("CF-Connecting-IP"), want: HeaderSource("cf-connecting-ip"), text: "cf_connecting_ip"},
+		{name: "blank header invalid", got: HeaderSource("  "), want: Source{}, text: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, want := tt.got, tt.want; got != want {
+				t.Fatalf("source mismatch: got %q, want %q", got, want)
+			}
+
+			if got, want := tt.got.String(), tt.text; got != want {
+				t.Fatalf("String() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSource_TextAndJSONRoundTrip(t *testing.T) {
+	original := HeaderSource("CF-Connecting-IP")
+
+	text, err := original.MarshalText()
+	if err != nil {
+		t.Fatalf("MarshalText() error = %v", err)
+	}
+	if got, want := string(text), "Cf-Connecting-Ip"; got != want {
+		t.Fatalf("MarshalText() = %q, want %q", got, want)
+	}
+
+	var fromText Source
+	if err := fromText.UnmarshalText(text); err != nil {
+		t.Fatalf("UnmarshalText() error = %v", err)
+	}
+	if got, want := fromText, original; got != want {
+		t.Fatalf("UnmarshalText() = %q, want %q", got, want)
+	}
+
+	encoded, err := json.Marshal(struct {
+		Source Source `json:"source"`
+	}{Source: original})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if got, want := string(encoded), `{"source":"Cf-Connecting-Ip"}`; got != want {
+		t.Fatalf("json.Marshal() = %q, want %q", got, want)
+	}
+
+	var decoded struct {
+		Source Source `json:"source"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := decoded.Source, original; got != want {
+		t.Fatalf("json.Unmarshal() source = %q, want %q", got, want)
+	}
+
+	if err := json.Unmarshal([]byte(`{"source":"X-Forwarded-For"}`), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got, want := decoded.Source, SourceXForwardedFor; got != want {
+		t.Fatalf("json.Unmarshal() source = %q, want %q", got, want)
+	}
+}
+
+func TestSource_BuiltinsIgnoreExportedValueMutation(t *testing.T) {
+	originalForwarded := SourceForwarded
+	originalXForwardedFor := SourceXForwardedFor
+	originalXRealIP := SourceXRealIP
+	originalRemoteAddr := SourceRemoteAddr
+
+	t.Cleanup(func() {
+		SourceForwarded = originalForwarded
+		SourceXForwardedFor = originalXForwardedFor
+		SourceXRealIP = originalXRealIP
+		SourceRemoteAddr = originalRemoteAddr
+	})
+
+	SourceForwarded = HeaderSource("X-Mutated-Forwarded")
+	SourceXForwardedFor = HeaderSource("X-Mutated-X-Forwarded-For")
+	SourceXRealIP = HeaderSource("X-Mutated-X-Real-IP")
+	SourceRemoteAddr = HeaderSource("X-Mutated-Remote-Addr")
+
+	if got, want := HeaderSource("Forwarded"), builtinSource(sourceForwarded); got != want {
+		t.Fatalf("HeaderSource(Forwarded) = %q, want %q", got, want)
+	}
+	if got, want := HeaderSource("X-Forwarded-For"), builtinSource(sourceXForwardedFor); got != want {
+		t.Fatalf("HeaderSource(X-Forwarded-For) = %q, want %q", got, want)
+	}
+	if got, want := HeaderSource("X-Real-IP"), builtinSource(sourceXRealIP); got != want {
+		t.Fatalf("HeaderSource(X-Real-IP) = %q, want %q", got, want)
+	}
+	if got, want := HeaderSource("Remote-Addr"), builtinSource(sourceRemoteAddr); got != want {
+		t.Fatalf("HeaderSource(Remote-Addr) = %q, want %q", got, want)
+	}
+
+	extractor := mustNewExtractor(t)
+	if diff := cmp.Diff([]Source{builtinSource(sourceRemoteAddr)}, extractor.config.sourcePriority); diff != "" {
+		t.Fatalf("default source priority mismatch (-want +got):\n%s", diff)
+	}
+
+	forwardedExtractor := mustNewExtractor(t,
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(HeaderSource("Forwarded")),
+	)
+	if diff := cmp.Diff([]Source{builtinSource(sourceForwarded)}, forwardedExtractor.config.sourcePriority); diff != "" {
+		t.Fatalf("canonicalized source priority mismatch (-want +got):\n%s", diff)
 	}
 }

@@ -169,6 +169,10 @@ func WithSourcePriority(sources ...Source) Option {
 	resolvedSources := canonicalizeSources(slices.Clone(sources))
 
 	return func(c *config) error {
+		if len(resolvedSources) == 0 {
+			return fmt.Errorf("at least one source required in WithSourcePriority")
+		}
+
 		c.sourcePriority = slices.Clone(resolvedSources)
 		return nil
 	}

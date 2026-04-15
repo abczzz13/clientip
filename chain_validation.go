@@ -40,13 +40,13 @@ func (e *Extractor) validateProxyCount(trustedCount int) error {
 }
 
 // appendChainPart appends one parsed chain part while enforcing maxChainLength.
-func (e *Extractor) appendChainPart(parts []string, part, sourceName string) ([]string, error) {
+func (e *Extractor) appendChainPart(parts []string, part string, source Source) ([]string, error) {
 	if len(parts) >= e.config.maxChainLength {
 		e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
 		return nil, &ChainTooLongError{
 			ExtractionError: ExtractionError{
 				Err:    ErrChainTooLong,
-				Source: sourceName,
+				Source: source,
 			},
 			ChainLength: len(parts) + 1,
 			MaxLength:   e.config.maxChainLength,

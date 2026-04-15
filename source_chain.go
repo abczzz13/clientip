@@ -27,7 +27,7 @@ func newChainedSource(extractor *Extractor, sources ...sourceExtractor) *chained
 }
 
 func newForwardedForSource(extractor *Extractor) sourceExtractor {
-	sourceName := SourceXForwardedFor
+	sourceName := builtinSource(sourceXForwardedFor)
 	return &forwardedForSource{
 		extractor:      extractor,
 		sourceName:     sourceName,
@@ -36,7 +36,7 @@ func newForwardedForSource(extractor *Extractor) sourceExtractor {
 }
 
 func newForwardedSource(extractor *Extractor) sourceExtractor {
-	sourceName := SourceForwarded
+	sourceName := builtinSource(sourceForwarded)
 	return &forwardedSource{
 		extractor:      extractor,
 		sourceName:     sourceName,
@@ -45,7 +45,7 @@ func newForwardedSource(extractor *Extractor) sourceExtractor {
 }
 
 func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtractor {
-	sourceName := NormalizeSourceName(headerName)
+	sourceName := HeaderSource(headerName)
 	return &singleHeaderSource{
 		extractor:      extractor,
 		headerName:     headerName,
@@ -56,7 +56,7 @@ func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtrac
 }
 
 func newRemoteAddrSource(extractor *Extractor) sourceExtractor {
-	sourceName := SourceRemoteAddr
+	sourceName := builtinSource(sourceRemoteAddr)
 	return &remoteAddrSource{
 		extractor:      extractor,
 		sourceName:     sourceName,
@@ -74,8 +74,8 @@ func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (extractio
 
 		result, err := source.Extract(ctx, r)
 		if err == nil {
-			if result.Source == "" {
-				result.Source = source.Name()
+			if !result.Source.valid() {
+				result.Source = source.Source()
 			}
 			return result, nil
 		}
@@ -114,4 +114,8 @@ func (c *chainedSource) isTerminalError(err error) bool {
 
 func (c *chainedSource) Name() string {
 	return c.name
+}
+
+func (c *chainedSource) Source() Source {
+	return Source{}
 }

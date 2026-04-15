@@ -115,7 +115,7 @@ func TestExtractFrom_HeaderValuesFunc(t *testing.T) {
 		t.Fatalf("ExtractFrom() error = %v", err)
 	}
 
-	if got, want := extraction.Source, "cf_connecting_ip"; got != want {
+	if got, want := extraction.Source, HeaderSource("CF-Connecting-IP"); got != want {
 		t.Fatalf("source = %q, want %q", got, want)
 	}
 	if got, want := extraction.IP, netip.MustParseAddr("9.9.9.9"); got != want {
@@ -190,7 +190,7 @@ func TestExtractFrom_CallOptionSourcePriority_UsesEffectiveHeaders(t *testing.T)
 		if got, want := extraction.IP, netip.MustParseAddr("9.9.9.9"); got != want {
 			t.Fatalf("ip = %s, want %s", got, want)
 		}
-		if got, want := extraction.Source, "cf_connecting_ip"; got != want {
+		if got, want := extraction.Source, HeaderSource("CF-Connecting-IP"); got != want {
 			t.Fatalf("source = %q, want %q", got, want)
 		}
 		if len(requestedHeaders) != 1 || requestedHeaders[0] != cfHeader {

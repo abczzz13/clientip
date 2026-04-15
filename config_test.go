@@ -86,7 +86,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceRemoteAddr},
+				SourcePriority:        []string{SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -116,7 +116,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				ChainSelection:        LeftmostUntrustedIP,
 				SecurityMode:          SecurityModeLax,
 				DebugMode:             true,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -136,7 +136,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeLax,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -155,7 +155,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceRemoteAddr},
+				SourcePriority:        []string{SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -174,7 +174,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceRemoteAddr},
+				SourcePriority:        []string{SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -384,6 +384,7 @@ func TestConfig_WithCallOptions(t *testing.T) {
 		name        string
 		callOpts    []CallOption
 		want        configSnapshot
+		wantSources []Source
 		wantErrText string
 	}{
 		{
@@ -402,7 +403,7 @@ func TestConfig_WithCallOptions(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -418,7 +419,7 @@ func TestConfig_WithCallOptions(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceRemoteAddr},
+				SourcePriority:        []string{SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -437,7 +438,7 @@ func TestConfig_WithCallOptions(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -456,7 +457,7 @@ func TestConfig_WithCallOptions(t *testing.T) {
 				ChainSelection:        RightmostUntrustedIP,
 				SecurityMode:          SecurityModeStrict,
 				DebugMode:             false,
-				SourcePriority:        []string{SourceXForwardedFor, SourceRemoteAddr},
+				SourcePriority:        []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 			},
 		},
 		{
@@ -468,6 +469,23 @@ func TestConfig_WithCallOptions(t *testing.T) {
 			name:        "duplicate built-in alias after canonicalization",
 			callOpts:    []CallOption{WithCallSourcePriority(SourceXForwardedFor, HeaderSource("X-Forwarded-For"))},
 			wantErrText: "duplicate source",
+		},
+		{
+			name:     "distinct custom headers with different runtime keys are allowed",
+			callOpts: []CallOption{WithCallSourcePriority(HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar"))},
+			want: configSnapshot{
+				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
+				MinTrustedProxies:     0,
+				MaxTrustedProxies:     0,
+				AllowPrivateIPs:       false,
+				AllowReservedPrefixes: []string{},
+				MaxChainLength:        DefaultMaxChainLength,
+				ChainSelection:        RightmostUntrustedIP,
+				SecurityMode:          SecurityModeStrict,
+				DebugMode:             false,
+				SourcePriority:        []string{"foo_bar", "foo_bar"},
+			},
+			wantSources: []Source{HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar")},
 		},
 		{
 			name:        "invalid trusted prefix call option",
@@ -500,6 +518,12 @@ func TestConfig_WithCallOptions(t *testing.T) {
 
 			if diff := cmp.Diff(tt.want, snapshotConfig(effective)); diff != "" {
 				t.Fatalf("call-option config mismatch (-want +got):\n%s", diff)
+			}
+
+			if tt.wantSources != nil {
+				if diff := cmp.Diff(tt.wantSources, effective.sourcePriority); diff != "" {
+					t.Fatalf("source priority mismatch (-want +got):\n%s", diff)
+				}
 			}
 		})
 	}
@@ -536,7 +560,7 @@ func TestApplyCallOptions(t *testing.T) {
 		}{
 			AllowPrivateIPs: true,
 			SecurityMode:    SecurityModeLax,
-			SourcePriority:  []string{SourceXForwardedFor, SourceRemoteAddr},
+			SourcePriority:  []string{SourceXForwardedFor.String(), SourceRemoteAddr.String()},
 		}
 
 		if diff := cmp.Diff(want, got); diff != "" {
@@ -664,6 +688,7 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 	tests := []struct {
 		name        string
 		opts        []Option
+		wantSources []Source
 		wantErrText string
 	}{
 		{
@@ -693,14 +718,30 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name:        "duplicate source after canonicalization",
-			opts:        []Option{WithTrustedLoopbackProxy(), WithSourcePriority(SourceXForwardedFor, "X-Forwarded-For")},
+			opts:        []Option{WithTrustedLoopbackProxy(), WithSourcePriority(SourceXForwardedFor, HeaderSource("X-Forwarded-For"))},
 			wantErrText: "duplicate source",
+		},
+		{
+			name:        "distinct custom headers with different runtime keys",
+			opts:        []Option{WithTrustedLoopbackProxy(), WithSourcePriority(HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar"))},
+			wantSources: []Source{HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar")},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.opts...)
+			extractor, err := New(tt.opts...)
+			if tt.wantErrText == "" && tt.wantSources != nil {
+				if err != nil {
+					t.Fatalf("New() error = %v", err)
+				}
+
+				if diff := cmp.Diff(tt.wantSources, extractor.config.sourcePriority); diff != "" {
+					t.Fatalf("source priority mismatch (-want +got):\n%s", diff)
+				}
+				return
+			}
+
 			got := errorTextStateOf(err, tt.wantErrText)
 
 			want := errorTextState{

@@ -1,11 +1,12 @@
 package clientip
 
 import (
+	"fmt"
 	"net/netip"
 	"slices"
 )
 
-// WithCallTrustedProxyPrefixes overrides trusted proxy prefixes for one call.
+// WithCallTrustedProxyPrefixes replaces trusted proxy prefixes for one call.
 func WithCallTrustedProxyPrefixes(prefixes ...netip.Prefix) CallOption {
 	prefixes = slices.Clone(prefixes)
 
@@ -44,7 +45,7 @@ func WithCallAllowPrivateIPs(allow bool) CallOption {
 	}
 }
 
-// WithCallAllowedReservedClientPrefixes overrides reserved-prefix allowlist for one call.
+// WithCallAllowedReservedClientPrefixes replaces reserved-prefix allowlist for one call.
 func WithCallAllowedReservedClientPrefixes(prefixes ...netip.Prefix) CallOption {
 	prefixes = slices.Clone(prefixes)
 
@@ -96,6 +97,10 @@ func WithCallSourcePriority(sources ...Source) CallOption {
 	sources = canonicalizeSources(slices.Clone(sources))
 
 	return func(c *config) error {
+		if len(sources) == 0 {
+			return fmt.Errorf("at least one source required in WithCallSourcePriority")
+		}
+
 		c.sourcePriority = slices.Clone(sources)
 		return nil
 	}

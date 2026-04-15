@@ -21,7 +21,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 		remoteAddr string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "valid IPv4 with port",
@@ -94,7 +94,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 
 			got := struct {
 				OK     bool
-				Source string
+				Source Source
 				IP     string
 			}{
 				OK:     (err == nil && result.IP.IsValid()),
@@ -106,7 +106,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 
 			want := struct {
 				OK     bool
-				Source string
+				Source Source
 				IP     string
 			}{
 				OK:     tt.wantOK,
@@ -127,7 +127,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	t.Run("Forwarded alias uses Forwarded parser", func(t *testing.T) {
 		extractor, err := New(
 			WithTrustedLoopbackProxy(),
-			WithSourcePriority(Source("Forwarded"), SourceRemoteAddr),
+			WithSourcePriority(HeaderSource("Forwarded"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -155,7 +155,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	t.Run("X-Forwarded-For alias combines multiple header lines", func(t *testing.T) {
 		extractor, err := New(
 			WithTrustedLoopbackProxy(),
-			WithSourcePriority(Source("X-Forwarded-For"), SourceRemoteAddr),
+			WithSourcePriority(HeaderSource("X-Forwarded-For"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -181,7 +181,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	})
 
 	t.Run("Remote-Addr alias maps to RemoteAddr source", func(t *testing.T) {
-		extractor, err := New(WithSourcePriority(Source("Remote-Addr")))
+		extractor, err := New(WithSourcePriority(HeaderSource("Remote-Addr")))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -206,7 +206,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	t.Run("X_Real_IP alias maps to X-Real-IP source", func(t *testing.T) {
 		extractor, err := New(
 			WithTrustedLoopbackProxy(),
-			WithSourcePriority(Source("X_Real_IP"), SourceRemoteAddr),
+			WithSourcePriority(HeaderSource("X_Real_IP"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -247,7 +247,7 @@ func TestExtract_XForwardedFor(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "single valid IP",
@@ -341,7 +341,7 @@ func TestExtract_Forwarded(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "single valid for value",
@@ -475,7 +475,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 
 			got := struct {
 				OK                bool
-				Source            string
+				Source            Source
 				IP                string
 				TrustedProxyCount int
 			}{
@@ -489,7 +489,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 
 			want := struct {
 				OK                bool
-				Source            string
+				Source            Source
 				IP                string
 				TrustedProxyCount int
 			}{
@@ -794,7 +794,7 @@ func TestExtract_XRealIP(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "X-Real-IP takes priority",
@@ -1628,7 +1628,7 @@ func TestExtract_Concurrent(t *testing.T) {
 			} else {
 				want := netip.MustParseAddr("1.1.1.1")
 				if result.IP != want {
-					errors <- &ExtractionError{Err: ErrInvalidIP, Source: "test"}
+					errors <- &ExtractionError{Err: ErrInvalidIP, Source: HeaderSource("test")}
 				}
 			}
 			done <- true
@@ -1674,7 +1674,7 @@ func TestExtract_NewAPI_Methods(t *testing.T) {
 
 	type extractionView struct {
 		IP                string
-		Source            string
+		Source            Source
 		TrustedProxyCount int
 		HasDebugInfo      bool
 	}
@@ -1745,35 +1745,35 @@ func TestExtract_WithCallOptions_LastWins(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
 	tests := []struct {
-		name    string
-		callOps []CallOption
-		wantErr bool
-		want    struct {
+		name     string
+		callOpts []CallOption
+		wantErr  bool
+		want     struct {
 			IP     string
-			Source string
+			Source Source
 		}
 	}{
 		{
-			name:    "strict default fails",
-			callOps: nil,
-			wantErr: true,
+			name:     "strict default fails",
+			callOpts: nil,
+			wantErr:  true,
 		},
 		{
 			name: "lax call options succeed",
-			callOps: []CallOption{
+			callOpts: []CallOption{
 				WithCallSecurityMode(SecurityModeStrict),
 				WithCallSecurityMode(SecurityModeLax),
 			},
 			want: struct {
 				IP     string
-				Source string
+				Source Source
 			}{IP: "8.8.8.8", Source: SourceXForwardedFor},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractor.Extract(req, tt.callOps...)
+			got, err := extractor.Extract(req, tt.callOpts...)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Extract() error = nil, want non-nil")
@@ -1787,7 +1787,7 @@ func TestExtract_WithCallOptions_LastWins(t *testing.T) {
 
 			gotView := struct {
 				IP     string
-				Source string
+				Source Source
 			}{IP: got.IP.String(), Source: got.Source}
 
 			if diff := cmp.Diff(tt.want, gotView); diff != "" {
@@ -1890,7 +1890,7 @@ func TestExtract_ErrorSourceReporting(t *testing.T) {
 		}
 
 		got := extractionStateOf(result)
-		want := extractionState{Source: "", HasIP: false}
+		want := extractionState{Source: Source{}, HasIP: false}
 
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Fatalf("error result mismatch (-want +got):\n%s", diff)
@@ -1925,11 +1925,11 @@ func TestNew_OptionsImmutability(t *testing.T) {
 
 	want := struct {
 		IP     string
-		Source string
+		Source Source
 	}{IP: "8.8.8.8", Source: SourceXForwardedFor}
 	gotView := struct {
 		IP     string
-		Source string
+		Source Source
 	}{IP: got.IP.String(), Source: got.Source}
 
 	if diff := cmp.Diff(want, gotView); diff != "" {

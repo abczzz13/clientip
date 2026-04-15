@@ -34,14 +34,14 @@ func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
 	sources := make([]sourceExtractor, 0, len(cfg.sourcePriority))
 	for _, configuredSource := range cfg.sourcePriority {
 		var source sourceExtractor
-		switch configuredSource {
-		case SourceForwarded:
+		switch configuredSource.kind {
+		case sourceForwarded:
 			source = newForwardedSource(e)
-		case SourceXForwardedFor:
+		case sourceXForwardedFor:
 			source = newForwardedForSource(e)
-		case SourceXRealIP:
+		case sourceXRealIP:
 			source = newSingleHeaderSource(e, "X-Real-IP")
-		case SourceRemoteAddr:
+		case sourceRemoteAddr:
 			source = newRemoteAddrSource(e)
 		default:
 			headerName, _ := configuredSource.headerKey()
@@ -154,22 +154,22 @@ func (e *Extractor) prepareCall(callOpts ...CallOption) (*Extractor, sourceExtra
 func (e *Extractor) extractWithSource(source sourceExtractor, ctx context.Context, r *http.Request) (Extraction, error) {
 	extractionResult, err := source.Extract(ctx, r)
 	if err != nil {
-		sourceName := e.getSourceName(extractionResult, err)
+		sourceValue := e.getSource(extractionResult, err)
 		return Extraction{
-			Source:            sourceName,
+			Source:            sourceValue,
 			TrustedProxyCount: extractionResult.TrustedProxyCount,
 			DebugInfo:         extractionResult.DebugInfo,
 		}, err
 	}
 
-	sourceName := extractionResult.Source
-	if sourceName == "" {
-		sourceName = source.Name()
+	sourceValue := extractionResult.Source
+	if !sourceValue.valid() {
+		sourceValue = source.Source()
 	}
 
 	return Extraction{
 		IP:                normalizeIP(extractionResult.IP),
-		Source:            sourceName,
+		Source:            sourceValue,
 		TrustedProxyCount: extractionResult.TrustedProxyCount,
 		DebugInfo:         extractionResult.DebugInfo,
 	}, nil
@@ -178,9 +178,9 @@ func (e *Extractor) extractWithSource(source sourceExtractor, ctx context.Contex
 func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
 	result, err := e.extractRemoteAddr(remoteAddr)
 	if err != nil {
-		sourceName := e.getSourceName(result, err)
+		sourceValue := e.getSource(result, err)
 		return Extraction{
-			Source:            sourceName,
+			Source:            sourceValue,
 			TrustedProxyCount: result.TrustedProxyCount,
 			DebugInfo:         result.DebugInfo,
 		}, err
@@ -194,16 +194,16 @@ func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error)
 	}, nil
 }
 
-func (e *Extractor) getSourceName(result extractionResult, err error) string {
+func (e *Extractor) getSource(result extractionResult, err error) Source {
 	if err != nil {
-		var sourceErr interface{ SourceName() string }
+		var sourceErr interface{ SourceValue() Source }
 		if errors.As(err, &sourceErr) {
-			return sourceErr.SourceName()
+			return sourceErr.SourceValue()
 		}
-		return ""
+		return Source{}
 	}
-	if result.Source != "" {
+	if result.Source.valid() {
 		return result.Source
 	}
-	return e.source.Name()
+	return e.source.Source()
 }
