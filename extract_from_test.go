@@ -24,8 +24,8 @@ func (p *panicOnNilHeaderProvider) Values(string) []string {
 
 func TestExtractFrom_ParityWithExtract(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -90,8 +90,8 @@ func TestExtractFrom_ParityWithExtract(t *testing.T) {
 
 func TestExtractFrom_HeaderValuesFunc(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		Priority("CF-Connecting-IP", SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(HeaderSource("CF-Connecting-IP"), SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -115,7 +115,7 @@ func TestExtractFrom_HeaderValuesFunc(t *testing.T) {
 		t.Fatalf("ExtractFrom() error = %v", err)
 	}
 
-	if got, want := extraction.Source, "cf_connecting_ip"; got != want {
+	if got, want := extraction.Source, HeaderSource("CF-Connecting-IP"); got != want {
 		t.Fatalf("source = %q, want %q", got, want)
 	}
 	if got, want := extraction.IP, netip.MustParseAddr("9.9.9.9"); got != want {
@@ -153,10 +153,84 @@ func TestExtractFrom_RemoteAddrOnlyDoesNotRequestHeaders(t *testing.T) {
 	}
 }
 
+func TestExtractFrom_CallOptionSourcePriority_UsesEffectiveHeaders(t *testing.T) {
+	extractor, err := New(
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	t.Run("custom header override requests only effective header", func(t *testing.T) {
+		cfHeader := textproto.CanonicalMIMEHeaderKey("CF-Connecting-IP")
+		requestedHeaders := make([]string, 0, 1)
+
+		extraction, err := extractor.ExtractFrom(
+			RequestInput{
+				RemoteAddr: "127.0.0.1:8080",
+				Headers: HeaderValuesFunc(func(name string) []string {
+					requestedHeaders = append(requestedHeaders, name)
+					switch name {
+					case cfHeader:
+						return []string{"9.9.9.9"}
+					case "X-Forwarded-For":
+						return []string{"8.8.8.8"}
+					default:
+						return nil
+					}
+				}),
+			},
+			WithCallSourcePriority(HeaderSource("cf-connecting-ip"), SourceRemoteAddr),
+		)
+		if err != nil {
+			t.Fatalf("ExtractFrom() error = %v", err)
+		}
+
+		if got, want := extraction.IP, netip.MustParseAddr("9.9.9.9"); got != want {
+			t.Fatalf("ip = %s, want %s", got, want)
+		}
+		if got, want := extraction.Source, HeaderSource("CF-Connecting-IP"); got != want {
+			t.Fatalf("source = %q, want %q", got, want)
+		}
+		if len(requestedHeaders) != 1 || requestedHeaders[0] != cfHeader {
+			t.Fatalf("requested headers = %v, want [%q]", requestedHeaders, cfHeader)
+		}
+	})
+
+	t.Run("remote addr override skips header provider", func(t *testing.T) {
+		requested := 0
+
+		extraction, err := extractor.ExtractFrom(
+			RequestInput{
+				RemoteAddr: "8.8.8.8:8080",
+				Headers: HeaderValuesFunc(func(name string) []string {
+					requested++
+					return []string{"9.9.9.9"}
+				}),
+			},
+			WithCallSourcePriority(SourceRemoteAddr),
+		)
+		if err != nil {
+			t.Fatalf("ExtractFrom() error = %v", err)
+		}
+
+		if got, want := extraction.IP, netip.MustParseAddr("8.8.8.8"); got != want {
+			t.Fatalf("ip = %s, want %s", got, want)
+		}
+		if got, want := extraction.Source, SourceRemoteAddr; got != want {
+			t.Fatalf("source = %q, want %q", got, want)
+		}
+		if requested != 0 {
+			t.Fatalf("header provider called %d times, want 0", requested)
+		}
+	})
+}
+
 func TestExtractFrom_TypedNilHeaderProviderTreatedAsAbsent(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("8.8.8.8")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("8.8.8.8")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -212,10 +286,10 @@ func TestExtractFrom_RemoteAddrOnly_RespectsCanceledContext(t *testing.T) {
 		}
 	})
 
-	t.Run("override_to_remote_addr_priority", func(t *testing.T) {
+	t.Run("call_option_to_remote_addr_priority", func(t *testing.T) {
 		extractor, err := New(
-			TrustProxyAddrs(netip.MustParseAddr("8.8.8.8")),
-			Priority(SourceXForwardedFor, SourceRemoteAddr),
+			WithTrustedProxyAddrs(netip.MustParseAddr("8.8.8.8")),
+			WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -226,7 +300,7 @@ func TestExtractFrom_RemoteAddrOnly_RespectsCanceledContext(t *testing.T) {
 				Context:    ctx,
 				RemoteAddr: "8.8.8.8:8080",
 			},
-			OverrideOptions{SourcePriority: Set([]string{SourceRemoteAddr})},
+			WithCallSourcePriority(SourceRemoteAddr),
 		)
 		if !errors.Is(extractErr, context.Canceled) {
 			t.Fatalf("error = %v, want context.Canceled", extractErr)
@@ -239,8 +313,8 @@ func TestExtractFrom_CanceledContext_DoesNotRequestHeaders(t *testing.T) {
 	cancel()
 
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -268,9 +342,9 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor),
-		MaxChainLength(1),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor),
+		WithMaxChainLength(1),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -317,12 +391,16 @@ func TestExtractFrom_UsesInputContextAndPathInLogs(t *testing.T) {
 	)
 }
 
-func TestExtractFrom_OneShotHelpersAndNilContext(t *testing.T) {
+func TestExtractFrom_NilContextDefaultsBackground(t *testing.T) {
 	input := RequestInput{RemoteAddr: "8.8.8.8:8080"}
-
-	extraction, err := ExtractFromWithOptions(input)
+	extractor, err := New()
 	if err != nil {
-		t.Fatalf("ExtractFromWithOptions() error = %v", err)
+		t.Fatalf("New() error = %v", err)
+	}
+
+	extraction, err := extractor.ExtractFrom(input)
+	if err != nil {
+		t.Fatalf("ExtractFrom() error = %v", err)
 	}
 	if got, want := extraction.IP.String(), "8.8.8.8"; got != want {
 		t.Fatalf("IP = %q, want %q", got, want)
@@ -331,9 +409,9 @@ func TestExtractFrom_OneShotHelpersAndNilContext(t *testing.T) {
 		t.Fatalf("Source = %q, want %q", got, want)
 	}
 
-	addr, err := ExtractAddrFromWithOptions(input)
+	addr, err := extractor.ExtractAddrFrom(input)
 	if err != nil {
-		t.Fatalf("ExtractAddrFromWithOptions() error = %v", err)
+		t.Fatalf("ExtractAddrFrom() error = %v", err)
 	}
 	if got, want := addr.String(), "8.8.8.8"; got != want {
 		t.Fatalf("IP = %q, want %q", got, want)

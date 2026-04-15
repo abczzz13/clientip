@@ -13,7 +13,22 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- Option naming is now consistently `With...` for policy options (`WithTrustedProxyPrefixes`, `WithMinTrustedProxies`, `WithMaxTrustedProxies`, `WithAllowPrivateIPs`, `WithAllowedReservedClientPrefixes`, `WithMaxChainLength`, and related trust helpers).
+- Internal chain extraction logic from `xff.go` is split into focused files (`chain_capacity.go`, `chain_validation.go`, `xff_parse.go`, `chain_analysis.go`) with no behavior change.
+- No-op call options now reuse the existing config and source chain when policy is unchanged.
+- Typed-nil `RequestInput.Headers` providers are treated as absent instead of being invoked.
 - The optional Prometheus adapter module now depends on `github.com/abczzz13/clientip v0.0.6`.
+- Typed source API with an opaque `Source` type, `HeaderSource(string)`, fully typed `Extraction.Source` / `ExtractionError.Source`, and `WithSourcePriority(...Source)`.
+- Per-call policy API via `CallOption` and helpers such as `WithCallSecurityMode`, `WithCallSourcePriority`, and `WithCallTrustedProxyPrefixes`.
+- **BREAKING:** `Extractor.Extract`, `Extractor.ExtractAddr`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom` now accept `...CallOption` (instead of `...OverrideOptions`).
+- **BREAKING:** `Extractor.Extract(nil)` and `Extractor.ExtractAddr(nil)` now return `ErrNilRequest`.
+- **BREAKING:** `NormalizeSourceName` has been removed; use `HeaderSource(name).String()` when you need the canonical identifier for an arbitrary header name.
+- **BREAKING:** custom `Source` text/JSON encoding now uses canonical MIME header names (for example `Cf-Connecting-Ip`) instead of underscore-normalized identifiers such as `cf_connecting_ip`; `Source.String()` still returns the underscore-normalized identifier.
+
+### Removed
+
+- Per-call `OverrideOptions` and `Set(...)` in favor of `CallOption`.
+- One-shot helpers `ExtractWithOptions`, `ExtractAddrWithOptions`, `ExtractFromWithOptions`, and `ExtractAddrFromWithOptions`.
 
 ## [0.0.6] - 2026-02-18
 
@@ -24,7 +39,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - New examples and tests covering framework-style integrations, parity with `net/http` extraction behavior, context/path propagation for logging, and cancellation behavior for framework header providers.
 - Additional `Forwarded` parser tests for quoted delimiters/escapes and malformed quoted-value edge cases.
 - Benchmark coverage for `ExtractFrom` with both `http.Header` and `HeaderValuesFunc` header providers, plus parameter-rich `Forwarded` header extraction.
-- New option `AllowReservedClientPrefixes(...netip.Prefix)` to explicitly allow selected reserved/special-use client ranges.
+- New option `WithAllowedReservedClientPrefixes(...netip.Prefix)` to explicitly allow selected reserved/special-use client ranges.
 
 ### Changed
 
@@ -64,7 +79,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - New malformed-header error sentinel: `ErrInvalidForwardedHeader`.
 - New source-absence sentinel: `ErrSourceUnavailable`.
 - New duplicate single-IP header error sentinel: `ErrMultipleSingleIPHeaders`.
-- Trust helper options for common deployments: `TrustLoopbackProxy()`, `TrustPrivateProxyRanges()`, `TrustLocalProxyDefaults()`, and `TrustProxyIP(string)`.
+- Trust helper options for common deployments: `WithTrustedLoopbackProxy()`, `WithTrustedPrivateProxyRanges()`, `WithTrustedLocalProxyDefaults()`, and `TrustProxyIP(string)`.
 - New deployment presets: `PresetDirectConnection()`, `PresetLoopbackReverseProxy()`, `PresetVMReverseProxy()`, and `PresetPreferredHeaderThenXFFLax(string)`.
 - New extraction API: `Extract(req, overrides...)` and `ExtractAddr(req, overrides...)` returning `(value, error)`.
 - One-shot convenience helpers: `ExtractWithOptions(req, opts)` and `ExtractAddrWithOptions(req, opts)`.
@@ -74,14 +89,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - Default source priority is now `RemoteAddr` only (safe-by-default, no implicit header trust).
 - Header-based sources now require trusted upstream proxy CIDRs (`TrustedCIDRs`, `TrustedProxies`, or trust helpers).
-- `Priority(...)` now allows at most one chain-header source per extractor (`SourceForwarded` or `SourceXForwardedFor`).
+- `WithSourcePriority(...)` now allows at most one chain-header source per extractor (`SourceForwarded` or `SourceXForwardedFor`).
 - Proxy-chain extraction, trust validation, and chain limits now apply consistently to `Forwarded` and `X-Forwarded-For`.
 - In `SecurityModeStrict` (default), malformed `Forwarded` and invalid present source values are terminal (fail closed); `SecurityModeLax` allows fallback.
 - Chain selection naming is now explicit: `WithChainSelection(ChainSelection)` with `RightmostUntrustedIP` (default) and `LeftmostUntrustedIP`.
 - Single-IP header sources now explicitly reject multiple header values and fail closed in strict mode.
 - `parseIP` now trims wrapping quotes/brackets only when delimiters are matched.
 - `ProxyValidationError` and `InvalidIPError` now expose `Chain` instead of `XFF`.
-- `Priority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
+- `WithSourcePriority(...)` now canonicalizes built-in source aliases (for example `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`).
 - Reserved/special-use client IP filtering now covers additional RFC ranges (for example benchmarking, NAT64, ORCHIDv2, and future-use ranges).
 - Prometheus adapter supports both options fragments (`WithMetrics()`, `WithRegisterer(...)`) and explicit constructors (`New()`, `NewWithRegisterer(...)`).
 - Result handling is now centered around `Extraction` + error return values.

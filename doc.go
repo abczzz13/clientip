@@ -8,8 +8,10 @@
 //   - Flexible proxy configuration with min/max trusted proxy ranges in proxy chains
 //   - Multiple source support: Forwarded, X-Forwarded-For, X-Real-IP, RemoteAddr, custom headers
 //   - Framework-friendly RequestInput API for non-net/http integrations
+//   - Typed source configuration via opaque Source values, built-in Source variables, and HeaderSource(...)
 //   - Safe defaults: RemoteAddr-only unless header sources are explicitly configured
 //   - Deployment presets for common topologies (direct, loopback proxy, VM proxy)
+//   - Per-call policy overrides via CallOption builders such as WithCallSecurityMode
 //   - Optional observability with context-aware logging and pluggable metrics
 //   - Type-safe using modern Go netip.Addr
 //
@@ -39,18 +41,27 @@
 //	    Headers:    headerProvider,
 //	})
 //
+// Call options work with both Extract and ExtractFrom:
+//
+//	extraction, err := extractor.ExtractFrom(input,
+//	    clientip.WithCallSourcePriority(
+//	        clientip.HeaderSource("CF-Connecting-IP"),
+//	        clientip.SourceRemoteAddr,
+//	    ),
+//	)
+//
 // # Behind Reverse Proxy
 //
 // Configure trusted proxy prefixes with flexible min/max proxy count:
 //
 //	cidrs, _ := clientip.ParseCIDRs("10.0.0.0/8", "172.16.0.0/12")
 //	extractor, err := clientip.New(
-//	    clientip.TrustProxyPrefixes(cidrs...), // Trust upstream proxy ranges
-//	    clientip.MinTrustedProxies(0),         // Count trusted proxies present in proxy headers
-//	    clientip.MaxTrustedProxies(2),
-//	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+//	    clientip.WithTrustedProxyPrefixes(cidrs...), // Trust upstream proxy ranges
+//	    clientip.WithMinTrustedProxies(0),         // Count trusted proxies present in proxy headers
+//	    clientip.WithMaxTrustedProxies(2),
+//	    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 //	    clientip.WithChainSelection(clientip.RightmostUntrustedIP),
-//	    clientip.AllowPrivateIPs(false),
+//	    clientip.WithAllowPrivateIPs(false),
 //	)
 //
 // # Custom Headers
@@ -58,18 +69,18 @@
 // Support for cloud providers and custom proxy headers:
 //
 //	extractor, _ := clientip.New(
-//	    clientip.TrustLoopbackProxy(),
-//	    clientip.Priority(
-//	        "CF-Connecting-IP",                   // Cloudflare
+//	    clientip.WithTrustedLoopbackProxy(),
+//	    clientip.WithSourcePriority(
+//	        clientip.HeaderSource("CF-Connecting-IP"), // Cloudflare
 //	        clientip.SourceXForwardedFor,
 //	        clientip.SourceRemoteAddr,
 //	    ),
 //	)
 //
 // Header sources require trusted upstream proxy ranges. Use
-// TrustProxyPrefixes (with ParseCIDRs for string inputs) or helper options like
-// TrustLoopbackProxy, TrustPrivateProxyRanges, TrustLocalProxyDefaults, or
-// TrustProxyAddrs.
+// WithTrustedProxyPrefixes(with ParseCIDRs for string inputs) or helper options like
+// WithTrustedLoopbackProxy, WithTrustedPrivateProxyRanges,
+// WithTrustedLocalProxyDefaults, or WithTrustedProxyAddrs.
 //
 // Presets are available for common setups:
 //
@@ -86,10 +97,10 @@
 //	metrics, _ := clientipprom.New()
 //
 //	extractor, err := clientip.New(
-//	    clientip.TrustProxyPrefixes(cidrs...),
-//	    clientip.MinTrustedProxies(0),
-//	    clientip.MaxTrustedProxies(3),
-//	    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+//	    clientip.WithTrustedProxyPrefixes(cidrs...),
+//	    clientip.WithMinTrustedProxies(0),
+//	    clientip.WithMaxTrustedProxies(3),
+//	    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
 //	    clientip.WithLogger(slog.Default()),
 //	    clientip.WithMetrics(metrics),
 //	)

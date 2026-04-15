@@ -66,7 +66,7 @@ func TestSingleHeaderSource_Extract(t *testing.T) {
 				extractor:  extractor,
 				headerName: tt.headerName,
 				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
-				sourceName: NormalizeSourceName(tt.headerName),
+				sourceName: HeaderSource(tt.headerName),
 			}
 
 			req := &http.Request{
@@ -105,7 +105,7 @@ func TestSingleHeaderSource_Extract_MultipleHeaderValues(t *testing.T) {
 		extractor:  extractor,
 		headerName: "X-Real-IP",
 		headerKey:  textproto.CanonicalMIMEHeaderKey("X-Real-IP"),
-		sourceName: NormalizeSourceName("X-Real-IP"),
+		sourceName: HeaderSource("X-Real-IP"),
 	}
 
 	req := &http.Request{
@@ -165,11 +165,11 @@ func TestSingleHeaderSource_Name(t *testing.T) {
 				extractor:  extractor,
 				headerName: tt.headerName,
 				headerKey:  textproto.CanonicalMIMEHeaderKey(tt.headerName),
-				sourceName: NormalizeSourceName(tt.headerName),
+				sourceName: HeaderSource(tt.headerName),
 			}
 
-			if source.Name() != tt.wantName {
-				t.Errorf("Name() = %q, want %q", source.Name(), tt.wantName)
+			if got := source.Source().String(); got != tt.wantName {
+				t.Errorf("Source().String() = %q, want %q", got, tt.wantName)
 			}
 		})
 	}

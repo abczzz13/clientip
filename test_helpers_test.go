@@ -12,7 +12,7 @@ import (
 type extractionState struct {
 	HasIP  bool
 	IP     string
-	Source string
+	Source Source
 }
 
 type errorTextState struct {

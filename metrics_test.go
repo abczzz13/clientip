@@ -39,16 +39,16 @@ func (m *mockMetrics) RecordSecurityEvent(event string) {
 	m.securityEvents[event]++
 }
 
-func (m *mockMetrics) getSuccessCount(source string) int {
+func (m *mockMetrics) getSuccessCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.successCount[source]
+	return m.successCount[source.String()]
 }
 
-func (m *mockMetrics) getFailureCount(source string) int {
+func (m *mockMetrics) getFailureCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.failureCount[source]
+	return m.failureCount[source.String()]
 }
 
 func (m *mockMetrics) getSecurityEventCount(event string) int {
@@ -120,7 +120,7 @@ func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
 func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
-		AllowPrivateIPs(false),
+		WithAllowPrivateIPs(false),
 		WithMetrics(metrics),
 	)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestMetrics_SecurityEvent_ReservedIP(t *testing.T) {
 func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
-		AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+		WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
 		WithMetrics(metrics),
 	)
 	if err != nil {
@@ -182,8 +182,8 @@ func TestMetrics_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -215,8 +215,8 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXRealIP),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXRealIP),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -244,11 +244,11 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(2),
-		MaxTrustedProxies(3),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(2),
+		WithMaxTrustedProxies(3),
 		WithMetrics(metrics),
-		Priority(SourceXForwardedFor),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -268,11 +268,11 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
 		WithMetrics(metrics),
-		Priority(SourceXForwardedFor),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -292,11 +292,11 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(1),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(1),
 		WithMetrics(metrics),
-		Priority(SourceXForwardedFor),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -316,11 +316,11 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	metrics := newMockMetrics()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
 		WithMetrics(metrics),
-		Priority(SourceXForwardedFor),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -339,10 +339,10 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
-		MaxChainLength(5),
+		WithMaxChainLength(5),
 		WithMetrics(metrics),
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -362,8 +362,8 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -383,8 +383,8 @@ func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustLoopbackProxy(),
-		Priority(SourceForwarded),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceForwarded),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -407,8 +407,8 @@ func TestMetrics_MultipleExtractions(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -439,8 +439,8 @@ func TestMetrics_DifferentSources(t *testing.T) {
 	metrics := newMockMetrics()
 	extractor, err := New(
 		WithMetrics(metrics),
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -109,7 +109,7 @@ func TestParseForwardedValues(t *testing.T) {
 }
 
 func TestParseForwardedValues_MaxChainLength(t *testing.T) {
-	extractor := mustNewExtractor(t, MaxChainLength(2))
+	extractor := mustNewExtractor(t, WithMaxChainLength(2))
 
 	_, err := extractor.parseForwardedValues([]string{"for=1.1.1.1, for=2.2.2.2, for=3.3.3.3"})
 	if !errorContains(err, ErrChainTooLong) {

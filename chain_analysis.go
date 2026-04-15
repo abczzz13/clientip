@@ -5,177 +5,17 @@ import (
 	"strings"
 )
 
-// typicalChainCapacity is the default initial capacity used when parsing proxy
-// chains.
-const typicalChainCapacity = 8
-
-func (e *Extractor) chainPartsCapacity(values []string) int {
-	maxLength := e.config.maxChainLength
-	if maxLength <= 0 {
-		maxLength = 1
-	}
-
-	if len(values) == 1 {
-		v := values[0]
-		firstComma := strings.IndexByte(v, ',')
-		if firstComma == -1 {
-			return 1
-		}
-
-		secondComma := strings.IndexByte(v[firstComma+1:], ',')
-		if secondComma == -1 {
-			if maxLength < 2 {
-				return maxLength
-			}
-			return 2
-		}
-
-		if strings.IndexByte(v[firstComma+secondComma+2:], ',') == -1 {
-			if maxLength < 3 {
-				return maxLength
-			}
-			return 3
-		}
-	} else if len(values) == 2 {
-		if strings.IndexByte(values[0], ',') == -1 && strings.IndexByte(values[1], ',') == -1 {
-			if maxLength < 2 {
-				return maxLength
-			}
-			return 2
-		}
-	}
-
-	if maxLength < typicalChainCapacity {
-		return maxLength
-	}
-
-	return typicalChainCapacity
-}
-
-func trimHTTPWhitespace(value string) string {
-	start := 0
-	for start < len(value) {
-		ch := value[start]
-		if ch != ' ' && ch != '\t' {
-			break
-		}
-		start++
-	}
-
-	end := len(value)
-	for end > start {
-		ch := value[end-1]
-		if ch != ' ' && ch != '\t' {
-			break
-		}
-		end--
-	}
-
-	return value[start:end]
-}
-
-func (e *Extractor) isTrustedProxy(ip netip.Addr) bool {
-	if !ip.IsValid() {
-		return false
-	}
-
-	if e.config.trustedProxyMatch.initialized {
-		return e.config.trustedProxyMatch.contains(ip)
-	}
-
-	for _, cidr := range e.config.trustedProxyCIDRs {
-		if cidr.Contains(ip) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (e *Extractor) validateProxyCount(trustedCount int) error {
-	if len(e.config.trustedProxyCIDRs) > 0 && e.config.minTrustedProxies > 0 && trustedCount == 0 {
-		e.config.metrics.RecordSecurityEvent(securityEventNoTrustedProxies)
-		return ErrNoTrustedProxies
-	}
-
-	if e.config.minTrustedProxies > 0 && trustedCount < e.config.minTrustedProxies {
-		e.config.metrics.RecordSecurityEvent(securityEventTooFewTrustedProxies)
-		return ErrTooFewTrustedProxies
-	}
-
-	if e.config.maxTrustedProxies > 0 && trustedCount > e.config.maxTrustedProxies {
-		e.config.metrics.RecordSecurityEvent(securityEventTooManyTrustedProxies)
-		return ErrTooManyTrustedProxies
-	}
-
-	return nil
-}
-
-func (e *Extractor) parseXFFValues(values []string) ([]string, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-
-	maxChainLength := e.config.maxChainLength
-	parts := make([]string, 0, e.chainPartsCapacity(values))
-	for _, v := range values {
-		start := 0
-		for i := 0; i <= len(v); i++ {
-			if i != len(v) && v[i] != ',' {
-				continue
-			}
-
-			part := trimHTTPWhitespace(v[start:i])
-			if part != "" {
-				if len(parts) >= maxChainLength {
-					e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
-					return nil, &ChainTooLongError{
-						ExtractionError: ExtractionError{
-							Err:    ErrChainTooLong,
-							Source: SourceXForwardedFor,
-						},
-						ChainLength: len(parts) + 1,
-						MaxLength:   maxChainLength,
-					}
-				}
-
-				parts = append(parts, part)
-			}
-
-			start = i + 1
-		}
-	}
-	return parts, nil
-}
-
-// appendChainPart appends one parsed chain part while enforcing maxChainLength.
-func (e *Extractor) appendChainPart(parts []string, part, sourceName string) ([]string, error) {
-	if len(parts) >= e.config.maxChainLength {
-		e.config.metrics.RecordSecurityEvent(securityEventChainTooLong)
-		return nil, &ChainTooLongError{
-			ExtractionError: ExtractionError{
-				Err:    ErrChainTooLong,
-				Source: sourceName,
-			},
-			ChainLength: len(parts) + 1,
-			MaxLength:   e.config.maxChainLength,
-		}
-	}
-
-	return append(parts, part), nil
-}
-
 type chainAnalysis struct {
 	clientIndex    int
 	trustedCount   int
 	trustedIndices []int
 }
 
-func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
+func (e *Extractor) clientIPFromChainWithDebug(source Source, parts []string) (netip.Addr, int, *ChainDebugInfo, error) {
 	if len(parts) == 0 {
 		return netip.Addr{}, 0, nil, &ExtractionError{
 			Err:    ErrInvalidIP,
-			Source: sourceName,
+			Source: source,
 		}
 	}
 
@@ -195,7 +35,7 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 		return netip.Addr{}, analysis.trustedCount, debugInfo, &ProxyValidationError{
 			ExtractionError: ExtractionError{
 				Err:    err,
-				Source: sourceName,
+				Source: source,
 			},
 			Chain:             chain,
 			TrustedProxyCount: analysis.trustedCount,
@@ -211,7 +51,7 @@ func (e *Extractor) clientIPFromChainWithDebug(sourceName string, parts []string
 		return netip.Addr{}, analysis.trustedCount, debugInfo, &InvalidIPError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
-				Source: sourceName,
+				Source: source,
 			},
 			Chain:          chain,
 			ExtractedIP:    clientIPStr,

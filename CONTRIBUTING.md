@@ -43,11 +43,11 @@ just ci
 ```
 
 ## Installing tools
-These maintainer tools are pinned and may require Go `1.24+`.
+These maintainer tools are pinned and may require Go `1.26+`.
 
 ```bash
 go install github.com/just/just@latest
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
 go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
 go install mvdan.cc/gofumpt@latest

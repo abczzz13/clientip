@@ -3,7 +3,7 @@ package clientip
 import (
 	"fmt"
 	"net/netip"
-	"strings"
+	"slices"
 )
 
 const (
@@ -79,64 +79,16 @@ func (m SecurityMode) valid() bool {
 // Construct options using package-provided option builder functions.
 type Option func(*config) error
 
-// SetValue represents an optional per-call override value.
+// CallOption configures one Extract/ExtractFrom call.
 //
-// Use Set(v) to mark an override as explicitly provided.
-type SetValue[T any] struct {
-	v   T
-	set bool
-}
-
-// Set marks a value as explicitly set for OverrideOptions.
-func Set[T any](value T) SetValue[T] {
-	return SetValue[T]{v: value, set: true}
-}
-
-// isSet reports whether a value was explicitly provided.
-func (s SetValue[T]) isSet() bool {
-	return s.set
-}
-
-// value returns the stored value.
-func (s SetValue[T]) value() T {
-	return s.v
-}
-
-// OverrideOptions applies per-call policy overrides.
-//
-// Only policy-related fields are overrideable. Logger and Metrics remain fixed
-// at extractor construction time.
-type OverrideOptions struct {
-	TrustedProxyPrefixes SetValue[[]netip.Prefix]
-	MinTrustedProxies    SetValue[int]
-	MaxTrustedProxies    SetValue[int]
-
-	AllowPrivateIPs             SetValue[bool]
-	AllowReservedClientPrefixes SetValue[[]netip.Prefix]
-	MaxChainLength              SetValue[int]
-	ChainSelection              SetValue[ChainSelection]
-	SecurityMode                SetValue[SecurityMode]
-	DebugInfo                   SetValue[bool]
-
-	SourcePriority SetValue[[]string]
-}
-
-func (o OverrideOptions) hasSetValues() bool {
-	return o.TrustedProxyPrefixes.isSet() ||
-		o.MinTrustedProxies.isSet() ||
-		o.MaxTrustedProxies.isSet() ||
-		o.AllowPrivateIPs.isSet() ||
-		o.AllowReservedClientPrefixes.isSet() ||
-		o.MaxChainLength.isSet() ||
-		o.ChainSelection.isSet() ||
-		o.SecurityMode.isSet() ||
-		o.DebugInfo.isSet() ||
-		o.SourcePriority.isSet()
-}
+// Call options can override policy fields for a single extraction, while
+// logger and metrics remain fixed at extractor construction time.
+type CallOption func(*config) error
 
 // config holds extractor configuration state.
 //
-// It is mutated by Option functions during construction and override merging.
+// It is mutated by Option functions during construction and by CallOption
+// functions during per-call policy adjustments.
 type config struct {
 	trustedProxyCIDRs []netip.Prefix
 	trustedProxyMatch trustedProxyMatcher
@@ -150,7 +102,7 @@ type config struct {
 	securityMode                SecurityMode
 	debugMode                   bool
 
-	sourcePriority   []string
+	sourcePriority   []Source
 	sourceHeaderKeys []string
 
 	logger  Logger
@@ -186,39 +138,20 @@ func mustParsePrefix(cidr string) netip.Prefix {
 	return prefix
 }
 
-func canonicalizeSourceNames(sources []string) []string {
-	resolved := make([]string, len(sources))
-	for i, source := range sources {
-		resolved[i] = canonicalSourceName(strings.TrimSpace(source))
-	}
-	return resolved
-}
-
 func clonePrefixes(prefixes []netip.Prefix) []netip.Prefix {
-	if prefixes == nil {
-		return nil
-	}
-	cloned := make([]netip.Prefix, len(prefixes))
-	copy(cloned, prefixes)
-	return cloned
+	return slices.Clone(prefixes)
 }
 
 func cloneAddrs(addrs []netip.Addr) []netip.Addr {
-	if addrs == nil {
-		return nil
-	}
-	cloned := make([]netip.Addr, len(addrs))
-	copy(cloned, addrs)
-	return cloned
+	return slices.Clone(addrs)
 }
 
 func cloneStrings(values []string) []string {
-	if values == nil {
-		return nil
-	}
-	cloned := make([]string, len(values))
-	copy(cloned, values)
-	return cloned
+	return slices.Clone(values)
+}
+
+func cloneSources(values []Source) []Source {
+	return slices.Clone(values)
 }
 
 func normalizePrefixes(prefixes []netip.Prefix, kind string) ([]netip.Prefix, error) {
@@ -286,8 +219,8 @@ func defaultConfig() *config {
 		securityMode:      SecurityModeStrict,
 		logger:            noopLogger{},
 		metrics:           noopMetrics{},
-		sourcePriority: []string{
-			SourceRemoteAddr,
+		sourcePriority: []Source{
+			builtinSource(sourceRemoteAddr),
 		},
 	}
 }
@@ -335,6 +268,9 @@ func configFromOptions(opts ...Option) (*config, error) {
 		if err != nil {
 			return nil, err
 		}
+		if isNilValue(metrics) {
+			return nil, fmt.Errorf("metrics cannot be nil")
+		}
 		cfg.metrics = metrics
 
 		if err := cfg.validate(); err != nil {
@@ -357,7 +293,7 @@ func (c *config) clone() *config {
 		chainSelection:              c.chainSelection,
 		securityMode:                c.securityMode,
 		debugMode:                   c.debugMode,
-		sourcePriority:              cloneStrings(c.sourcePriority),
+		sourcePriority:              cloneSources(c.sourcePriority),
 		sourceHeaderKeys:            cloneStrings(c.sourceHeaderKeys),
 		logger:                      c.logger,
 		metrics:                     c.metrics,
@@ -366,84 +302,71 @@ func (c *config) clone() *config {
 	}
 }
 
-func (c *config) withOverrides(overrides ...OverrideOptions) (*config, error) {
-	if len(overrides) == 0 {
-		return c, nil
+func (c *config) samePolicy(other *config) bool {
+	if other == nil {
+		return false
 	}
 
-	hasOverrides := false
+	return slices.Equal(c.trustedProxyCIDRs, other.trustedProxyCIDRs) &&
+		c.minTrustedProxies == other.minTrustedProxies &&
+		c.maxTrustedProxies == other.maxTrustedProxies &&
+		c.allowPrivateIPs == other.allowPrivateIPs &&
+		slices.Equal(c.allowReservedClientPrefixes, other.allowReservedClientPrefixes) &&
+		c.maxChainLength == other.maxChainLength &&
+		c.chainSelection == other.chainSelection &&
+		c.securityMode == other.securityMode &&
+		c.debugMode == other.debugMode &&
+		slices.Equal(c.sourcePriority, other.sourcePriority) &&
+		slices.Equal(c.sourceHeaderKeys, other.sourceHeaderKeys)
+}
 
-	for _, override := range overrides {
-		if override.hasSetValues() {
-			hasOverrides = true
-			break
+func applyCallOptions(c *config, callOpts ...CallOption) error {
+	for _, callOpt := range callOpts {
+		if callOpt == nil {
+			return fmt.Errorf("call option cannot be nil")
+		}
+
+		if err := callOpt(c); err != nil {
+			return err
 		}
 	}
 
-	if !hasOverrides {
+	return nil
+}
+
+func (c *config) withCallOptions(callOpts ...CallOption) (*config, error) {
+	if len(callOpts) == 0 {
 		return c, nil
 	}
 
 	effective := c.clone()
-	trustedProxyCIDRsOverridden := false
 
-	for _, override := range overrides {
-		if !override.hasSetValues() {
-			continue
-		}
-
-		if override.TrustedProxyPrefixes.isSet() {
-			normalized, err := normalizeTrustedProxyPrefixes(override.TrustedProxyPrefixes.value())
-			if err != nil {
-				return nil, err
-			}
-
-			effective.trustedProxyCIDRs = mergeUniquePrefixes(nil, normalized...)
-			trustedProxyCIDRsOverridden = true
-		}
-		if override.MinTrustedProxies.isSet() {
-			effective.minTrustedProxies = override.MinTrustedProxies.value()
-		}
-		if override.MaxTrustedProxies.isSet() {
-			effective.maxTrustedProxies = override.MaxTrustedProxies.value()
-		}
-
-		if override.AllowPrivateIPs.isSet() {
-			effective.allowPrivateIPs = override.AllowPrivateIPs.value()
-		}
-		if override.AllowReservedClientPrefixes.isSet() {
-			normalized, err := normalizeReservedClientPrefixes(override.AllowReservedClientPrefixes.value())
-			if err != nil {
-				return nil, err
-			}
-
-			effective.allowReservedClientPrefixes = mergeUniquePrefixes(nil, normalized...)
-		}
-		if override.MaxChainLength.isSet() {
-			effective.maxChainLength = override.MaxChainLength.value()
-		}
-		if override.ChainSelection.isSet() {
-			effective.chainSelection = override.ChainSelection.value()
-		}
-		if override.SecurityMode.isSet() {
-			effective.securityMode = override.SecurityMode.value()
-		}
-		if override.DebugInfo.isSet() {
-			effective.debugMode = override.DebugInfo.value()
-		}
-
-		if override.SourcePriority.isSet() {
-			effective.sourcePriority = canonicalizeSourceNames(cloneStrings(override.SourcePriority.value()))
-			effective.sourceHeaderKeys = sourceHeaderKeys(effective.sourcePriority)
-		}
+	if err := applyCallOptions(effective, callOpts...); err != nil {
+		return nil, err
 	}
 
-	if trustedProxyCIDRsOverridden {
+	sourcePriorityChanged := !slices.Equal(effective.sourcePriority, c.sourcePriority)
+	if sourcePriorityChanged {
+		effective.sourcePriority = canonicalizeSources(effective.sourcePriority)
+		effective.sourceHeaderKeys = sourceHeaderKeys(effective.sourcePriority)
+	}
+
+	trustedProxyCIDRsChanged := !slices.Equal(effective.trustedProxyCIDRs, c.trustedProxyCIDRs)
+	if trustedProxyCIDRsChanged {
+		appendTrustedProxyCIDRs(effective, effective.trustedProxyCIDRs...)
+		trustedProxyCIDRsChanged = !slices.Equal(effective.trustedProxyCIDRs, c.trustedProxyCIDRs)
+	}
+
+	if trustedProxyCIDRsChanged {
 		effective.trustedProxyMatch = buildTrustedProxyMatcher(effective.trustedProxyCIDRs)
 	}
 
 	if err := effective.validate(); err != nil {
 		return nil, err
+	}
+
+	if c.samePolicy(effective) {
+		return c, nil
 	}
 
 	return effective, nil

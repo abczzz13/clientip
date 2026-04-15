@@ -9,24 +9,50 @@ import (
 
 type forwardedForSource struct {
 	extractor      *Extractor
+	sourceName     Source
 	unavailableErr error
 }
 
 type forwardedSource struct {
 	extractor      *Extractor
+	sourceName     Source
 	unavailableErr error
 }
 
 func (s *forwardedForSource) Name() string {
-	return SourceXForwardedFor
+	if !s.sourceName.valid() {
+		return builtinSource(sourceXForwardedFor).String()
+	}
+
+	return s.sourceName.String()
 }
 
 func (s *forwardedSource) Name() string {
-	return SourceForwarded
+	if !s.sourceName.valid() {
+		return builtinSource(sourceForwarded).String()
+	}
+
+	return s.sourceName.String()
+}
+
+func (s *forwardedForSource) Source() Source {
+	if !s.sourceName.valid() {
+		return builtinSource(sourceXForwardedFor)
+	}
+
+	return s.sourceName
+}
+
+func (s *forwardedSource) Source() Source {
+	if !s.sourceName.valid() {
+		return builtinSource(sourceForwarded)
+	}
+
+	return s.sourceName
 }
 
 func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	sourceName := s.Name()
+	sourceName := s.Source()
 	forwardedValues := r.Header["Forwarded"]
 	if len(forwardedValues) == 0 {
 		return extractionResult{}, sourceUnavailableError(s.unavailableErr, sourceName)
@@ -55,7 +81,7 @@ func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extract
 }
 
 func (s *forwardedForSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
-	sourceName := s.Name()
+	sourceName := s.Source()
 	xffValues := r.Header["X-Forwarded-For"]
 	if len(xffValues) == 0 {
 		return extractionResult{}, sourceUnavailableError(s.unavailableErr, sourceName)

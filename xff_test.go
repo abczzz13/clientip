@@ -62,7 +62,7 @@ func TestParseXFFValues(t *testing.T) {
 }
 
 func TestParseXFFValues_MaxChainLength(t *testing.T) {
-	extractor := mustNewExtractor(t, MaxChainLength(5))
+	extractor := mustNewExtractor(t, WithMaxChainLength(5))
 
 	values := []string{"1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 5.5.5.5, 6.6.6.6, 7.7.7.7"}
 	_, err := extractor.parseXFFValues(values)
@@ -73,7 +73,7 @@ func TestParseXFFValues_MaxChainLength(t *testing.T) {
 }
 
 func TestParseXFFValues_PreservesWireOrderAcrossHeaderLines(t *testing.T) {
-	extractor := mustNewExtractor(t, MaxChainLength(10))
+	extractor := mustNewExtractor(t, WithMaxChainLength(10))
 
 	values := []string{
 		"1.1.1.1, 8.8.8.8",
@@ -93,7 +93,7 @@ func TestParseXFFValues_PreservesWireOrderAcrossHeaderLines(t *testing.T) {
 }
 
 func TestParseXFFValues_MaxChainLength_AcrossHeaderLines(t *testing.T) {
-	extractor := mustNewExtractor(t, MaxChainLength(3))
+	extractor := mustNewExtractor(t, WithMaxChainLength(3))
 
 	_, err := extractor.parseXFFValues([]string{
 		"1.1.1.1, 8.8.8.8",
@@ -735,7 +735,7 @@ func TestIsPlausibleClientIP_ReservedRanges(t *testing.T) {
 	}
 }
 
-func TestIsPlausibleClientIP_AllowReservedClientPrefixes(t *testing.T) {
+func TestIsPlausibleClientIP_WithAllowedReservedClientPrefixes(t *testing.T) {
 	extractor := &Extractor{
 		config: &config{
 			allowReservedClientPrefixes: []netip.Prefix{

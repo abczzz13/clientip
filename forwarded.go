@@ -32,7 +32,7 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 			}
 
 			var appendErr error
-			parts, appendErr = e.appendChainPart(parts, forwardedFor, SourceForwarded)
+			parts, appendErr = e.appendChainPart(parts, forwardedFor, builtinSource(sourceForwarded))
 			return appendErr
 		})
 		if err != nil {
@@ -52,7 +52,7 @@ func (e *Extractor) parseForwardedValues(values []string) ([]string, error) {
 func invalidForwardedHeaderError(err error) error {
 	return &ExtractionError{
 		Err:    fmt.Errorf("%w: %w", ErrInvalidForwardedHeader, err),
-		Source: SourceForwarded,
+		Source: builtinSource(sourceForwarded),
 	}
 }
 

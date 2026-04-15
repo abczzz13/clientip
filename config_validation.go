@@ -2,8 +2,6 @@ package clientip
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
 )
 
 func (c *config) validate() error {
@@ -17,7 +15,7 @@ func (c *config) validate() error {
 		return fmt.Errorf("minTrustedProxies (%d) cannot exceed maxTrustedProxies (%d)", c.minTrustedProxies, c.maxTrustedProxies)
 	}
 	if c.minTrustedProxies > 0 && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("minTrustedProxies > 0 requires trusted proxy prefixes to be configured for security validation; to skip validation and trust all proxies, use TrustProxyPrefixes(netip.MustParsePrefix(\"0.0.0.0/0\"), netip.MustParsePrefix(\"::/0\"))")
+		return fmt.Errorf("minTrustedProxies > 0 requires trusted proxy prefixes to be configured for security validation; to skip validation and trust all proxies, use WithTrustedProxyPrefixes(netip.MustParsePrefix(\"0.0.0.0/0\"), netip.MustParsePrefix(\"::/0\"))")
 	}
 	if c.maxChainLength <= 0 {
 		return fmt.Errorf("maxChainLength must be > 0, got %d", c.maxChainLength)
@@ -42,73 +40,51 @@ func (c *config) validate() error {
 	}
 
 	if hasHeaderSource && len(c.trustedProxyCIDRs) == 0 {
-		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure TrustProxyPrefixes or trust helpers such as TrustLoopbackProxy, TrustPrivateProxyRanges, TrustLocalProxyDefaults, or TrustProxyAddrs")
+		return fmt.Errorf("header-based sources require trusted proxy prefixes; configure WithTrustedProxyPrefixes or trust helpers such as WithTrustedLoopbackProxy, WithTrustedPrivateProxyRanges, WithTrustedLocalProxyDefaults, or WithTrustedProxyAddrs, or use WithCallTrustedProxyPrefixes for a single extraction")
 	}
 
-	if isNilLogger(c.logger) {
+	if isNilValue(c.logger) {
 		return fmt.Errorf("logger cannot be nil")
 	}
-	if isNilMetrics(c.metrics) {
+	if isNilValue(c.metrics) {
 		return fmt.Errorf("metrics cannot be nil")
 	}
 	return nil
 }
 
 func (c *config) validateSourcePriority() (hasHeaderSource, hasChainSource bool, err error) {
-	seen := make(map[string]struct{}, len(c.sourcePriority))
+	seen := make(map[Source]struct{}, len(c.sourcePriority))
 	seenForwarded := false
 	seenXFF := false
 
-	for _, sourceName := range c.sourcePriority {
-		normalized := NormalizeSourceName(strings.TrimSpace(sourceName))
-		if normalized == "" {
+	for _, source := range c.sourcePriority {
+		source = canonicalSource(source)
+		if !source.valid() {
 			return false, false, fmt.Errorf("source names cannot be empty")
 		}
 
-		if _, ok := seen[normalized]; ok {
-			return false, false, fmt.Errorf("duplicate source %q in priority list", sourceName)
+		if _, ok := seen[source]; ok {
+			return false, false, fmt.Errorf("duplicate source %q in priority list", source)
 		}
-		seen[normalized] = struct{}{}
+		seen[source] = struct{}{}
 
-		if normalized != SourceRemoteAddr {
+		if source.kind != sourceRemoteAddr {
 			hasHeaderSource = true
 		}
 
-		switch normalized {
-		case SourceForwarded:
+		switch source.kind {
+		case sourceForwarded:
 			seenForwarded = true
 			hasChainSource = true
-		case SourceXForwardedFor:
+		case sourceXForwardedFor:
 			seenXFF = true
 			hasChainSource = true
 		}
 	}
 
 	if seenForwarded && seenXFF {
-		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", SourceForwarded, SourceXForwardedFor)
+		return false, false, fmt.Errorf("priority cannot include both %q and %q; choose one proxy chain header", builtinSource(sourceForwarded), builtinSource(sourceXForwardedFor))
 	}
 
 	return hasHeaderSource, hasChainSource, nil
-}
-
-func isNilLogger(logger Logger) bool {
-	return isNilInterface(logger)
-}
-
-func isNilMetrics(metrics Metrics) bool {
-	return isNilInterface(metrics)
-}
-
-func isNilInterface(v any) bool {
-	if v == nil {
-		return true
-	}
-
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return rv.IsNil()
-	default:
-		return false
-	}
 }

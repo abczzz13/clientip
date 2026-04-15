@@ -248,32 +248,37 @@ func TestRequestFromInput_HeaderProviderPaths(t *testing.T) {
 func TestSourceHeaderKeys_DedupesAndCanonicalizes(t *testing.T) {
 	tests := []struct {
 		name           string
-		sourcePriority []string
+		sourcePriority []Source
 		want           []string
 	}{
 		{
 			name:           "remote addr only",
-			sourcePriority: []string{SourceRemoteAddr},
+			sourcePriority: []Source{SourceRemoteAddr},
 		},
 		{
 			name:           "built-in chain header",
-			sourcePriority: []string{SourceXForwardedFor, SourceRemoteAddr},
+			sourcePriority: []Source{SourceXForwardedFor, SourceRemoteAddr},
 			want:           []string{"X-Forwarded-For"},
 		},
 		{
 			name:           "duplicate built-in alias",
-			sourcePriority: []string{SourceXForwardedFor, "X-Forwarded-For"},
+			sourcePriority: []Source{SourceXForwardedFor, HeaderSource("X-Forwarded-For")},
 			want:           []string{"X-Forwarded-For"},
 		},
 		{
 			name:           "mixed built-in and custom headers",
-			sourcePriority: []string{SourceForwarded, SourceXRealIP, "cf-connecting-ip"},
+			sourcePriority: []Source{SourceForwarded, SourceXRealIP, HeaderSource("cf-connecting-ip")},
 			want:           []string{"Forwarded", "X-Real-IP", "Cf-Connecting-Ip"},
 		},
 		{
 			name:           "duplicate custom header in different cases",
-			sourcePriority: []string{"CF-Connecting-IP", "cf-connecting-ip", "Cf-Connecting-Ip"},
+			sourcePriority: []Source{HeaderSource("CF-Connecting-IP"), HeaderSource("cf-connecting-ip"), HeaderSource("Cf-Connecting-Ip")},
 			want:           []string{"Cf-Connecting-Ip"},
+		},
+		{
+			name:           "distinct custom headers preserve different runtime keys",
+			sourcePriority: []Source{HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar")},
+			want:           []string{"Foo-Bar", "Foo_bar"},
 		},
 	}
 

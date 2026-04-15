@@ -21,7 +21,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 		remoteAddr string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "valid IPv4 with port",
@@ -94,7 +94,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 
 			got := struct {
 				OK     bool
-				Source string
+				Source Source
 				IP     string
 			}{
 				OK:     (err == nil && result.IP.IsValid()),
@@ -106,7 +106,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 
 			want := struct {
 				OK     bool
-				Source string
+				Source Source
 				IP     string
 			}{
 				OK:     tt.wantOK,
@@ -123,11 +123,11 @@ func TestExtract_RemoteAddr(t *testing.T) {
 	}
 }
 
-func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
+func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	t.Run("Forwarded alias uses Forwarded parser", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority("Forwarded", SourceRemoteAddr),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(HeaderSource("Forwarded"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -154,8 +154,8 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 
 	t.Run("X-Forwarded-For alias combines multiple header lines", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority("X-Forwarded-For", SourceRemoteAddr),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(HeaderSource("X-Forwarded-For"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -181,7 +181,7 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	})
 
 	t.Run("Remote-Addr alias maps to RemoteAddr source", func(t *testing.T) {
-		extractor, err := New(Priority("Remote-Addr"))
+		extractor, err := New(WithSourcePriority(HeaderSource("Remote-Addr")))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -205,8 +205,8 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 
 	t.Run("X_Real_IP alias maps to X-Real-IP source", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority("X_Real_IP", SourceRemoteAddr),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(HeaderSource("X_Real_IP"), SourceRemoteAddr),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -233,9 +233,9 @@ func TestExtract_PriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 
 func TestExtract_XForwardedFor(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -247,7 +247,7 @@ func TestExtract_XForwardedFor(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "single valid IP",
@@ -327,8 +327,8 @@ func TestExtract_XForwardedFor(t *testing.T) {
 
 func TestExtract_Forwarded(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -341,7 +341,7 @@ func TestExtract_Forwarded(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "single valid for value",
@@ -426,10 +426,10 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(2),
-		Priority(SourceForwarded),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceForwarded),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -475,7 +475,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 
 			got := struct {
 				OK                bool
-				Source            string
+				Source            Source
 				IP                string
 				TrustedProxyCount int
 			}{
@@ -489,7 +489,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 
 			want := struct {
 				OK                bool
-				Source            string
+				Source            Source
 				IP                string
 				TrustedProxyCount int
 			}{
@@ -525,8 +525,8 @@ func TestExtract_ParsesMultipleXFFHeaders_AcrossSecurityModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := []Option{
-				TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-				Priority(SourceXForwardedFor, SourceRemoteAddr),
+				WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+				WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 			}
 			if tt.setSecurityMode {
 				opts = append(opts, WithSecurityMode(tt.securityMode))
@@ -560,8 +560,8 @@ func TestExtract_ParsesMultipleXFFHeaders_AcrossSecurityModes(t *testing.T) {
 
 func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -588,8 +588,8 @@ func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 
 func TestExtract_SecurityModeLax_AllowsFallbackOnMalformedForwarded(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
 	if err != nil {
@@ -617,9 +617,9 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnMalformedForwarded(t *testing.T
 
 func TestExtract_ChainTooLong_IsTerminalByDefault(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
-		MaxChainLength(2),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+		WithMaxChainLength(2),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -650,10 +650,10 @@ func TestExtract_StrictMode_UntrustedProxy_IsTerminal(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -684,10 +684,10 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnUntrustedProxy(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
 	if err != nil {
@@ -740,8 +740,8 @@ func TestExtract_SingleHeader_UntrustedProxy_StrictVsLax(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			extractor, newErr := New(
-				TrustProxyPrefixes(cidrs...),
-				Priority(SourceXRealIP, SourceRemoteAddr),
+				WithTrustedProxyPrefixes(cidrs...),
+				WithSourcePriority(SourceXRealIP, SourceRemoteAddr),
 				WithSecurityMode(tt.mode),
 			)
 			if newErr != nil {
@@ -775,9 +775,9 @@ func TestExtract_SingleHeader_UntrustedProxy_StrictVsLax(t *testing.T) {
 
 func TestExtract_XRealIP(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(
+		WithTrustedLoopbackProxy(),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(
 			SourceXRealIP,
 			SourceXForwardedFor,
 			SourceRemoteAddr,
@@ -794,7 +794,7 @@ func TestExtract_XRealIP(t *testing.T) {
 		xff        string
 		want       string
 		wantOK     bool
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name:       "X-Real-IP takes priority",
@@ -859,8 +859,8 @@ func TestExtract_XRealIP(t *testing.T) {
 
 func TestExtract_SecurityModeLax_AllowsFallbackOnInvalidPreferredSingleHeader(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
 	if err != nil {
@@ -888,8 +888,8 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnInvalidPreferredSingleHeader(t 
 
 func TestExtract_StrictMode_DuplicatePreferredSingleHeader_IsTerminal(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeStrict),
 	)
 	if err != nil {
@@ -918,8 +918,8 @@ func TestExtract_StrictMode_DuplicatePreferredSingleHeader_IsTerminal(t *testing
 
 func TestExtract_SecurityModeLax_AllowsFallbackOnDuplicatePreferredSingleHeader(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeLax),
 	)
 	if err != nil {
@@ -953,10 +953,10 @@ func TestExtract_WithTrustedProxies(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(2),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1050,10 +1050,10 @@ func TestExtract_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
 	}
 
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(0),
-		MaxTrustedProxies(2),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(0),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1080,9 +1080,9 @@ func TestExtract_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
 	}
 }
 
-func TestExtract_AllowPrivateIPs(t *testing.T) {
+func TestExtract_WithAllowPrivateIPs(t *testing.T) {
 	extractor, err := New(
-		AllowPrivateIPs(true),
+		WithAllowPrivateIPs(true),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1142,9 +1142,9 @@ func TestExtract_AllowPrivateIPs(t *testing.T) {
 	}
 }
 
-func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
+func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 	t.Run("remote reserved allowed", func(t *testing.T) {
-		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")))
+		extractor, err := New(WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -1164,7 +1164,7 @@ func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
 	})
 
 	t.Run("remote reserved not allowlisted", func(t *testing.T) {
-		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("203.0.113.0/24")))
+		extractor, err := New(WithAllowedReservedClientPrefixes(netip.MustParsePrefix("203.0.113.0/24")))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -1178,9 +1178,9 @@ func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
 
 	t.Run("xff reserved allowed", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority(SourceXForwardedFor),
-			AllowReservedClientPrefixes(netip.MustParsePrefix("100.64.0.0/10")),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor),
+			WithAllowedReservedClientPrefixes(netip.MustParsePrefix("100.64.0.0/10")),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1203,7 +1203,7 @@ func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
 	})
 
 	t.Run("private still rejected", func(t *testing.T) {
-		extractor, err := New(AllowReservedClientPrefixes(netip.MustParsePrefix("192.168.0.0/16")))
+		extractor, err := New(WithAllowedReservedClientPrefixes(netip.MustParsePrefix("192.168.0.0/16")))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -1216,7 +1216,7 @@ func TestExtract_AllowReservedClientPrefixes(t *testing.T) {
 	})
 }
 
-func TestExtract_WithOverrides_AllowReservedClientPrefixes(t *testing.T) {
+func TestExtract_WithCallOptions_AllowedReservedClientPrefixes(t *testing.T) {
 	extractor, err := New()
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1229,11 +1229,9 @@ func TestExtract_WithOverrides_AllowReservedClientPrefixes(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalidIP", err)
 	}
 
-	result, err := extractor.Extract(req, OverrideOptions{
-		AllowReservedClientPrefixes: Set([]netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}),
-	})
+	result, err := extractor.Extract(req, WithCallAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")))
 	if err != nil {
-		t.Fatalf("Extract() with override error = %v", err)
+		t.Fatalf("Extract() with call option error = %v", err)
 	}
 
 	if got, want := result.IP, netip.MustParseAddr("198.51.100.10"); got != want {
@@ -1244,13 +1242,152 @@ func TestExtract_WithOverrides_AllowReservedClientPrefixes(t *testing.T) {
 	}
 }
 
+func TestExtract_WithCallOptions_RuntimeOverrides(t *testing.T) {
+	t.Run("trusted proxy prefixes override trust decision", func(t *testing.T) {
+		extractor, err := New(
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "10.0.0.1:8080", Header: make(http.Header)}
+		req.Header.Set("X-Forwarded-For", "8.8.8.8")
+
+		_, err = extractor.Extract(req)
+		if !errors.Is(err, ErrUntrustedProxy) {
+			t.Fatalf("error = %v, want ErrUntrustedProxy", err)
+		}
+
+		result, err := extractor.Extract(req,
+			WithCallTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
+		)
+		if err != nil {
+			t.Fatalf("Extract() with call option error = %v", err)
+		}
+
+		if got, want := result.IP, netip.MustParseAddr("8.8.8.8"); got != want {
+			t.Fatalf("IP = %s, want %s", got, want)
+		}
+		if got, want := result.Source, SourceXForwardedFor; got != want {
+			t.Fatalf("Source = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("proxy count bounds override validation", func(t *testing.T) {
+		extractor, err := New(
+			WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
+			WithSourcePriority(SourceXForwardedFor),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "10.0.0.2:8080", Header: make(http.Header)}
+		req.Header.Set("X-Forwarded-For", "8.8.8.8, 10.0.0.1, 10.0.0.2")
+
+		_, err = extractor.Extract(req, WithCallMinTrustedProxies(3))
+		if !errors.Is(err, ErrTooFewTrustedProxies) {
+			t.Fatalf("min-trusted error = %v, want ErrTooFewTrustedProxies", err)
+		}
+
+		_, err = extractor.Extract(req, WithCallMaxTrustedProxies(1))
+		if !errors.Is(err, ErrTooManyTrustedProxies) {
+			t.Fatalf("max-trusted error = %v, want ErrTooManyTrustedProxies", err)
+		}
+	})
+
+	t.Run("max chain length override applies at extraction time", func(t *testing.T) {
+		extractor, err := New(
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}
+		req.Header.Set("X-Forwarded-For", "8.8.8.8, 9.9.9.9")
+
+		_, err = extractor.Extract(req, WithCallMaxChainLength(1))
+		if !errors.Is(err, ErrChainTooLong) {
+			t.Fatalf("error = %v, want ErrChainTooLong", err)
+		}
+	})
+
+	t.Run("chain selection and debug info can both be overridden", func(t *testing.T) {
+		extractor, err := New(
+			WithTrustedProxyPrefixes(netip.MustParsePrefix("173.245.48.0/20")),
+			WithSourcePriority(SourceXForwardedFor),
+		)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "173.245.48.5:443", Header: make(http.Header)}
+		req.Header.Set("X-Forwarded-For", "1.1.1.1, 8.8.8.8, 173.245.48.5")
+
+		result, err := extractor.Extract(req)
+		if err != nil {
+			t.Fatalf("Extract() error = %v", err)
+		}
+		if got, want := result.IP.String(), "8.8.8.8"; got != want {
+			t.Fatalf("default IP = %q, want %q", got, want)
+		}
+		if result.DebugInfo != nil {
+			t.Fatal("default extraction should not include debug info")
+		}
+
+		result, err = extractor.Extract(req,
+			WithCallChainSelection(LeftmostUntrustedIP),
+			WithCallDebugInfo(true),
+		)
+		if err != nil {
+			t.Fatalf("Extract() with call options error = %v", err)
+		}
+		if got, want := result.IP.String(), "1.1.1.1"; got != want {
+			t.Fatalf("override IP = %q, want %q", got, want)
+		}
+		if result.DebugInfo == nil {
+			t.Fatal("override extraction should include debug info")
+		}
+	})
+
+	t.Run("allow private IPs can be enabled per call", func(t *testing.T) {
+		extractor, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		req := &http.Request{RemoteAddr: "192.168.1.10:8080", Header: make(http.Header)}
+
+		_, err = extractor.Extract(req)
+		if !errors.Is(err, ErrInvalidIP) {
+			t.Fatalf("error = %v, want ErrInvalidIP", err)
+		}
+
+		result, err := extractor.Extract(req, WithCallAllowPrivateIPs(true))
+		if err != nil {
+			t.Fatalf("Extract() with call option error = %v", err)
+		}
+
+		if got, want := result.IP, netip.MustParseAddr("192.168.1.10"); got != want {
+			t.Fatalf("IP = %s, want %s", got, want)
+		}
+		if got, want := result.Source, SourceRemoteAddr; got != want {
+			t.Fatalf("Source = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestExtract_WithDebugInfo(t *testing.T) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, err := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(2),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		WithDebugInfo(true),
 	)
 	if err != nil {
@@ -1289,8 +1426,8 @@ func TestExtract_WithDebugInfo(t *testing.T) {
 func TestExtract_ErrorTypes(t *testing.T) {
 	t.Run("InvalidForwardedHeader", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority(SourceForwarded),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceForwarded),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1319,8 +1456,8 @@ func TestExtract_ErrorTypes(t *testing.T) {
 
 	t.Run("MultipleXFFHeaders_AreCombined", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority(SourceXForwardedFor),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1349,8 +1486,8 @@ func TestExtract_ErrorTypes(t *testing.T) {
 
 	t.Run("MultipleSingleIPHeadersError", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority(SourceXRealIP),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXRealIP),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1388,10 +1525,10 @@ func TestExtract_ErrorTypes(t *testing.T) {
 	t.Run("ProxyValidationError", func(t *testing.T) {
 		cidrs, _ := ParseCIDRs("10.0.0.0/8")
 		extractor, err := New(
-			TrustProxyPrefixes(cidrs...),
-			MinTrustedProxies(2),
-			MaxTrustedProxies(3),
-			Priority(SourceXForwardedFor),
+			WithTrustedProxyPrefixes(cidrs...),
+			WithMinTrustedProxies(2),
+			WithMaxTrustedProxies(3),
+			WithSourcePriority(SourceXForwardedFor),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1423,8 +1560,8 @@ func TestExtract_ErrorTypes(t *testing.T) {
 
 	t.Run("InvalidIPError", func(t *testing.T) {
 		extractor, err := New(
-			TrustLoopbackProxy(),
-			Priority(SourceXForwardedFor),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor),
 		)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
@@ -1491,7 +1628,7 @@ func TestExtract_Concurrent(t *testing.T) {
 			} else {
 				want := netip.MustParseAddr("1.1.1.1")
 				if result.IP != want {
-					errors <- &ExtractionError{Err: ErrInvalidIP, Source: "test"}
+					errors <- &ExtractionError{Err: ErrInvalidIP, Source: HeaderSource("test")}
 				}
 			}
 			done <- true
@@ -1537,7 +1674,7 @@ func TestExtract_NewAPI_Methods(t *testing.T) {
 
 	type extractionView struct {
 		IP                string
-		Source            string
+		Source            Source
 		TrustedProxyCount int
 		HasDebugInfo      bool
 	}
@@ -1593,10 +1730,10 @@ func TestExtract_NewAPI_Methods(t *testing.T) {
 	}
 }
 
-func TestExtract_WithOverrides_LastWins(t *testing.T) {
+func TestExtract_WithCallOptions_LastWins(t *testing.T) {
 	extractor, err := New(
-		TrustProxyAddrs(netip.MustParseAddr("127.0.0.1")),
-		Priority("X-Frontend-IP", SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("127.0.0.1")),
+		WithSourcePriority(HeaderSource("X-Frontend-IP"), SourceXForwardedFor, SourceRemoteAddr),
 		WithSecurityMode(SecurityModeStrict),
 	)
 	if err != nil {
@@ -1608,35 +1745,35 @@ func TestExtract_WithOverrides_LastWins(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
 	tests := []struct {
-		name      string
-		overrides []OverrideOptions
-		wantErr   bool
-		want      struct {
+		name     string
+		callOpts []CallOption
+		wantErr  bool
+		want     struct {
 			IP     string
-			Source string
+			Source Source
 		}
 	}{
 		{
-			name:      "strict default fails",
-			overrides: nil,
-			wantErr:   true,
+			name:     "strict default fails",
+			callOpts: nil,
+			wantErr:  true,
 		},
 		{
-			name: "lax override succeeds",
-			overrides: []OverrideOptions{
-				{SecurityMode: Set(SecurityModeStrict)},
-				{SecurityMode: Set(SecurityModeLax)},
+			name: "lax call options succeed",
+			callOpts: []CallOption{
+				WithCallSecurityMode(SecurityModeStrict),
+				WithCallSecurityMode(SecurityModeLax),
 			},
 			want: struct {
 				IP     string
-				Source string
+				Source Source
 			}{IP: "8.8.8.8", Source: SourceXForwardedFor},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractor.Extract(req, tt.overrides...)
+			got, err := extractor.Extract(req, tt.callOpts...)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Extract() error = nil, want non-nil")
@@ -1650,7 +1787,7 @@ func TestExtract_WithOverrides_LastWins(t *testing.T) {
 
 			gotView := struct {
 				IP     string
-				Source string
+				Source Source
 			}{IP: got.IP.String(), Source: got.Source}
 
 			if diff := cmp.Diff(tt.want, gotView); diff != "" {
@@ -1660,188 +1797,51 @@ func TestExtract_WithOverrides_LastWins(t *testing.T) {
 	}
 }
 
-func TestExtractWithOptions_OneShotHelpers(t *testing.T) {
-	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-
-	tests := []struct {
-		name           string
-		callExtraction bool
-		wantExtraction struct {
-			IP     string
-			Source string
-		}
-		wantAddr string
-	}{
-		{
-			name:           "ExtractWithOptions",
-			callExtraction: true,
-			wantExtraction: struct {
-				IP     string
-				Source string
-			}{IP: "1.1.1.1", Source: SourceRemoteAddr},
-		},
-		{
-			name:     "ExtractAddrWithOptions",
-			wantAddr: "1.1.1.1",
-		},
+func TestPrepareCall_NoEffectiveChanges_ReusesExtractorAndSource(t *testing.T) {
+	extractor, err := New(
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+		WithSecurityMode(SecurityModeStrict),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.callExtraction {
-				got, err := ExtractWithOptions(req)
-				if err != nil {
-					t.Fatalf("ExtractWithOptions() error = %v", err)
-				}
-				gotView := struct {
-					IP     string
-					Source string
-				}{IP: got.IP.String(), Source: got.Source}
+	activeExtractor, activeSource, err := extractor.prepareCall(
+		WithCallSecurityMode(SecurityModeStrict),
+		WithCallSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("prepareCall() error = %v", err)
+	}
 
-				if diff := cmp.Diff(tt.wantExtraction, gotView); diff != "" {
-					t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
-				}
-				return
-			}
+	if activeExtractor != extractor {
+		t.Fatal("prepareCall() should reuse extractor when call options do not change policy")
+	}
 
-			gotAddr, err := ExtractAddrWithOptions(req)
-			if err != nil {
-				t.Fatalf("ExtractAddrWithOptions() error = %v", err)
-			}
-			if diff := cmp.Diff(tt.wantAddr, gotAddr.String()); diff != "" {
-				t.Fatalf("addr mismatch (-want +got):\n%s", diff)
-			}
-		})
+	if activeSource != extractor.source {
+		t.Fatal("prepareCall() should reuse source chain when call options do not change policy")
 	}
 }
 
-func TestExtract_NilRequest_AndNilOneShotHelpers(t *testing.T) {
+func TestExtract_NilRequest(t *testing.T) {
 	extractor, err := New()
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	extractionTests := []struct {
-		name string
-		run  func() (Extraction, error)
-		want extractionState
-	}{
-		{
-			name: "Extractor.Extract(nil)",
-			run: func() (Extraction, error) {
-				return extractor.Extract(nil)
-			},
-			want: extractionState{HasIP: false, Source: SourceRemoteAddr},
-		},
-		{
-			name: "ExtractWithOptions(nil)",
-			run: func() (Extraction, error) {
-				return ExtractWithOptions(nil)
-			},
-			want: extractionState{HasIP: false, Source: SourceRemoteAddr},
-		},
+	_, extractErr := extractor.Extract(nil)
+	if !errors.Is(extractErr, ErrNilRequest) {
+		t.Fatalf("error = %v, want ErrNilRequest", extractErr)
 	}
 
-	for _, tt := range extractionTests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, extractErr := tt.run()
-			if !errors.Is(extractErr, ErrSourceUnavailable) {
-				t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
-			}
-
-			gotView := extractionStateOf(got)
-
-			if diff := cmp.Diff(tt.want, gotView); diff != "" {
-				t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
-			}
-		})
+	gotAddr, extractErr := extractor.ExtractAddr(nil)
+	if !errors.Is(extractErr, ErrNilRequest) {
+		t.Fatalf("error = %v, want ErrNilRequest", extractErr)
 	}
 
-	addrTests := []struct {
-		name string
-		run  func() (netip.Addr, error)
-	}{
-		{
-			name: "Extractor.ExtractAddr(nil)",
-			run: func() (netip.Addr, error) {
-				return extractor.ExtractAddr(nil)
-			},
-		},
-		{
-			name: "ExtractAddrWithOptions(nil)",
-			run: func() (netip.Addr, error) {
-				return ExtractAddrWithOptions(nil)
-			},
-		},
-	}
-
-	for _, tt := range addrTests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotAddr, extractErr := tt.run()
-			if !errors.Is(extractErr, ErrSourceUnavailable) {
-				t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
-			}
-
-			if diff := cmp.Diff(false, gotAddr.IsValid()); diff != "" {
-				t.Fatalf("address validity mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestOneShotHelpers_InvalidOptions_PropagateErrors(t *testing.T) {
-	const wantErrText = "header-based sources require trusted proxy prefixes"
-	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-	input := RequestInput{RemoteAddr: "1.1.1.1:12345"}
-
-	tests := []struct {
-		name string
-		run  func() error
-	}{
-		{
-			name: "ExtractWithOptions",
-			run: func() error {
-				_, err := ExtractWithOptions(req, Priority(SourceXForwardedFor))
-				return err
-			},
-		},
-		{
-			name: "ExtractAddrWithOptions",
-			run: func() error {
-				_, err := ExtractAddrWithOptions(req, Priority(SourceXForwardedFor))
-				return err
-			},
-		},
-		{
-			name: "ExtractFromWithOptions",
-			run: func() error {
-				_, err := ExtractFromWithOptions(input, Priority(SourceXForwardedFor))
-				return err
-			},
-		},
-		{
-			name: "ExtractAddrFromWithOptions",
-			run: func() error {
-				_, err := ExtractAddrFromWithOptions(input, Priority(SourceXForwardedFor))
-				return err
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			got := errorTextStateOf(err, wantErrText)
-
-			want := errorTextState{
-				HasErr:       true,
-				ContainsText: true,
-			}
-
-			if diff := cmp.Diff(want, got); diff != "" {
-				t.Fatalf("error result mismatch (-want +got):\n%s", diff)
-			}
-		})
+	if diff := cmp.Diff(false, gotAddr.IsValid()); diff != "" {
+		t.Fatalf("address validity mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -1849,8 +1849,8 @@ func TestExtract_ErrorSourceReporting(t *testing.T) {
 	t.Run("source-aware error keeps source", func(t *testing.T) {
 		extractor := mustNewExtractor(
 			t,
-			TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-			Priority(SourceXRealIP),
+			WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+			WithSourcePriority(SourceXRealIP),
 		)
 
 		req := &http.Request{
@@ -1890,7 +1890,7 @@ func TestExtract_ErrorSourceReporting(t *testing.T) {
 		}
 
 		got := extractionStateOf(result)
-		want := extractionState{Source: "", HasIP: false}
+		want := extractionState{Source: Source{}, HasIP: false}
 
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Fatalf("error result mismatch (-want +got):\n%s", diff)
@@ -1900,13 +1900,13 @@ func TestExtract_ErrorSourceReporting(t *testing.T) {
 
 func TestNew_OptionsImmutability(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
-	priority := []string{SourceXForwardedFor, SourceRemoteAddr}
+	priority := []Source{SourceXForwardedFor, SourceRemoteAddr}
 
 	extractor, err := New(
-		TrustProxyPrefixes(trusted...),
-		MinTrustedProxies(0),
-		MaxTrustedProxies(0),
-		Priority(priority...),
+		WithTrustedProxyPrefixes(trusted...),
+		WithMinTrustedProxies(0),
+		WithMaxTrustedProxies(0),
+		WithSourcePriority(priority...),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1925,11 +1925,11 @@ func TestNew_OptionsImmutability(t *testing.T) {
 
 	want := struct {
 		IP     string
-		Source string
+		Source Source
 	}{IP: "8.8.8.8", Source: SourceXForwardedFor}
 	gotView := struct {
 		IP     string
-		Source string
+		Source Source
 	}{IP: got.IP.String(), Source: got.Source}
 
 	if diff := cmp.Diff(want, gotView); diff != "" {

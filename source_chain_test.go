@@ -13,6 +13,7 @@ import (
 
 type stubSourceExtractor struct {
 	name   string
+	source Source
 	result extractionResult
 	err    error
 	calls  *int
@@ -30,6 +31,14 @@ func (s *stubSourceExtractor) Name() string {
 	return s.name
 }
 
+func (s *stubSourceExtractor) Source() Source {
+	if s.source.valid() {
+		return s.source
+	}
+
+	return HeaderSource(s.name)
+}
+
 func TestChainedSource_Extract(t *testing.T) {
 	extractor := mustNewExtractor(t)
 
@@ -41,7 +50,7 @@ func TestChainedSource_Extract(t *testing.T) {
 		xRealIP    string
 		wantValid  bool
 		wantIP     string
-		wantSource string
+		wantSource Source
 	}{
 		{
 			name: "first source succeeds",
@@ -149,7 +158,7 @@ func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
 			Calls       int
 			ErrCanceled bool
 			IP          string
-			Source      string
+			Source      Source
 		}
 	}{
 		{
@@ -163,7 +172,7 @@ func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
 				Calls       int
 				ErrCanceled bool
 				IP          string
-				Source      string
+				Source      Source
 			}{Calls: 0, ErrCanceled: true},
 		},
 		{
@@ -175,8 +184,8 @@ func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
 				Calls       int
 				ErrCanceled bool
 				IP          string
-				Source      string
-			}{Calls: 1, ErrCanceled: false, IP: "1.1.1.1", Source: "stub_source"},
+				Source      Source
+			}{Calls: 1, ErrCanceled: false, IP: "1.1.1.1", Source: HeaderSource("stub_source")},
 		},
 	}
 
@@ -185,7 +194,8 @@ func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
 			calls := 0
 			source := &stubSourceExtractor{
 				name:   "stub_source",
-				result: extractionResult{IP: netip.MustParseAddr("1.1.1.1"), Source: "stub_source"},
+				source: HeaderSource("stub_source"),
+				result: extractionResult{IP: netip.MustParseAddr("1.1.1.1"), Source: HeaderSource("stub_source")},
 				calls:  &calls,
 			}
 			chained := newChainedSource(extractor, source)
@@ -196,7 +206,7 @@ func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
 				Calls       int
 				ErrCanceled bool
 				IP          string
-				Source      string
+				Source      Source
 			}{
 				Calls:       calls,
 				ErrCanceled: errors.Is(extractErr, context.Canceled),
@@ -235,7 +245,7 @@ func TestChainedSource_FillsEmptySourceNameFromSource(t *testing.T) {
 	gotView := struct {
 		Calls  int
 		IP     string
-		Source string
+		Source Source
 	}{
 		Calls:  calls,
 		IP:     got.IP.String(),
@@ -244,11 +254,11 @@ func TestChainedSource_FillsEmptySourceNameFromSource(t *testing.T) {
 	wantView := struct {
 		Calls  int
 		IP     string
-		Source string
+		Source Source
 	}{
 		Calls:  1,
 		IP:     "1.1.1.1",
-		Source: "custom_source",
+		Source: HeaderSource("custom_source"),
 	}
 
 	if diff := cmp.Diff(wantView, gotView); diff != "" {
@@ -283,22 +293,22 @@ func TestSourceFactories(t *testing.T) {
 
 	t.Run("Forwarded source", func(t *testing.T) {
 		source := newForwardedSource(extractor)
-		if source.Name() != SourceForwarded {
-			t.Errorf("newForwardedSource() source name = %q, want %q", source.Name(), SourceForwarded)
+		if source.Source() != SourceForwarded {
+			t.Errorf("newForwardedSource() source = %q, want %q", source.Source(), SourceForwarded)
 		}
 	})
 
 	t.Run("XForwardedFor source", func(t *testing.T) {
 		source := newForwardedForSource(extractor)
-		if source.Name() != SourceXForwardedFor {
-			t.Errorf("newForwardedForSource() source name = %q, want %q", source.Name(), SourceXForwardedFor)
+		if source.Source() != SourceXForwardedFor {
+			t.Errorf("newForwardedForSource() source = %q, want %q", source.Source(), SourceXForwardedFor)
 		}
 	})
 
 	t.Run("XRealIP source", func(t *testing.T) {
 		source := newSingleHeaderSource(extractor, "X-Real-IP")
-		if source.Name() != SourceXRealIP {
-			t.Errorf("newSingleHeaderSource(X-Real-IP) source name = %q, want %q", source.Name(), SourceXRealIP)
+		if source.Source() != SourceXRealIP {
+			t.Errorf("newSingleHeaderSource(X-Real-IP) source = %q, want %q", source.Source(), SourceXRealIP)
 		}
 
 		single, ok := source.(*singleHeaderSource)
@@ -314,20 +324,20 @@ func TestSourceFactories(t *testing.T) {
 
 	t.Run("RemoteAddr source", func(t *testing.T) {
 		source := newRemoteAddrSource(extractor)
-		if source.Name() != SourceRemoteAddr {
-			t.Errorf("newRemoteAddrSource() source name = %q, want %q", source.Name(), SourceRemoteAddr)
+		if source.Source() != SourceRemoteAddr {
+			t.Errorf("newRemoteAddrSource() source = %q, want %q", source.Source(), SourceRemoteAddr)
 		}
 	})
 
 	t.Run("Custom header source", func(t *testing.T) {
 		source := newSingleHeaderSource(extractor, "X-Custom-Header")
-		if source.Name() != "x_custom_header" {
-			t.Errorf("newSingleHeaderSource() source name = %q, want %q", source.Name(), "x_custom_header")
+		if got, want := source.Source(), HeaderSource("X-Custom-Header"); got != want {
+			t.Errorf("newSingleHeaderSource() source = %q, want %q", got, want)
 		}
 	})
 }
 
-func TestNormalizeSourceName(t *testing.T) {
+func TestHeaderSource_String(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
@@ -360,9 +370,9 @@ func TestNormalizeSourceName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := NormalizeSourceName(tt.input)
+			got := HeaderSource(tt.input).String()
 			if got != tt.want {
-				t.Errorf("NormalizeSourceName(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("HeaderSource(%q).String() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

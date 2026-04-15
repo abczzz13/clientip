@@ -16,6 +16,9 @@ var (
 	// request.
 	ErrSourceUnavailable = errors.New("source unavailable")
 
+	// ErrNilRequest indicates a nil *http.Request was passed to Extract/ExtractAddr.
+	ErrNilRequest = errors.New("request cannot be nil")
+
 	// ErrMultipleSingleIPHeaders indicates multiple values were provided for a
 	// single-IP header source.
 	ErrMultipleSingleIPHeaders = errors.New("multiple single-IP headers received")
@@ -46,12 +49,12 @@ var (
 // ExtractionError wraps a source-specific extraction failure.
 type ExtractionError struct {
 	Err    error
-	Source string
+	Source Source
 }
 
 // Error implements error.
 func (e *ExtractionError) Error() string {
-	return fmt.Sprintf("%s: %v", e.Source, e.Err)
+	return fmt.Sprintf("%s: %v", e.Source.String(), e.Err)
 }
 
 // Unwrap returns the underlying sentinel or wrapped error.
@@ -61,6 +64,11 @@ func (e *ExtractionError) Unwrap() error {
 
 // SourceName returns the source identifier associated with this error.
 func (e *ExtractionError) SourceName() string {
+	return e.Source.String()
+}
+
+// SourceValue returns the source associated with this error.
+func (e *ExtractionError) SourceValue() Source {
 	return e.Source
 }
 
@@ -77,11 +85,11 @@ type MultipleHeadersError struct {
 func (e *MultipleHeadersError) Error() string {
 	if e.HeaderName != "" {
 		return fmt.Sprintf("%s: %v (header=%q, header_count=%d, remote_addr=%s)",
-			e.Source, e.Err, e.HeaderName, e.HeaderCount, e.RemoteAddr)
+			e.Source.String(), e.Err, e.HeaderName, e.HeaderCount, e.RemoteAddr)
 	}
 
 	return fmt.Sprintf("%s: %v (header_count=%d, remote_addr=%s)",
-		e.Source, e.Err, e.HeaderCount, e.RemoteAddr)
+		e.Source.String(), e.Err, e.HeaderCount, e.RemoteAddr)
 }
 
 // ProxyValidationError reports failures from trusted-proxy chain validation.
@@ -96,7 +104,7 @@ type ProxyValidationError struct {
 // Error implements error.
 func (e *ProxyValidationError) Error() string {
 	return fmt.Sprintf("%s: %v (chain=%q, trusted_count=%d, min=%d, max=%d)",
-		e.Source, e.Err, e.Chain, e.TrustedProxyCount, e.MinTrustedProxies, e.MaxTrustedProxies)
+		e.Source.String(), e.Err, e.Chain, e.TrustedProxyCount, e.MinTrustedProxies, e.MaxTrustedProxies)
 }
 
 // InvalidIPError reports an invalid or implausible extracted client IP.
@@ -112,10 +120,10 @@ type InvalidIPError struct {
 func (e *InvalidIPError) Error() string {
 	if e.Chain != "" {
 		return fmt.Sprintf("%s: %v (chain=%q, extracted_ip=%q, index=%d, trusted_proxies=%d)",
-			e.Source, e.Err, e.Chain, e.ExtractedIP, e.Index, e.TrustedProxies)
+			e.Source.String(), e.Err, e.Chain, e.ExtractedIP, e.Index, e.TrustedProxies)
 	}
 	if e.ExtractedIP != "" {
-		return fmt.Sprintf("%s: %v (ip=%q)", e.Source, e.Err, e.ExtractedIP)
+		return fmt.Sprintf("%s: %v (ip=%q)", e.Source.String(), e.Err, e.ExtractedIP)
 	}
 	return e.ExtractionError.Error()
 }
@@ -128,7 +136,7 @@ type RemoteAddrError struct {
 
 // Error implements error.
 func (e *RemoteAddrError) Error() string {
-	return fmt.Sprintf("%s: %v (remote_addr=%q)", e.Source, e.Err, e.RemoteAddr)
+	return fmt.Sprintf("%s: %v (remote_addr=%q)", e.Source.String(), e.Err, e.RemoteAddr)
 }
 
 // ChainTooLongError reports an overlong Forwarded/X-Forwarded-For chain.
@@ -141,7 +149,7 @@ type ChainTooLongError struct {
 // Error implements error.
 func (e *ChainTooLongError) Error() string {
 	return fmt.Sprintf("%s: %v (chain_length=%d, max_length=%d)",
-		e.Source, e.Err, e.ChainLength, e.MaxLength)
+		e.Source.String(), e.Err, e.ChainLength, e.MaxLength)
 }
 
 // ChainDebugInfo describes parsed chain-analysis details for diagnostics.
@@ -160,7 +168,7 @@ type ChainDebugInfo struct {
 type Extraction struct {
 	IP netip.Addr
 
-	Source string
+	Source Source
 
 	TrustedProxyCount int
 
@@ -180,9 +188,6 @@ func ParseCIDRs(cidrs ...string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-// NormalizeSourceName canonicalizes a source/header name for reporting.
-//
-// It lowercases the value and replaces hyphens with underscores.
-func NormalizeSourceName(headerName string) string {
+func normalizeSourceName(headerName string) string {
 	return strings.ToLower(strings.ReplaceAll(headerName, "-", "_"))
 }

@@ -25,8 +25,8 @@ func BenchmarkExtract_RemoteAddr(b *testing.B) {
 
 func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
@@ -46,10 +46,10 @@ func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(2),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
@@ -68,8 +68,8 @@ func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 
 func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
@@ -88,8 +88,8 @@ func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
 
 func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
@@ -109,10 +109,10 @@ func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(5),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(5),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.5:12345",
@@ -132,10 +132,10 @@ func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(2),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(2),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		WithDebugInfo(true),
 	)
 	req := &http.Request{
@@ -159,10 +159,10 @@ func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		WithChainSelection(LeftmostUntrustedIP),
 	)
 	req := &http.Request{
@@ -182,9 +182,9 @@ func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 
 func BenchmarkExtract_CustomHeader(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(
-			"CF-Connecting-IP",
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(
+			HeaderSource("CF-Connecting-IP"),
 			SourceXForwardedFor,
 			SourceRemoteAddr,
 		),
@@ -206,8 +206,8 @@ func BenchmarkExtract_CustomHeader(b *testing.B) {
 
 func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
 	)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
@@ -261,8 +261,8 @@ func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
 
 func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	headers := make(http.Header)
 	headers.Set("X-Forwarded-For", "1.1.1.1")
@@ -283,8 +283,8 @@ func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
 
 func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
 	extractor, _ := New(
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	xffValues := []string{"1.1.1.1"}
 	input := RequestInput{
@@ -379,9 +379,9 @@ func BenchmarkIsTrustedProxy_LargeCIDRSet_Precomputed(b *testing.B) {
 	}
 
 	extractor, _ := New(
-		TrustProxyPrefixes(prefixes...),
-		MinTrustedProxies(0),
-		MaxTrustedProxies(0),
+		WithTrustedProxyPrefixes(prefixes...),
+		WithMinTrustedProxies(0),
+		WithMaxTrustedProxies(0),
 	)
 	ip := netip.MustParseAddr("10.128.8.8")
 
@@ -416,9 +416,9 @@ func BenchmarkIsTrustedProxy_LargeCIDRSet_LinearFallback(b *testing.B) {
 func BenchmarkChainAnalysis_Rightmost(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
 	)
 
 	parts := []string{"1.1.1.1", "8.8.8.8", "10.0.0.1", "10.0.0.2"}
@@ -435,9 +435,9 @@ func BenchmarkChainAnalysis_Rightmost(b *testing.B) {
 func BenchmarkChainAnalysis_Leftmost(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
 	extractor, _ := New(
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
 		WithChainSelection(LeftmostUntrustedIP),
 	)
 

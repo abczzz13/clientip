@@ -27,21 +27,25 @@ func newChainedSource(extractor *Extractor, sources ...sourceExtractor) *chained
 }
 
 func newForwardedForSource(extractor *Extractor) sourceExtractor {
+	sourceName := builtinSource(sourceXForwardedFor)
 	return &forwardedForSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceXForwardedFor},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 
 func newForwardedSource(extractor *Extractor) sourceExtractor {
+	sourceName := builtinSource(sourceForwarded)
 	return &forwardedSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceForwarded},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 
 func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtractor {
-	sourceName := NormalizeSourceName(headerName)
+	sourceName := HeaderSource(headerName)
 	return &singleHeaderSource{
 		extractor:      extractor,
 		headerName:     headerName,
@@ -52,9 +56,11 @@ func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtrac
 }
 
 func newRemoteAddrSource(extractor *Extractor) sourceExtractor {
+	sourceName := builtinSource(sourceRemoteAddr)
 	return &remoteAddrSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceRemoteAddr},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 
@@ -68,8 +74,8 @@ func (c *chainedSource) Extract(ctx context.Context, r *http.Request) (extractio
 
 		result, err := source.Extract(ctx, r)
 		if err == nil {
-			if result.Source == "" {
-				result.Source = source.Name()
+			if !result.Source.valid() {
+				result.Source = source.Source()
 			}
 			return result, nil
 		}
@@ -108,4 +114,8 @@ func (c *chainedSource) isTerminalError(err error) bool {
 
 func (c *chainedSource) Name() string {
 	return c.name
+}
+
+func (c *chainedSource) Source() Source {
+	return Source{}
 }

@@ -66,7 +66,7 @@ func FuzzParseRemoteAddr_RoundTripNormalization(f *testing.F) {
 }
 
 func FuzzParseXFFValues_ErrorShapeAndOutput(f *testing.F) {
-	extractor, err := New(MaxChainLength(16))
+	extractor, err := New(WithMaxChainLength(16))
 	if err != nil {
 		f.Fatalf("New() error = %v", err)
 	}
@@ -118,7 +118,7 @@ func FuzzParseXFFValues_ErrorShapeAndOutput(f *testing.F) {
 }
 
 func FuzzParseForwardedValues_ErrorShapeAndOutput(f *testing.F) {
-	extractor, err := New(MaxChainLength(16))
+	extractor, err := New(WithMaxChainLength(16))
 	if err != nil {
 		f.Fatalf("New() error = %v", err)
 	}
