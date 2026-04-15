@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Parser fuzz targets for `parseIP`, `parseRemoteAddr`, `parseXFFValues`, and `parseForwardedValues`, plus new `just fuzz` and `just fuzz-one` maintainer commands.
+- Expanded regression coverage for extraction behavior, request-input header adaptation, logger/metrics reporting, typed error formatting, and Prometheus adapter examples/tests.
+
+### Changed
+
+- The optional Prometheus adapter module now depends on `github.com/abczzz13/clientip v0.0.6`.
+
 ## [0.0.6] - 2026-02-18
 
 ### Added
