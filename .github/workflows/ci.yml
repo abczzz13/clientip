@@ -36,7 +36,7 @@ jobs:
       - run: go test -race ./...
       - run: go test -coverprofile=coverage.out ./...
       - run: go tool cover -func=coverage.out
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-root-${{ matrix.go-label }}
           path: coverage.out
@@ -67,7 +67,7 @@ jobs:
       - run: GOWORK=off go -C prometheus test -race ./...
       - run: GOWORK=off go -C prometheus test -coverprofile=../coverage-prometheus.out ./...
       - run: GOWORK=off go -C prometheus tool cover -func=../coverage-prometheus.out
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-prometheus-${{ matrix.go-label }}
           path: coverage-prometheus.out
@@ -86,7 +86,7 @@ jobs:
             go.sum
             prometheus/go.mod
             prometheus/go.sum
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
       - run: just lint
 
@@ -103,7 +103,7 @@ jobs:
             go.sum
             prometheus/go.mod
             prometheus/go.sum
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
       - run: just actionlint
 
@@ -112,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOWORK: off
-      BENCH_PATTERN: 'BenchmarkExtract_(RemoteAddr|XForwardedFor_Simple|XForwardedFor_WithTrustedProxies|Forwarded_Simple|Forwarded_WithParams|XForwardedFor_LongChain|WithDebugInfo|LeftmostUntrustedSelection|Fallback_MissingPreferredHeader)$|BenchmarkExtractFrom_(HTTP_RemoteAddr|HTTP_XForwardedFor_Simple|HeaderValuesFunc_XForwardedFor_Simple)$'
+      BENCH_PATTERN: "BenchmarkExtract_(RemoteAddr|XForwardedFor_Simple|XForwardedFor_WithTrustedProxies|Forwarded_Simple|Forwarded_WithParams|XForwardedFor_LongChain|WithDebugInfo|LeftmostUntrustedSelection|Fallback_MissingPreferredHeader)$|BenchmarkExtractFrom_(HTTP_RemoteAddr|HTTP_XForwardedFor_Simple|HeaderValuesFunc_XForwardedFor_Simple)$"
       BENCH_COUNT: "4"
       BENCH_TIME: "300ms"
       BENCHSTAT_VERSION: "v0.0.0-20260211190930-8161c38c6cdc"
@@ -179,7 +179,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-compare
