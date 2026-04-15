@@ -47,7 +47,7 @@ func snapshotConfig(cfg *config) configSnapshot {
 		ChainSelection:        cfg.chainSelection,
 		SecurityMode:          cfg.securityMode,
 		DebugMode:             cfg.debugMode,
-		SourcePriority:        cloneStrings(cfg.sourcePriority),
+		SourcePriority:        sourceNames(cfg.sourcePriority),
 	}
 }
 
@@ -55,6 +55,14 @@ func cidrStrings(prefixes []netip.Prefix) []string {
 	values := make([]string, len(prefixes))
 	for i, prefix := range prefixes {
 		values[i] = prefix.String()
+	}
+	return values
+}
+
+func sourceNames(sources []Source) []string {
+	values := make([]string, len(sources))
+	for i, source := range sources {
+		values[i] = source.name()
 	}
 	return values
 }
@@ -84,19 +92,19 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		{
 			name: "configured options",
 			opts: []Option{
-				TrustProxyPrefixes(
+				WithTrustedProxyPrefixes(
 					netip.MustParsePrefix("10.0.0.0/8"),
 					netip.MustParsePrefix("172.16.0.0/12"),
 				),
-				MinTrustedProxies(1),
-				MaxTrustedProxies(3),
-				AllowPrivateIPs(true),
-				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
-				MaxChainLength(42),
+				WithMinTrustedProxies(1),
+				WithMaxTrustedProxies(3),
+				WithAllowPrivateIPs(true),
+				WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+				WithMaxChainLength(42),
 				WithChainSelection(LeftmostUntrustedIP),
 				WithSecurityMode(SecurityModeLax),
 				WithDebugInfo(true),
-				Priority(SourceXForwardedFor, SourceRemoteAddr),
+				WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 			},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"10.0.0.0/8", "172.16.0.0/12"},
@@ -114,8 +122,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		{
 			name: "merge option fragments",
 			opts: []Option{
-				TrustLoopbackProxy(),
-				Priority(SourceXForwardedFor, SourceRemoteAddr),
+				WithTrustedLoopbackProxy(),
+				WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 				WithSecurityMode(SecurityModeLax),
 			},
 			want: configSnapshot{
@@ -134,8 +142,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		{
 			name: "merge trusted proxy prefixes",
 			opts: []Option{
-				TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
-				TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12")),
+				WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
+				WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12")),
 			},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"10.0.0.0/8", "172.16.0.0/12"},
@@ -153,8 +161,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		{
 			name: "merge reserved client prefixes",
 			opts: []Option{
-				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
-				AllowReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24")),
+				WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24")),
+				WithAllowedReservedClientPrefixes(netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24")),
 			},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{},
@@ -171,12 +179,12 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name:        "invalid trusted prefix helper",
-			opts:        []Option{TrustProxyPrefixes(netip.Prefix{})},
+			opts:        []Option{WithTrustedProxyPrefixes(netip.Prefix{})},
 			wantErrText: "invalid trusted proxy prefix",
 		},
 		{
 			name:        "invalid allow reserved prefix helper",
-			opts:        []Option{AllowReservedClientPrefixes(netip.Prefix{})},
+			opts:        []Option{WithAllowedReservedClientPrefixes(netip.Prefix{})},
 			wantErrText: "invalid reserved client prefix",
 		},
 	}
@@ -215,12 +223,12 @@ func TestNew_InvalidOptions(t *testing.T) {
 	}{
 		{
 			name:        "min exceeds max",
-			opts:        []Option{TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), MinTrustedProxies(5), MaxTrustedProxies(2)},
+			opts:        []Option{WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), WithMinTrustedProxies(5), WithMaxTrustedProxies(2)},
 			wantErrText: "minTrustedProxies",
 		},
 		{
 			name:        "header source without trusted proxies",
-			opts:        []Option{Priority(SourceXForwardedFor)},
+			opts:        []Option{WithSourcePriority(SourceXForwardedFor)},
 			wantErrText: "header-based sources require trusted proxy prefixes",
 		},
 		{
@@ -235,7 +243,7 @@ func TestNew_InvalidOptions(t *testing.T) {
 		},
 		{
 			name:        "empty explicit source priority",
-			opts:        []Option{Priority()},
+			opts:        []Option{WithSourcePriority()},
 			wantErrText: "at least one source required",
 		},
 		{
@@ -250,17 +258,17 @@ func TestNew_InvalidOptions(t *testing.T) {
 		},
 		{
 			name:        "invalid trust proxy addr helper",
-			opts:        []Option{TrustProxyAddrs(netip.Addr{})},
+			opts:        []Option{WithTrustedProxyAddrs(netip.Addr{})},
 			wantErrText: "invalid proxy address",
 		},
 		{
 			name:        "leftmost without trusted proxies",
-			opts:        []Option{Priority(SourceXForwardedFor), WithChainSelection(LeftmostUntrustedIP)},
+			opts:        []Option{WithSourcePriority(SourceXForwardedFor), WithChainSelection(LeftmostUntrustedIP)},
 			wantErrText: "LeftmostUntrustedIP selection requires trusted proxy prefixes",
 		},
 		{
 			name:        "multiple chain sources",
-			opts:        []Option{TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), Priority(SourceForwarded, SourceXForwardedFor), WithLogger(logger)},
+			opts:        []Option{WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")), WithSourcePriority(SourceForwarded, SourceXForwardedFor), WithLogger(logger)},
 			wantErrText: "priority cannot include both",
 		},
 		{
@@ -299,7 +307,7 @@ func TestNew_WithMetricsFactory_Lifecycle(t *testing.T) {
 				calls++
 				return noopMetrics{}, nil
 			}),
-			Priority(SourceXForwardedFor),
+			WithSourcePriority(SourceXForwardedFor),
 		)
 		if err == nil {
 			t.Fatal("New() error = nil, want non-nil")
@@ -363,10 +371,10 @@ func TestNew_WithMetricsFactory_Lifecycle(t *testing.T) {
 	})
 }
 
-func TestConfig_WithOverrides(t *testing.T) {
+func TestConfig_WithCallOptions(t *testing.T) {
 	base, err := configFromOptions(
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("configFromOptions() error = %v", err)
@@ -374,15 +382,15 @@ func TestConfig_WithOverrides(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		overrides   []OverrideOptions
+		callOpts    []CallOption
 		want        configSnapshot
 		wantErrText string
 	}{
 		{
 			name: "last wins on scalar",
-			overrides: []OverrideOptions{
-				{SecurityMode: Set(SecurityModeLax)},
-				{SecurityMode: Set(SecurityModeStrict)},
+			callOpts: []CallOption{
+				WithCallSecurityMode(SecurityModeLax),
+				WithCallSecurityMode(SecurityModeStrict),
 			},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
@@ -398,10 +406,8 @@ func TestConfig_WithOverrides(t *testing.T) {
 			},
 		},
 		{
-			name: "override source priority",
-			overrides: []OverrideOptions{
-				{SourcePriority: Set([]string{SourceRemoteAddr})},
-			},
+			name:     "call option source priority",
+			callOpts: []CallOption{WithCallSourcePriority(SourceRemoteAddr)},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
 				MinTrustedProxies:     0,
@@ -416,13 +422,11 @@ func TestConfig_WithOverrides(t *testing.T) {
 			},
 		},
 		{
-			name: "override trusted prefixes normalizes and dedupes",
-			overrides: []OverrideOptions{
-				{TrustedProxyPrefixes: Set([]netip.Prefix{
-					netip.MustParsePrefix("10.0.0.1/8"),
-					netip.MustParsePrefix("10.0.0.2/8"),
-				})},
-			},
+			name: "call option trusted prefixes normalize and dedupe",
+			callOpts: []CallOption{WithCallTrustedProxyPrefixes(
+				netip.MustParsePrefix("10.0.0.1/8"),
+				netip.MustParsePrefix("10.0.0.2/8"),
+			)},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"10.0.0.0/8"},
 				MinTrustedProxies:     0,
@@ -437,13 +441,11 @@ func TestConfig_WithOverrides(t *testing.T) {
 			},
 		},
 		{
-			name: "override reserved allowlist",
-			overrides: []OverrideOptions{
-				{AllowReservedClientPrefixes: Set([]netip.Prefix{
-					netip.MustParsePrefix("198.51.100.10/24"),
-					netip.MustParsePrefix("198.51.100.0/24"),
-				})},
-			},
+			name: "call option reserved allowlist",
+			callOpts: []CallOption{WithCallAllowedReservedClientPrefixes(
+				netip.MustParsePrefix("198.51.100.10/24"),
+				netip.MustParsePrefix("198.51.100.0/24"),
+			)},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
 				MinTrustedProxies:     0,
@@ -458,78 +460,144 @@ func TestConfig_WithOverrides(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid empty source priority",
-			overrides: []OverrideOptions{
-				{SourcePriority: Set([]string{})},
-			},
+			name:        "invalid empty source priority",
+			callOpts:    []CallOption{WithCallSourcePriority()},
 			wantErrText: "at least one source required",
 		},
 		{
-			name: "invalid trusted prefix override",
-			overrides: []OverrideOptions{
-				{TrustedProxyPrefixes: Set([]netip.Prefix{{}})},
-			},
+			name:        "duplicate built-in alias after canonicalization",
+			callOpts:    []CallOption{WithCallSourcePriority(SourceXForwardedFor, HeaderSource("X-Forwarded-For"))},
+			wantErrText: "duplicate source",
+		},
+		{
+			name:        "invalid trusted prefix call option",
+			callOpts:    []CallOption{WithCallTrustedProxyPrefixes(netip.Prefix{})},
 			wantErrText: "invalid trusted proxy prefix",
 		},
 		{
-			name: "invalid reserved prefix override",
-			overrides: []OverrideOptions{
-				{AllowReservedClientPrefixes: Set([]netip.Prefix{{}})},
-			},
+			name:        "invalid reserved prefix call option",
+			callOpts:    []CallOption{WithCallAllowedReservedClientPrefixes(netip.Prefix{})},
 			wantErrText: "invalid reserved client prefix",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			effective, err := base.withOverrides(tt.overrides...)
+			effective, err := base.withCallOptions(tt.callOpts...)
 			if tt.wantErrText != "" {
 				if err == nil {
-					t.Fatalf("withOverrides() error = nil, want containing %q", tt.wantErrText)
+					t.Fatalf("withCallOptions() error = nil, want containing %q", tt.wantErrText)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrText) {
-					t.Fatalf("withOverrides() error = %q, want containing %q", err.Error(), tt.wantErrText)
+					t.Fatalf("withCallOptions() error = %q, want containing %q", err.Error(), tt.wantErrText)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("withOverrides() error = %v", err)
+				t.Fatalf("withCallOptions() error = %v", err)
 			}
 
 			if diff := cmp.Diff(tt.want, snapshotConfig(effective)); diff != "" {
-				t.Fatalf("override config mismatch (-want +got):\n%s", diff)
+				t.Fatalf("call-option config mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
-func TestConfig_WithOverrides_NoSetValues_ReturnsBase(t *testing.T) {
+func TestApplyCallOptions(t *testing.T) {
+	t.Run("applies options in order", func(t *testing.T) {
+		cfg := defaultConfig()
+
+		err := applyCallOptions(
+			cfg,
+			WithCallAllowPrivateIPs(true),
+			WithCallSecurityMode(SecurityModeLax),
+			WithCallSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+		)
+		if err != nil {
+			t.Fatalf("applyCallOptions() error = %v", err)
+		}
+
+		got := struct {
+			AllowPrivateIPs bool
+			SecurityMode    SecurityMode
+			SourcePriority  []string
+		}{
+			AllowPrivateIPs: cfg.allowPrivateIPs,
+			SecurityMode:    cfg.securityMode,
+			SourcePriority:  sourceNames(cfg.sourcePriority),
+		}
+
+		want := struct {
+			AllowPrivateIPs bool
+			SecurityMode    SecurityMode
+			SourcePriority  []string
+		}{
+			AllowPrivateIPs: true,
+			SecurityMode:    SecurityModeLax,
+			SourcePriority:  []string{SourceXForwardedFor, SourceRemoteAddr},
+		}
+
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("applyCallOptions() mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("nil option returns error", func(t *testing.T) {
+		err := applyCallOptions(defaultConfig(), nil)
+		if err == nil {
+			t.Fatal("applyCallOptions() error = nil, want non-nil")
+		}
+	})
+}
+
+func TestConfig_WithCallOptions_None_ReturnsBase(t *testing.T) {
 	base, err := configFromOptions(
-		TrustLoopbackProxy(),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("configFromOptions() error = %v", err)
 	}
 
-	effective, err := base.withOverrides(
-		OverrideOptions{},
-		OverrideOptions{},
-	)
+	effective, err := base.withCallOptions()
 	if err != nil {
-		t.Fatalf("withOverrides() error = %v", err)
+		t.Fatalf("withCallOptions() error = %v", err)
 	}
 
 	if effective != base {
-		t.Fatal("withOverrides() should return original config when no values are set")
+		t.Fatal("withCallOptions() should return original config when no call options are provided")
 	}
 }
 
-func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutPrefixOverride(t *testing.T) {
+func TestConfig_WithCallOptions_NoEffectiveChanges_ReturnsBase(t *testing.T) {
 	base, err := configFromOptions(
-		TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedLoopbackProxy(),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+		WithSecurityMode(SecurityModeStrict),
+	)
+	if err != nil {
+		t.Fatalf("configFromOptions() error = %v", err)
+	}
+
+	effective, err := base.withCallOptions(
+		WithCallSecurityMode(SecurityModeStrict),
+		WithCallSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
+	)
+	if err != nil {
+		t.Fatalf("withCallOptions() error = %v", err)
+	}
+
+	if effective != base {
+		t.Fatal("withCallOptions() should return original config when call options do not change policy")
+	}
+}
+
+func TestConfig_WithCallOptions_PreservesTrustedProxyMatcherWithoutPrefixOverride(t *testing.T) {
+	base, err := configFromOptions(
+		WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("configFromOptions() error = %v", err)
@@ -539,34 +607,44 @@ func TestConfig_WithOverrides_PreservesTrustedProxyMatcherWithoutPrefixOverride(
 		t.Fatal("base matcher should be initialized")
 	}
 
-	effective, err := base.withOverrides(OverrideOptions{SecurityMode: Set(SecurityModeLax)})
+	effective, err := base.withCallOptions(WithCallSecurityMode(SecurityModeLax))
 	if err != nil {
-		t.Fatalf("withOverrides() error = %v", err)
+		t.Fatalf("withCallOptions() error = %v", err)
 	}
 
 	if effective == base {
-		t.Fatal("withOverrides() should return a cloned config when overrides are set")
+		t.Fatal("withCallOptions() should return a cloned config when call options are set")
 	}
 
-	if effective.trustedProxyMatch != base.trustedProxyMatch {
-		t.Fatal("trusted proxy matcher should be reused when trusted proxy prefixes are unchanged")
+	if effective.trustedProxyMatch.ipv4Root != base.trustedProxyMatch.ipv4Root {
+		t.Fatal("withCallOptions() should preserve the existing IPv4 matcher when trusted proxy prefixes are unchanged")
+	}
+
+	if effective.trustedProxyMatch.ipv6Root != base.trustedProxyMatch.ipv6Root {
+		t.Fatal("withCallOptions() should preserve the existing IPv6 matcher when trusted proxy prefixes are unchanged")
+	}
+
+	if !effective.trustedProxyMatch.contains(netip.MustParseAddr("10.2.3.4")) {
+		t.Fatal("preserved matcher should still trust configured IPv4 CIDRs")
+	}
+
+	if !effective.trustedProxyMatch.contains(netip.MustParseAddr("2001:db8::10")) {
+		t.Fatal("preserved matcher should still trust configured IPv6 CIDRs")
 	}
 }
 
-func TestConfig_WithOverrides_RebuildsTrustedProxyMatcherWithPrefixOverride(t *testing.T) {
+func TestConfig_WithCallOptions_RebuildsTrustedProxyMatcherWithPrefixOverride(t *testing.T) {
 	base, err := configFromOptions(
-		TrustProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
-		Priority(SourceXForwardedFor, SourceRemoteAddr),
+		WithTrustedProxyPrefixes(netip.MustParsePrefix("10.0.0.0/8")),
+		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("configFromOptions() error = %v", err)
 	}
 
-	effective, err := base.withOverrides(OverrideOptions{
-		TrustedProxyPrefixes: Set([]netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")}),
-	})
+	effective, err := base.withCallOptions(WithCallTrustedProxyPrefixes(netip.MustParsePrefix("192.168.0.0/16")))
 	if err != nil {
-		t.Fatalf("withOverrides() error = %v", err)
+		t.Fatalf("withCallOptions() error = %v", err)
 	}
 
 	if !effective.trustedProxyMatch.initialized {
@@ -590,32 +668,32 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 	}{
 		{
 			name:        "negative min trusted proxies",
-			opts:        []Option{MinTrustedProxies(-1)},
+			opts:        []Option{WithMinTrustedProxies(-1)},
 			wantErrText: "minTrustedProxies must be >= 0",
 		},
 		{
 			name:        "negative max trusted proxies",
-			opts:        []Option{MaxTrustedProxies(-1)},
+			opts:        []Option{WithMaxTrustedProxies(-1)},
 			wantErrText: "maxTrustedProxies must be >= 0",
 		},
 		{
 			name:        "zero max chain length",
-			opts:        []Option{MaxChainLength(0)},
+			opts:        []Option{WithMaxChainLength(0)},
 			wantErrText: "maxChainLength must be > 0",
 		},
 		{
 			name:        "negative max chain length",
-			opts:        []Option{MaxChainLength(-1)},
+			opts:        []Option{WithMaxChainLength(-1)},
 			wantErrText: "maxChainLength must be > 0",
 		},
 		{
 			name:        "duplicate source in priority",
-			opts:        []Option{Priority(SourceRemoteAddr, SourceRemoteAddr)},
+			opts:        []Option{WithSourcePriority(SourceRemoteAddr, SourceRemoteAddr)},
 			wantErrText: "duplicate source",
 		},
 		{
 			name:        "duplicate source after canonicalization",
-			opts:        []Option{TrustLoopbackProxy(), Priority(SourceXForwardedFor, "X-Forwarded-For")},
+			opts:        []Option{WithTrustedLoopbackProxy(), WithSourcePriority(SourceXForwardedFor, "X-Forwarded-For")},
 			wantErrText: "duplicate source",
 		},
 	}
@@ -637,8 +715,8 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 	}
 }
 
-func TestTrustPrivateProxyRanges_AddsExpectedCIDRs(t *testing.T) {
-	extractor, err := New(TrustPrivateProxyRanges())
+func TestWithTrustedPrivateProxyRanges_AddsExpectedCIDRs(t *testing.T) {
+	extractor, err := New(WithTrustedPrivateProxyRanges())
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

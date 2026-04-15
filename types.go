@@ -16,6 +16,9 @@ var (
 	// request.
 	ErrSourceUnavailable = errors.New("source unavailable")
 
+	// ErrNilRequest indicates a nil *http.Request was passed to Extract/ExtractAddr.
+	ErrNilRequest = errors.New("request cannot be nil")
+
 	// ErrMultipleSingleIPHeaders indicates multiple values were provided for a
 	// single-IP header source.
 	ErrMultipleSingleIPHeaders = errors.New("multiple single-IP headers received")

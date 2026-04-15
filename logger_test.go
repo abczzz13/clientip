@@ -78,8 +78,8 @@ func TestLogging_MultipleXFFHeaders_DoNotWarn(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -111,8 +111,8 @@ func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXRealIP),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXRealIP),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -153,9 +153,9 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceXForwardedFor),
-		MaxChainLength(2),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceXForwardedFor),
+		WithMaxChainLength(2),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -196,10 +196,10 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(2),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(2),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -241,10 +241,10 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -286,10 +286,10 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(1),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(1),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -331,10 +331,10 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyPrefixes(cidrs...),
-		MinTrustedProxies(1),
-		MaxTrustedProxies(3),
-		Priority(SourceXForwardedFor),
+		WithTrustedProxyPrefixes(cidrs...),
+		WithMinTrustedProxies(1),
+		WithMaxTrustedProxies(3),
+		WithSourcePriority(SourceXForwardedFor),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -372,8 +372,8 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 
 	extractor, err := New(
 		WithLogger(logger),
-		TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-		Priority(SourceForwarded, SourceRemoteAddr),
+		WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -66,7 +66,7 @@ func TestPresets_Config(t *testing.T) {
 		{
 			name: "preferred header then xff lax invalid header",
 			opts: []Option{
-				TrustLoopbackProxy(),
+				WithTrustedLoopbackProxy(),
 				PresetPreferredHeaderThenXFFLax("  "),
 			},
 			wantErrText: "source names cannot be empty",
@@ -99,7 +99,7 @@ func TestPresets_Config(t *testing.T) {
 
 func TestPresetPreferredHeaderThenXFFLax_EndToEnd(t *testing.T) {
 	extractor, err := New(
-		TrustLoopbackProxy(),
+		WithTrustedLoopbackProxy(),
 		PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
 	)
 	if err != nil {

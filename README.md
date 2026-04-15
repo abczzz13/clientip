@@ -65,7 +65,7 @@ vmExtractor, err := clientip.New(
 
 // Prefer a best-effort header, then fallback to XFF and RemoteAddr
 fallbackExtractor, err := clientip.New(
-    clientip.TrustLoopbackProxy(),
+    clientip.WithTrustedLoopbackProxy(),
     clientip.PresetPreferredHeaderThenXFFLax("X-Frontend-IP"),
 )
 
@@ -112,7 +112,11 @@ if err != nil {
 style frameworks (Gin, Echo, Chi) you can keep using `Extract(req)` directly.
 
 `ExtractFrom` only requests header names required by the configured
-`Priority(...)` sources.
+`WithSourcePriority(...)` sources.
+
+Call-time overrides apply to `ExtractFrom(...)` as well, so middleware can
+switch to a different trusted header or fall back to `SourceRemoteAddr`
+without constructing a second extractor.
 
 ```go
 // Gin
@@ -160,10 +164,10 @@ if err != nil {
 extractor, err := clientip.New(
     // min=0 allows requests where proxy headers contain only the client IP
     // (trusted RemoteAddr is validated separately).
-    clientip.TrustProxyPrefixes(cidrs...),
-    clientip.MinTrustedProxies(0),
-    clientip.MaxTrustedProxies(3),
-    clientip.Priority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+    clientip.WithTrustedProxyPrefixes(cidrs...),
+    clientip.WithMinTrustedProxies(0),
+    clientip.WithMaxTrustedProxies(3),
+    clientip.WithSourcePriority(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithChainSelection(clientip.RightmostUntrustedIP),
 )
 if err != nil {
@@ -175,9 +179,9 @@ if err != nil {
 
 ```go
 extractor, err := clientip.New(
-    clientip.TrustPrivateProxyRanges(),
-    clientip.Priority(
-        "CF-Connecting-IP",
+    clientip.WithTrustedPrivateProxyRanges(),
+    clientip.WithSourcePriority(
+        clientip.HeaderSource("CF-Connecting-IP"),
         clientip.SourceXForwardedFor,
         clientip.SourceRemoteAddr,
     ),
@@ -190,15 +194,15 @@ extractor, err := clientip.New(
 // Strict is default and fails closed on security errors
 // (including malformed Forwarded and invalid present source values).
 strictExtractor, _ := clientip.New(
-    clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-    clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+    clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+    clientip.WithSourcePriority(clientip.HeaderSource("X-Frontend-IP"), clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeStrict),
 )
 
 // Lax mode allows fallback to lower-priority sources after those errors.
 laxExtractor, _ := clientip.New(
-    clientip.TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
-    clientip.Priority("X-Frontend-IP", clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+    clientip.WithTrustedProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+    clientip.WithSourcePriority(clientip.HeaderSource("X-Frontend-IP"), clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
     clientip.WithSecurityMode(clientip.SecurityModeLax),
 )
 ```
@@ -327,29 +331,24 @@ You can also construct metrics explicitly with `clientipprom.New()` or
 
 `New(opts...)` accepts one or more `Option` builders.
 
-For one-shot extraction without reusing an extractor, use:
+Construct an extractor once and reuse it for all requests.
 
-- `ExtractWithOptions(req, opts...)`
-- `ExtractAddrWithOptions(req, opts...)`
-- `ExtractFromWithOptions(input, opts...)`
-- `ExtractAddrFromWithOptions(input, opts...)`
-
-- `TrustProxyPrefixes(...netip.Prefix)` add trusted proxy network prefixes
-- `TrustLoopbackProxy()` trust loopback upstream proxies (`127.0.0.0/8`, `::1/128`)
-- `TrustPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
-- `TrustLocalProxyDefaults()` trust loopback + private proxy ranges
-- `TrustProxyAddrs(...netip.Addr)` add trusted upstream proxy host addresses
+- `WithTrustedProxyPrefixes(...netip.Prefix)` add trusted proxy network prefixes
+- `WithTrustedLoopbackProxy()` trust loopback upstream proxies (`127.0.0.0/8`, `::1/128`)
+- `WithTrustedPrivateProxyRanges()` trust private upstream proxy ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
+- `WithTrustedLocalProxyDefaults()` trust loopback + private proxy ranges
+- `WithTrustedProxyAddrs(...netip.Addr)` add trusted upstream proxy host addresses
 - `PresetDirectConnection()` remote-address only extraction preset
 - `PresetLoopbackReverseProxy()` loopback reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
 - `PresetVMReverseProxy()` VM/private-network reverse-proxy preset (`X-Forwarded-For`, then `RemoteAddr`)
 - `PresetPreferredHeaderThenXFFLax(string)` preferred-header fallback preset in lax mode
-- `MinTrustedProxies(int)` / `MaxTrustedProxies(int)` set trusted-proxy count bounds for chain headers
-- `AllowPrivateIPs(bool)` allow private client IPs
-- `AllowReservedClientPrefixes(...netip.Prefix)` explicitly allow selected reserved/special-use client ranges
+- `WithMinTrustedProxies(int)` / `WithMaxTrustedProxies(int)` set trusted-proxy count bounds for chain headers
+- `WithAllowPrivateIPs(bool)` allow private client IPs
+- `WithAllowedReservedClientPrefixes(...netip.Prefix)` explicitly allow selected reserved/special-use client ranges
 - `ParseCIDRs(...string)` parse CIDR strings to `[]netip.Prefix` for typed options
-- `MaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
+- `WithMaxChainLength(int)` limit proxy chain length from `Forwarded`/`X-Forwarded-For` (default 100)
 - `WithChainSelection(ChainSelection)` choose `RightmostUntrustedIP` (default) or `LeftmostUntrustedIP`
-- `Priority(...string)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr` (built-in aliases are canonicalized, e.g. `"Forwarded"`, `"X-Forwarded-For"`, `"X_Real_IP"`, `"Remote-Addr"`), with at most one chain header source (`SourceForwarded` or `SourceXForwardedFor`) per extractor
+- `WithSourcePriority(...Source)` set source order; built-ins: `SourceForwarded`, `SourceXForwardedFor`, `SourceXRealIP`, `SourceRemoteAddr`; use `HeaderSource("CF-Connecting-IP")` for custom headers
 - `WithSecurityMode(SecurityMode)` choose `SecurityModeStrict` (default) or `SecurityModeLax`
 - `WithLogger(Logger)` inject logger implementation
 - `WithMetrics(Metrics)` inject custom metrics implementation directly
@@ -358,7 +357,7 @@ For one-shot extraction without reusing an extractor, use:
 
 Default source order is `SourceRemoteAddr`.
 
-Any header-based source requires trusted upstream proxy ranges (`TrustProxyPrefixes` or one of the trust helpers).
+Any header-based source requires trusted upstream proxy ranges (`WithTrustedProxyPrefixes` or one of the trust helpers).
 
 Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
 
@@ -369,8 +368,8 @@ Prometheus adapter helpers from `github.com/abczzz13/clientip/prometheus`:
 Proxy count bounds (`min`/`max`) apply to trusted proxies present in `Forwarded` (from `for=` values) and `X-Forwarded-For`.
 The immediate proxy (`RemoteAddr`) is validated for trust separately before either header is trusted.
 
-`AllowReservedClientPrefixes` only bypasses reserved/special-use filtering for matching ranges.
-It does not bypass loopback/link-local/multicast/unspecified rejection, and private-IP policy remains controlled by `AllowPrivateIPs`.
+`WithAllowedReservedClientPrefixes` only bypasses reserved/special-use filtering for matching ranges.
+It does not bypass loopback/link-local/multicast/unspecified rejection, and private-IP policy remains controlled by `WithAllowPrivateIPs`.
 
 ## Extraction
 
@@ -393,10 +392,10 @@ type RequestInput struct {
     Headers    HeaderValues
 }
 
-func (e *Extractor) Extract(req *http.Request, overrides ...OverrideOptions) (Extraction, error)
-func (e *Extractor) ExtractAddr(req *http.Request, overrides ...OverrideOptions) (netip.Addr, error)
-func (e *Extractor) ExtractFrom(input RequestInput, overrides ...OverrideOptions) (Extraction, error)
-func (e *Extractor) ExtractAddrFrom(input RequestInput, overrides ...OverrideOptions) (netip.Addr, error)
+func (e *Extractor) Extract(req *http.Request, callOpts ...CallOption) (Extraction, error)
+func (e *Extractor) ExtractAddr(req *http.Request, callOpts ...CallOption) (netip.Addr, error)
+func (e *Extractor) ExtractFrom(input RequestInput, callOpts ...CallOption) (Extraction, error)
+func (e *Extractor) ExtractAddrFrom(input RequestInput, callOpts ...CallOption) (netip.Addr, error)
 ```
 
 When `Extract` returns a non-nil error, the returned `Extraction` value is
@@ -404,20 +403,40 @@ best-effort metadata only (typically `Source` when available). For chain
 diagnostics, inspect typed errors like `ProxyValidationError` and
 `InvalidIPError`.
 
-Per-call overrides let you temporarily adjust policy for a single extraction:
+Per-call options let you temporarily adjust policy for a single extraction:
 
 ```go
 extraction, err := extractor.Extract(
     req,
-    clientip.OverrideOptions{
-        SecurityMode: clientip.Set(clientip.SecurityModeLax),
-    },
+    clientip.WithCallSecurityMode(clientip.SecurityModeLax),
 )
 ```
 
-Multiple `OverrideOptions` values are merged left-to-right; later set values
+```go
+extraction, err := extractor.ExtractFrom(
+    input,
+    clientip.WithCallSourcePriority(
+        clientip.HeaderSource("CF-Connecting-IP"),
+        clientip.SourceRemoteAddr,
+    ),
+)
+```
+
+Multiple `CallOption` values are applied left-to-right; later values
 win. Only policy fields are overrideable (logger and metrics stay fixed per
 extractor instance).
+
+Available call options:
+
+- `WithCallTrustedProxyPrefixes(...netip.Prefix)`
+- `WithCallMinTrustedProxies(int)` / `WithCallMaxTrustedProxies(int)`
+- `WithCallAllowPrivateIPs(bool)`
+- `WithCallAllowedReservedClientPrefixes(...netip.Prefix)`
+- `WithCallMaxChainLength(int)`
+- `WithCallChainSelection(ChainSelection)`
+- `WithCallSecurityMode(SecurityMode)`
+- `WithCallDebugInfo(bool)`
+- `WithCallSourcePriority(...Source)`
 
 Custom header names are normalized via `NormalizeSourceName` (lowercase with underscores).
 
@@ -443,6 +462,8 @@ if err != nil {
         // Invalid or implausible client IP
     case errors.Is(err, clientip.ErrSourceUnavailable):
         // Requested source was not present on this request
+    case errors.Is(err, clientip.ErrNilRequest):
+        // Extract/ExtractAddr received a nil *http.Request
     }
 
     var mh *clientip.MultipleHeadersError
@@ -472,7 +493,7 @@ Typed chain-related errors expose additional context:
 
 ## Security anti-patterns
 
-- Do not include multiple competing header-based sources in `Priority(...)` for security decisions (for example custom header + chain header fallback). Prefer one canonical trusted header plus `SourceRemoteAddr` fallback only when required.
+- Do not include multiple competing header-based sources in `WithSourcePriority(...)` for security decisions (for example custom header + chain header fallback). Prefer one canonical trusted header plus `SourceRemoteAddr` fallback only when required.
 - Do not enable `SecurityModeLax` for security-enforcement decisions (ACLs, fraud/risk controls, authz). Use strict mode and fail closed.
 - Do not trust broad proxy CIDRs unless they are truly under your control. Keep trusted ranges minimal and explicit.
 - Do not treat a missing/invalid source as benign in critical paths; monitor and remediate extraction errors.

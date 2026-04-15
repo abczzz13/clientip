@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
+	"net/textproto"
+	"strings"
 )
 
 const (
@@ -17,6 +19,79 @@ const (
 	// SourceRemoteAddr resolves from Request.RemoteAddr.
 	SourceRemoteAddr = "remote_addr"
 )
+
+// Source identifies one extraction source in priority order.
+//
+// Use built-in constants for standard sources and HeaderSource for custom
+// headers.
+type Source string
+
+// HeaderSource returns a source backed by a custom HTTP header name.
+func HeaderSource(name string) Source {
+	return canonicalSource(Source(name))
+}
+
+func canonicalSource(source Source) Source {
+	raw := strings.TrimSpace(string(source))
+	if raw == "" {
+		return ""
+	}
+
+	switch NormalizeSourceName(raw) {
+	case string(SourceForwarded):
+		return SourceForwarded
+	case string(SourceXForwardedFor):
+		return SourceXForwardedFor
+	case string(SourceXRealIP):
+		return SourceXRealIP
+	case string(SourceRemoteAddr):
+		return SourceRemoteAddr
+	default:
+		return Source(textproto.CanonicalMIMEHeaderKey(raw))
+	}
+}
+
+func canonicalizeSources(sources []Source) []Source {
+	resolved := make([]Source, len(sources))
+	for i, source := range sources {
+		resolved[i] = canonicalSource(source)
+	}
+	return resolved
+}
+
+func (s Source) String() string {
+	return s.name()
+}
+
+func (s Source) name() string {
+	s = canonicalSource(s)
+	if s == "" {
+		return ""
+	}
+
+	switch s {
+	case SourceForwarded, SourceXForwardedFor, SourceXRealIP, SourceRemoteAddr:
+		return string(s)
+	default:
+		return NormalizeSourceName(string(s))
+	}
+}
+
+func (s Source) headerKey() (string, bool) {
+	s = canonicalSource(s)
+	switch s {
+	case SourceForwarded:
+		return "Forwarded", true
+	case SourceXForwardedFor:
+		return "X-Forwarded-For", true
+	case SourceXRealIP:
+		return "X-Real-IP", true
+	case SourceRemoteAddr, "":
+		return "", false
+	default:
+		return string(s), true
+	}
+}
 
 type extractionResult struct {
 	IP                netip.Addr

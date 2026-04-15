@@ -86,11 +86,16 @@ func (s *singleHeaderSource) Extract(ctx context.Context, r *http.Request) (extr
 
 type remoteAddrSource struct {
 	extractor      *Extractor
+	sourceName     string
 	unavailableErr error
 }
 
 func (s *remoteAddrSource) Name() string {
-	return SourceRemoteAddr
+	if s.sourceName == "" {
+		return SourceRemoteAddr
+	}
+
+	return s.sourceName
 }
 
 func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {
@@ -105,22 +110,24 @@ func (s *remoteAddrSource) Extract(ctx context.Context, r *http.Request) (extrac
 }
 
 func (e *Extractor) extractRemoteAddr(remoteAddr string) (extractionResult, error) {
+	sourceName := SourceRemoteAddr
+
 	if remoteAddr == "" {
-		return extractionResult{}, &ExtractionError{Err: ErrSourceUnavailable, Source: SourceRemoteAddr}
+		return extractionResult{}, &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName}
 	}
 
 	ip := parseRemoteAddr(remoteAddr)
 	if !e.isPlausibleClientIP(ip) {
-		e.config.metrics.RecordExtractionFailure(SourceRemoteAddr)
+		e.config.metrics.RecordExtractionFailure(sourceName)
 		return extractionResult{}, &RemoteAddrError{
 			ExtractionError: ExtractionError{
 				Err:    ErrInvalidIP,
-				Source: SourceRemoteAddr,
+				Source: sourceName,
 			},
 			RemoteAddr: remoteAddr,
 		}
 	}
 
-	e.config.metrics.RecordExtractionSuccess(SourceRemoteAddr)
-	return extractionResult{IP: normalizeIP(ip), Source: SourceRemoteAddr}, nil
+	e.config.metrics.RecordExtractionSuccess(sourceName)
+	return extractionResult{IP: normalizeIP(ip), Source: sourceName}, nil
 }

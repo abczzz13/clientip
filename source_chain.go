@@ -27,16 +27,20 @@ func newChainedSource(extractor *Extractor, sources ...sourceExtractor) *chained
 }
 
 func newForwardedForSource(extractor *Extractor) sourceExtractor {
+	sourceName := SourceXForwardedFor
 	return &forwardedForSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceXForwardedFor},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 
 func newForwardedSource(extractor *Extractor) sourceExtractor {
+	sourceName := SourceForwarded
 	return &forwardedSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceForwarded},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 
@@ -52,9 +56,11 @@ func newSingleHeaderSource(extractor *Extractor, headerName string) sourceExtrac
 }
 
 func newRemoteAddrSource(extractor *Extractor) sourceExtractor {
+	sourceName := SourceRemoteAddr
 	return &remoteAddrSource{
 		extractor:      extractor,
-		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: SourceRemoteAddr},
+		sourceName:     sourceName,
+		unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName},
 	}
 }
 

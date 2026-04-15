@@ -3,7 +3,6 @@ package clientip
 import (
 	"context"
 	"net/http"
-	"net/textproto"
 	"net/url"
 )
 
@@ -81,7 +80,7 @@ func requestFromInput(input RequestInput, sourceHeaderKeys []string) *http.Reque
 		}
 
 		input.Headers = h
-	} else if isNilInterface(input.Headers) {
+	} else if isNilValue(input.Headers) {
 		return req
 	}
 
@@ -118,12 +117,12 @@ func requestFromInput(input RequestInput, sourceHeaderKeys []string) *http.Reque
 	return req
 }
 
-func sourceHeaderKeys(sourcePriority []string) []string {
+func sourceHeaderKeys(sourcePriority []Source) []string {
 	keys := make([]string, 0, len(sourcePriority))
 	seen := make(map[string]struct{}, len(sourcePriority))
 
-	for _, sourceName := range sourcePriority {
-		key, ok := sourceHeaderKey(sourceName)
+	for _, source := range sourcePriority {
+		key, ok := sourceHeaderKey(source)
 		if !ok {
 			continue
 		}
@@ -139,17 +138,16 @@ func sourceHeaderKeys(sourcePriority []string) []string {
 	return keys
 }
 
-func sourceHeaderKey(sourceName string) (string, bool) {
-	switch sourceName {
-	case SourceForwarded:
-		return "Forwarded", true
-	case SourceXForwardedFor:
-		return "X-Forwarded-For", true
-	case SourceXRealIP:
-		return "X-Real-IP", true
-	case SourceRemoteAddr:
+func sourceHeaderKey(source Source) (string, bool) {
+	source = canonicalSource(source)
+	if source == "" {
 		return "", false
-	default:
-		return textproto.CanonicalMIMEHeaderKey(sourceName), true
 	}
+
+	key, ok := source.headerKey()
+	if !ok {
+		return "", false
+	}
+
+	return key, true
 }

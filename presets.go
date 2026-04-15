@@ -5,7 +5,7 @@ package clientip
 //
 // This preset extracts from RemoteAddr only.
 func PresetDirectConnection() Option {
-	return Priority(SourceRemoteAddr)
+	return WithSourcePriority(SourceRemoteAddr)
 }
 
 // PresetLoopbackReverseProxy configures extraction for apps behind a reverse
@@ -16,8 +16,8 @@ func PresetDirectConnection() Option {
 func PresetLoopbackReverseProxy() Option {
 	return func(c *config) error {
 		return applyOptions(c,
-			TrustLoopbackProxy(),
-			Priority(SourceXForwardedFor, SourceRemoteAddr),
+			WithTrustedLoopbackProxy(),
+			WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		)
 	}
 }
@@ -30,8 +30,8 @@ func PresetLoopbackReverseProxy() Option {
 func PresetVMReverseProxy() Option {
 	return func(c *config) error {
 		return applyOptions(c,
-			TrustLocalProxyDefaults(),
-			Priority(SourceXForwardedFor, SourceRemoteAddr),
+			WithTrustedLocalProxyDefaults(),
+			WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
 		)
 	}
 }
@@ -46,7 +46,7 @@ func PresetVMReverseProxy() Option {
 func PresetPreferredHeaderThenXFFLax(header string) Option {
 	return func(c *config) error {
 		return applyOptions(c,
-			Priority(header, SourceXForwardedFor, SourceRemoteAddr),
+			WithSourcePriority(HeaderSource(header), SourceXForwardedFor, SourceRemoteAddr),
 			WithSecurityMode(SecurityModeLax),
 		)
 	}

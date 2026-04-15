@@ -3,10 +3,26 @@ package clientip
 import (
 	"fmt"
 	"net/netip"
+	"reflect"
+	"slices"
 )
 
-// TrustProxyPrefixes adds trusted proxy network prefixes.
-func TrustProxyPrefixes(prefixes ...netip.Prefix) Option {
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
+// WithTrustedProxyPrefixes adds trusted proxy network prefixes.
+func WithTrustedProxyPrefixes(prefixes ...netip.Prefix) Option {
 	prefixes = clonePrefixes(prefixes)
 
 	return func(c *config) error {
@@ -20,24 +36,24 @@ func TrustProxyPrefixes(prefixes ...netip.Prefix) Option {
 	}
 }
 
-// TrustLoopbackProxy adds loopback CIDRs to trusted proxy ranges.
-func TrustLoopbackProxy() Option {
+// WithTrustedLoopbackProxy adds loopback CIDRs to trusted proxy ranges.
+func WithTrustedLoopbackProxy() Option {
 	return func(c *config) error {
 		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
 		return nil
 	}
 }
 
-// TrustPrivateProxyRanges adds private network CIDRs to trusted proxy ranges.
-func TrustPrivateProxyRanges() Option {
+// WithTrustedPrivateProxyRanges adds private network CIDRs to trusted proxy ranges.
+func WithTrustedPrivateProxyRanges() Option {
 	return func(c *config) error {
 		appendTrustedProxyCIDRs(c, privateProxyCIDRs...)
 		return nil
 	}
 }
 
-// TrustLocalProxyDefaults adds loopback and private network CIDRs.
-func TrustLocalProxyDefaults() Option {
+// WithTrustedLocalProxyDefaults adds loopback and private network CIDRs.
+func WithTrustedLocalProxyDefaults() Option {
 	return func(c *config) error {
 		appendTrustedProxyCIDRs(c, loopbackProxyCIDRs...)
 		appendTrustedProxyCIDRs(c, privateProxyCIDRs...)
@@ -45,8 +61,8 @@ func TrustLocalProxyDefaults() Option {
 	}
 }
 
-// TrustProxyAddrs adds trusted upstream proxy host addresses.
-func TrustProxyAddrs(addrs ...netip.Addr) Option {
+// WithTrustedProxyAddrs adds trusted upstream proxy host addresses.
+func WithTrustedProxyAddrs(addrs ...netip.Addr) Option {
 	addrs = cloneAddrs(addrs)
 
 	return func(c *config) error {
@@ -65,32 +81,32 @@ func TrustProxyAddrs(addrs ...netip.Addr) Option {
 	}
 }
 
-// MinTrustedProxies sets the minimum trusted proxy count for chain-header sources.
-func MinTrustedProxies(min int) Option {
+// WithMinTrustedProxies sets the minimum trusted proxy count for chain-header sources.
+func WithMinTrustedProxies(min int) Option {
 	return func(c *config) error {
 		c.minTrustedProxies = min
 		return nil
 	}
 }
 
-// MaxTrustedProxies sets the maximum trusted proxy count for chain-header sources.
-func MaxTrustedProxies(max int) Option {
+// WithMaxTrustedProxies sets the maximum trusted proxy count for chain-header sources.
+func WithMaxTrustedProxies(max int) Option {
 	return func(c *config) error {
 		c.maxTrustedProxies = max
 		return nil
 	}
 }
 
-// AllowPrivateIPs configures whether private client IPs are accepted.
-func AllowPrivateIPs(allow bool) Option {
+// WithAllowPrivateIPs configures whether private client IPs are accepted.
+func WithAllowPrivateIPs(allow bool) Option {
 	return func(c *config) error {
 		c.allowPrivateIPs = allow
 		return nil
 	}
 }
 
-// AllowReservedClientPrefixes configures reserved client prefixes to explicitly allow.
-func AllowReservedClientPrefixes(prefixes ...netip.Prefix) Option {
+// WithAllowedReservedClientPrefixes configures reserved client prefixes to explicitly allow.
+func WithAllowedReservedClientPrefixes(prefixes ...netip.Prefix) Option {
 	prefixes = clonePrefixes(prefixes)
 
 	return func(c *config) error {
@@ -104,8 +120,8 @@ func AllowReservedClientPrefixes(prefixes ...netip.Prefix) Option {
 	}
 }
 
-// MaxChainLength sets the maximum number of entries accepted in proxy chains.
-func MaxChainLength(max int) Option {
+// WithMaxChainLength sets the maximum number of entries accepted in proxy chains.
+func WithMaxChainLength(max int) Option {
 	return func(c *config) error {
 		c.maxChainLength = max
 		return nil
@@ -148,15 +164,12 @@ func WithMetricsFactory(factory func() (Metrics, error)) Option {
 	}
 }
 
-// Priority sets extraction source order.
-//
-// Source names are canonicalized so built-in aliases resolve to canonical
-// constants.
-func Priority(sources ...string) Option {
-	resolvedSources := canonicalizeSourceNames(cloneStrings(sources))
+// WithSourcePriority sets extraction source order.
+func WithSourcePriority(sources ...Source) Option {
+	resolvedSources := canonicalizeSources(slices.Clone(sources))
 
 	return func(c *config) error {
-		c.sourcePriority = cloneStrings(resolvedSources)
+		c.sourcePriority = slices.Clone(resolvedSources)
 		return nil
 	}
 }

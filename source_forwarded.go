@@ -9,20 +9,30 @@ import (
 
 type forwardedForSource struct {
 	extractor      *Extractor
+	sourceName     string
 	unavailableErr error
 }
 
 type forwardedSource struct {
 	extractor      *Extractor
+	sourceName     string
 	unavailableErr error
 }
 
 func (s *forwardedForSource) Name() string {
-	return SourceXForwardedFor
+	if s.sourceName == "" {
+		return SourceXForwardedFor
+	}
+
+	return s.sourceName
 }
 
 func (s *forwardedSource) Name() string {
-	return SourceForwarded
+	if s.sourceName == "" {
+		return SourceForwarded
+	}
+
+	return s.sourceName
 }
 
 func (s *forwardedSource) Extract(ctx context.Context, r *http.Request) (extractionResult, error) {

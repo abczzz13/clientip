@@ -32,10 +32,9 @@ func New(opts ...Option) (*Extractor, error) {
 
 func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
 	sources := make([]sourceExtractor, 0, len(cfg.sourcePriority))
-	for _, sourceName := range cfg.sourcePriority {
-		resolvedSourceName := canonicalSourceName(sourceName)
+	for _, configuredSource := range cfg.sourcePriority {
 		var source sourceExtractor
-		switch resolvedSourceName {
+		switch configuredSource {
 		case SourceForwarded:
 			source = newForwardedSource(e)
 		case SourceXForwardedFor:
@@ -45,8 +44,8 @@ func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
 		case SourceRemoteAddr:
 			source = newRemoteAddrSource(e)
 		default:
-			// Assume it's a custom header name.
-			source = newSingleHeaderSource(e, sourceName)
+			headerName, _ := configuredSource.headerKey()
+			source = newSingleHeaderSource(e, headerName)
 		}
 		sources = append(sources, source)
 	}
@@ -54,36 +53,22 @@ func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
 	return newChainedSource(e, sources...)
 }
 
-func canonicalSourceName(sourceName string) string {
-	switch NormalizeSourceName(sourceName) {
-	case SourceForwarded:
-		return SourceForwarded
-	case SourceXForwardedFor:
-		return SourceXForwardedFor
-	case SourceXRealIP:
-		return SourceXRealIP
-	case SourceRemoteAddr:
-		return SourceRemoteAddr
-	default:
-		return sourceName
-	}
-}
-
 // Extract resolves client IP and metadata for the request.
 //
-// When overrides are provided, they are merged left-to-right and applied only
+// When call options are provided, they are applied left-to-right and applied only
 // for this call.
-func (e *Extractor) Extract(r *http.Request, overrides ...OverrideOptions) (Extraction, error) {
-	ctx := requestContext(r)
+func (e *Extractor) Extract(r *http.Request, callOpts ...CallOption) (Extraction, error) {
 	if r == nil {
-		r = &http.Request{}
+		return Extraction{}, ErrNilRequest
 	}
 
-	if len(overrides) == 0 {
+	ctx := r.Context()
+
+	if len(callOpts) == 0 {
 		return e.extractWithSource(e.source, ctx, r)
 	}
 
-	activeExtractor, activeSource, err := e.prepareCall(overrides...)
+	activeExtractor, activeSource, err := e.prepareCall(callOpts...)
 	if err != nil {
 		return Extraction{}, err
 	}
@@ -92,8 +77,8 @@ func (e *Extractor) Extract(r *http.Request, overrides ...OverrideOptions) (Extr
 }
 
 // ExtractAddr resolves only the client IP address.
-func (e *Extractor) ExtractAddr(r *http.Request, overrides ...OverrideOptions) (netip.Addr, error) {
-	extraction, err := e.Extract(r, overrides...)
+func (e *Extractor) ExtractAddr(r *http.Request, callOpts ...CallOption) (netip.Addr, error) {
+	extraction, err := e.Extract(r, callOpts...)
 	if err != nil {
 		return netip.Addr{}, err
 	}
@@ -104,15 +89,15 @@ func (e *Extractor) ExtractAddr(r *http.Request, overrides ...OverrideOptions) (
 // ExtractFrom resolves client IP and metadata from framework-agnostic request
 // input.
 //
-// When overrides are provided, they are merged left-to-right and applied only
+// When call options are provided, they are applied left-to-right and applied only
 // for this call.
-func (e *Extractor) ExtractFrom(input RequestInput, overrides ...OverrideOptions) (Extraction, error) {
+func (e *Extractor) ExtractFrom(input RequestInput, callOpts ...CallOption) (Extraction, error) {
 	activeExtractor := e
 	activeSource := e.source
 
-	if len(overrides) > 0 {
+	if len(callOpts) > 0 {
 		var err error
-		activeExtractor, activeSource, err = e.prepareCall(overrides...)
+		activeExtractor, activeSource, err = e.prepareCall(callOpts...)
 		if err != nil {
 			return Extraction{}, err
 		}
@@ -134,8 +119,8 @@ func (e *Extractor) ExtractFrom(input RequestInput, overrides ...OverrideOptions
 
 // ExtractAddrFrom resolves only the client IP address from framework-agnostic
 // request input.
-func (e *Extractor) ExtractAddrFrom(input RequestInput, overrides ...OverrideOptions) (netip.Addr, error) {
-	extraction, err := e.ExtractFrom(input, overrides...)
+func (e *Extractor) ExtractAddrFrom(input RequestInput, callOpts ...CallOption) (netip.Addr, error) {
+	extraction, err := e.ExtractFrom(input, callOpts...)
 	if err != nil {
 		return netip.Addr{}, err
 	}
@@ -143,75 +128,25 @@ func (e *Extractor) ExtractAddrFrom(input RequestInput, overrides ...OverrideOpt
 	return extraction.IP, nil
 }
 
-// ExtractWithOptions is a one-shot convenience helper.
-//
-// It constructs a temporary extractor from opts and resolves metadata for r.
-func ExtractWithOptions(r *http.Request, opts ...Option) (Extraction, error) {
-	extractor, err := New(opts...)
-	if err != nil {
-		return Extraction{}, err
-	}
-
-	return extractor.Extract(r)
-}
-
-// ExtractAddrWithOptions is a one-shot convenience helper.
-//
-// It constructs a temporary extractor from opts and resolves only the client
-// IP address for r.
-func ExtractAddrWithOptions(r *http.Request, opts ...Option) (netip.Addr, error) {
-	extractor, err := New(opts...)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	return extractor.ExtractAddr(r)
-}
-
-// ExtractFromWithOptions is a one-shot convenience helper.
-//
-// It constructs a temporary extractor from opts and resolves metadata from
-// framework-agnostic request input.
-func ExtractFromWithOptions(input RequestInput, opts ...Option) (Extraction, error) {
-	extractor, err := New(opts...)
-	if err != nil {
-		return Extraction{}, err
-	}
-
-	return extractor.ExtractFrom(input)
-}
-
-// ExtractAddrFromWithOptions is a one-shot convenience helper.
-//
-// It constructs a temporary extractor from opts and resolves only the client IP
-// address from framework-agnostic request input.
-func ExtractAddrFromWithOptions(input RequestInput, opts ...Option) (netip.Addr, error) {
-	extractor, err := New(opts...)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	return extractor.ExtractAddrFrom(input)
-}
-
-func (e *Extractor) prepareCall(overrides ...OverrideOptions) (*Extractor, sourceExtractor, error) {
+func (e *Extractor) prepareCall(callOpts ...CallOption) (*Extractor, sourceExtractor, error) {
 	activeExtractor := e
 	activeSource := e.source
 
-	if len(overrides) == 0 {
+	if len(callOpts) == 0 {
 		return activeExtractor, activeSource, nil
 	}
 
-	effectiveConfig, err := e.config.withOverrides(overrides...)
+	effectiveConfig, err := e.config.withCallOptions(callOpts...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid override options: %w", err)
+		return nil, nil, fmt.Errorf("invalid call options: %w", err)
+	}
+	if effectiveConfig == e.config {
+		return activeExtractor, activeSource, nil
 	}
 
-	if effectiveConfig != e.config {
-		activeExtractor = &Extractor{config: effectiveConfig}
-		activeExtractor.source = activeExtractor.buildSourceChain(effectiveConfig)
-		activeSource = activeExtractor.source
-	}
+	activeExtractor = &Extractor{config: effectiveConfig}
+	activeExtractor.source = activeExtractor.buildSourceChain(effectiveConfig)
+	activeSource = activeExtractor.source
 
 	return activeExtractor, activeSource, nil
 }
@@ -238,14 +173,6 @@ func (e *Extractor) extractWithSource(source sourceExtractor, ctx context.Contex
 		TrustedProxyCount: extractionResult.TrustedProxyCount,
 		DebugInfo:         extractionResult.DebugInfo,
 	}, nil
-}
-
-func requestContext(r *http.Request) context.Context {
-	if r == nil {
-		return context.Background()
-	}
-
-	return r.Context()
 }
 
 func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {

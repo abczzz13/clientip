@@ -85,69 +85,6 @@ func TestParseCIDRs(t *testing.T) {
 	}
 }
 
-func TestSetValue_Behavior(t *testing.T) {
-	type setValueObservation struct {
-		Set   bool
-		Value any
-	}
-
-	tests := []struct {
-		name string
-		run  func() setValueObservation
-		want setValueObservation
-	}{
-		{
-			name: "zero int value is not set",
-			run: func() setValueObservation {
-				var v SetValue[int]
-				return setValueObservation{Set: v.isSet(), Value: v.value()}
-			},
-			want: setValueObservation{Set: false, Value: 0},
-		},
-		{
-			name: "Set marks int as set",
-			run: func() setValueObservation {
-				v := Set(42)
-				return setValueObservation{Set: v.isSet(), Value: v.value()}
-			},
-			want: setValueObservation{Set: true, Value: 42},
-		},
-		{
-			name: "zero bool value is not set",
-			run: func() setValueObservation {
-				var v SetValue[bool]
-				return setValueObservation{Set: v.isSet(), Value: v.value()}
-			},
-			want: setValueObservation{Set: false, Value: false},
-		},
-		{
-			name: "Set marks false bool as set",
-			run: func() setValueObservation {
-				v := Set(false)
-				return setValueObservation{Set: v.isSet(), Value: v.value()}
-			},
-			want: setValueObservation{Set: true, Value: false},
-		},
-		{
-			name: "Set preserves nil slice value",
-			run: func() setValueObservation {
-				var nilSlice []string
-				v := Set(nilSlice)
-				return setValueObservation{Set: v.isSet(), Value: v.value()}
-			},
-			want: setValueObservation{Set: true, Value: []string(nil)},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if diff := cmp.Diff(tt.want, tt.run()); diff != "" {
-				t.Fatalf("SetValue mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 func TestTypedErrors_ErrorFormatting(t *testing.T) {
 	tests := []struct {
 		name string
