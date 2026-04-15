@@ -7,10 +7,31 @@ import (
 	"net/netip"
 	"net/textproto"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
+type stubSourceExtractor struct {
+	name   string
+	result extractionResult
+	err    error
+	calls  *int
+}
+
+func (s *stubSourceExtractor) Extract(context.Context, *http.Request) (extractionResult, error) {
+	if s.calls != nil {
+		*s.calls = *s.calls + 1
+	}
+
+	return s.result, s.err
+}
+
+func (s *stubSourceExtractor) Name() string {
+	return s.name
+}
+
 func TestChainedSource_Extract(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	tests := []struct {
 		name       string
@@ -115,8 +136,128 @@ func TestChainedSource_Extract(t *testing.T) {
 	}
 }
 
+func TestChainedSource_ContextCanceledPrecheck(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		ctx  func() context.Context
+		want struct {
+			Calls       int
+			ErrCanceled bool
+			IP          string
+			Source      string
+		}
+	}{
+		{
+			name: "already canceled context does not call sources",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			want: struct {
+				Calls       int
+				ErrCanceled bool
+				IP          string
+				Source      string
+			}{Calls: 0, ErrCanceled: true},
+		},
+		{
+			name: "active context calls first source",
+			ctx: func() context.Context {
+				return context.Background()
+			},
+			want: struct {
+				Calls       int
+				ErrCanceled bool
+				IP          string
+				Source      string
+			}{Calls: 1, ErrCanceled: false, IP: "1.1.1.1", Source: "stub_source"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			source := &stubSourceExtractor{
+				name:   "stub_source",
+				result: extractionResult{IP: netip.MustParseAddr("1.1.1.1"), Source: "stub_source"},
+				calls:  &calls,
+			}
+			chained := newChainedSource(extractor, source)
+
+			result, extractErr := chained.Extract(tt.ctx(), &http.Request{Header: make(http.Header)})
+
+			got := struct {
+				Calls       int
+				ErrCanceled bool
+				IP          string
+				Source      string
+			}{
+				Calls:       calls,
+				ErrCanceled: errors.Is(extractErr, context.Canceled),
+				Source:      result.Source,
+			}
+			if result.IP.IsValid() {
+				got.IP = result.IP.String()
+			}
+
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("chained result mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestChainedSource_FillsEmptySourceNameFromSource(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	calls := 0
+	source := &stubSourceExtractor{
+		name:   "custom_source",
+		result: extractionResult{IP: netip.MustParseAddr("1.1.1.1")},
+		calls:  &calls,
+	}
+	chained := newChainedSource(extractor, source)
+
+	got, extractErr := chained.Extract(context.Background(), &http.Request{Header: make(http.Header)})
+	if extractErr != nil {
+		t.Fatalf("Extract() error = %v", extractErr)
+	}
+
+	gotView := struct {
+		Calls  int
+		IP     string
+		Source string
+	}{
+		Calls:  calls,
+		IP:     got.IP.String(),
+		Source: got.Source,
+	}
+	wantView := struct {
+		Calls  int
+		IP     string
+		Source string
+	}{
+		Calls:  1,
+		IP:     "1.1.1.1",
+		Source: "custom_source",
+	}
+
+	if diff := cmp.Diff(wantView, gotView); diff != "" {
+		t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestChainedSource_Name(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 	sources := []sourceExtractor{
 		&forwardedForSource{extractor: extractor},
 		&singleHeaderSource{
@@ -138,7 +279,7 @@ func TestChainedSource_Name(t *testing.T) {
 }
 
 func TestSourceFactories(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	t.Run("Forwarded source", func(t *testing.T) {
 		source := newForwardedSource(extractor)

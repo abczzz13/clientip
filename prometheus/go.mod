@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/abczzz13/clientip v0.0.5
+	github.com/google/go-cmp v0.7.0
 	github.com/prometheus/client_golang v1.21.1
 )
 

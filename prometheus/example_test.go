@@ -9,6 +9,19 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 )
 
+func counterValue(registry *prom.Registry, metricName string, labels map[string]string) float64 {
+	value, found, err := lookupCounterValue(registry, metricName, labels)
+	if err != nil {
+		panic(err)
+	}
+
+	if !found {
+		panic(fmt.Sprintf("counter %q with labels %v not found", metricName, labels))
+	}
+
+	return value
+}
+
 func ExampleWithMetrics() {
 	extractor, err := clientip.New(clientipprom.WithMetrics())
 	if err != nil {

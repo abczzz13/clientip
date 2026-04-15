@@ -2,7 +2,23 @@ package clientip
 
 import (
 	"errors"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"strings"
+	"testing"
 )
+
+type extractionState struct {
+	HasIP  bool
+	IP     string
+	Source string
+}
+
+type errorTextState struct {
+	HasErr       bool
+	ContainsText bool
+}
 
 func errorIsType(err error, target any) bool {
 	if err == nil {
@@ -51,4 +67,59 @@ func errorContains(err, target error) bool {
 		return false
 	}
 	return errors.Is(err, target)
+}
+
+func extractionStateOf(extraction Extraction) extractionState {
+	state := extractionState{
+		HasIP:  extraction.IP.IsValid(),
+		Source: extraction.Source,
+	}
+
+	if extraction.IP.IsValid() {
+		state.IP = extraction.IP.String()
+	}
+
+	return state
+}
+
+func errorTextStateOf(err error, contains string) errorTextState {
+	return errorTextState{
+		HasErr:       err != nil,
+		ContainsText: err != nil && strings.Contains(err.Error(), contains),
+	}
+}
+
+func mustNewExtractor(t *testing.T, opts ...Option) *Extractor {
+	t.Helper()
+
+	extractor, err := New(opts...)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	return extractor
+}
+
+func mustParseCIDRs(t *testing.T, cidrs ...string) []netip.Prefix {
+	t.Helper()
+
+	prefixes, err := ParseCIDRs(cidrs...)
+	if err != nil {
+		t.Fatalf("ParseCIDRs() error = %v", err)
+	}
+
+	return prefixes
+}
+
+func newTestRequest(remoteAddr, path string) *http.Request {
+	req := &http.Request{
+		RemoteAddr: remoteAddr,
+		Header:     make(http.Header),
+	}
+
+	if path != "" {
+		req.URL = &url.URL{Path: path}
+	}
+
+	return req
 }

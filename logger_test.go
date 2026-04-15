@@ -3,9 +3,7 @@ package clientip
 import (
 	"context"
 	"errors"
-	"net/http"
 	"net/netip"
-	"net/url"
 	"sync"
 	"testing"
 )
@@ -87,11 +85,7 @@ func TestLogging_MultipleXFFHeaders_DoNotWarn(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/multiple-headers"},
-	}
+	req := newTestRequest("1.1.1.1:8080", "/test/multiple-headers")
 	req.Header.Add("X-Forwarded-For", "8.8.8.8")
 	req.Header.Add("X-Forwarded-For", "9.9.9.9")
 
@@ -124,11 +118,7 @@ func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/multiple-single-ip-headers"},
-	}
+	req := newTestRequest("1.1.1.1:8080", "/test/multiple-single-ip-headers")
 	req.Header.Add("X-Real-IP", "8.8.8.8")
 	req.Header.Add("X-Real-IP", "9.9.9.9")
 
@@ -171,11 +161,7 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/chain-too-long"},
-	}
+	req := newTestRequest("1.1.1.1:8080", "/test/chain-too-long")
 	req.Header.Set("X-Forwarded-For", "8.8.8.8, 9.9.9.9, 4.4.4.4")
 
 	result, err := extractor.Extract(req)
@@ -206,10 +192,7 @@ func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 
 func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
-	cidrs, err := ParseCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("ParseCIDRs() error = %v", err)
-	}
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	extractor, err := New(
 		WithLogger(logger),
@@ -222,11 +205,7 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/proxy-count"},
-	}
+	req := newTestRequest("10.0.0.1:8080", "/test/proxy-count")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
 	result, err := extractor.Extract(req)
@@ -258,10 +237,7 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 
 func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
-	cidrs, err := ParseCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("ParseCIDRs() error = %v", err)
-	}
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	extractor, err := New(
 		WithLogger(logger),
@@ -274,11 +250,7 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/no-trusted-proxies"},
-	}
+	req := newTestRequest("10.0.0.1:8080", "/test/no-trusted-proxies")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
 	result, err := extractor.Extract(req)
@@ -310,10 +282,7 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 
 func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
-	cidrs, err := ParseCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("ParseCIDRs() error = %v", err)
-	}
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	extractor, err := New(
 		WithLogger(logger),
@@ -326,11 +295,7 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "10.0.0.2:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/too-many-proxies"},
-	}
+	req := newTestRequest("10.0.0.2:8080", "/test/too-many-proxies")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1, 10.0.0.2")
 
 	result, err := extractor.Extract(req)
@@ -362,10 +327,7 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 
 func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
-	cidrs, err := ParseCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("ParseCIDRs() error = %v", err)
-	}
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	extractor, err := New(
 		WithLogger(logger),
@@ -378,11 +340,7 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "8.8.8.8:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/untrusted-proxy"},
-	}
+	req := newTestRequest("8.8.8.8:8080", "/test/untrusted-proxy")
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 10.0.0.1")
 
 	result, err := extractor.Extract(req)
@@ -421,11 +379,7 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
-		URL:        &url.URL{Path: "/test/malformed-forwarded"},
-	}
+	req := newTestRequest("1.1.1.1:8080", "/test/malformed-forwarded")
 	req.Header.Set("Forwarded", "for=\"1.1.1.1")
 
 	result, err := extractor.Extract(req)

@@ -1,8 +1,11 @@
 package clientip
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestParseXFFValues(t *testing.T) {
@@ -45,45 +48,66 @@ func TestParseXFFValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extractor, _ := New()
+			extractor := mustNewExtractor(t)
 			got, err := extractor.parseXFFValues(tt.values)
 			if err != nil {
 				t.Fatalf("parseXFFValues() error = %v, want nil", err)
 			}
 
-			if len(got) != len(tt.want) {
-				t.Errorf("parseXFFValues() length = %d, want %d", len(got), len(tt.want))
-				return
-			}
-
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("parseXFFValues()[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("parseXFFValues() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
 func TestParseXFFValues_MaxChainLength(t *testing.T) {
-	extractor, err := New(MaxChainLength(5))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	extractor := mustNewExtractor(t, MaxChainLength(5))
 
 	values := []string{"1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 5.5.5.5, 6.6.6.6, 7.7.7.7"}
-	_, err = extractor.parseXFFValues(values)
+	_, err := extractor.parseXFFValues(values)
 
 	if !errorContains(err, ErrChainTooLong) {
-		t.Errorf("parseXFFValues() error = %v, want ErrChainTooLong", err)
+		t.Fatalf("parseXFFValues() error = %v, want ErrChainTooLong", err)
+	}
+}
+
+func TestParseXFFValues_PreservesWireOrderAcrossHeaderLines(t *testing.T) {
+	extractor := mustNewExtractor(t, MaxChainLength(10))
+
+	values := []string{
+		"1.1.1.1, 8.8.8.8",
+		"9.9.9.9",
+		" 4.4.4.4 , 5.5.5.5 ",
+	}
+
+	got, err := extractor.parseXFFValues(values)
+	if err != nil {
+		t.Fatalf("parseXFFValues() error = %v", err)
+	}
+
+	want := []string{"1.1.1.1", "8.8.8.8", "9.9.9.9", "4.4.4.4", "5.5.5.5"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("parseXFFValues() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseXFFValues_MaxChainLength_AcrossHeaderLines(t *testing.T) {
+	extractor := mustNewExtractor(t, MaxChainLength(3))
+
+	_, err := extractor.parseXFFValues([]string{
+		"1.1.1.1, 8.8.8.8",
+		"9.9.9.9",
+		"4.4.4.4",
+	})
+
+	if !errors.Is(err, ErrChainTooLong) {
+		t.Fatalf("parseXFFValues() error = %v, want ErrChainTooLong", err)
 	}
 }
 
 func TestIsTrustedProxy(t *testing.T) {
-	cidrs, err := ParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-	if err != nil {
-		t.Fatalf("ParseCIDRs() error = %v", err)
-	}
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 
 	extractor := &Extractor{
 		config: &config{
@@ -308,7 +332,7 @@ func TestAnalyzeChainRightmost_NoCIDRs(t *testing.T) {
 }
 
 func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	tests := []struct {
 		name               string
@@ -432,7 +456,7 @@ func TestAnalyzeChainRightmost_WithCIDRs(t *testing.T) {
 }
 
 func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	tests := []struct {
 		name             string
@@ -537,7 +561,7 @@ func TestAnalyzeChainLeftmost_WithCIDRs(t *testing.T) {
 }
 
 func TestSelectLeftmostUntrustedIP(t *testing.T) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
+	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
 	tests := []struct {
 		name                    string

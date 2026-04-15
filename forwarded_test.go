@@ -87,7 +87,7 @@ func TestParseForwardedValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extractor, _ := New()
+			extractor := mustNewExtractor(t)
 			got, err := extractor.parseForwardedValues(tt.values)
 
 			if tt.wantErr != nil {
@@ -102,20 +102,105 @@ func TestParseForwardedValues(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("parseForwardedValues() mismatch (-want +got):\n%s", diff)
+				t.Fatalf("parseForwardedValues() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
 func TestParseForwardedValues_MaxChainLength(t *testing.T) {
-	extractor, err := New(MaxChainLength(2))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+	extractor := mustNewExtractor(t, MaxChainLength(2))
+
+	_, err := extractor.parseForwardedValues([]string{"for=1.1.1.1, for=2.2.2.2, for=3.3.3.3"})
+	if !errorContains(err, ErrChainTooLong) {
+		t.Fatalf("parseForwardedValues() error = %v, want ErrChainTooLong", err)
+	}
+}
+
+func TestParseForwardedValues_MalformedParameterMatrix(t *testing.T) {
+	extractor := mustNewExtractor(t)
+
+	tests := []struct {
+		name   string
+		values []string
+	}{
+		{name: "empty parameter key", values: []string{"=1.1.1.1"}},
+		{name: "empty for value", values: []string{"for="}},
+		{name: "empty quoted for value", values: []string{`for=""`}},
+		{name: "invalid quoted for value suffix", values: []string{`for="1.1.1.1"extra`}},
+		{name: "non for parameter missing equals", values: []string{"for=1.1.1.1;proto"}},
+		{name: "non for parameter empty key", values: []string{"for=1.1.1.1;=https"}},
+		{name: "non for parameter empty value", values: []string{"for=1.1.1.1;proto="}},
+		{name: "unterminated quoted value across params", values: []string{"for=1.1.1.1;proto=\"https"}},
+		{name: "unbalanced quotes in element", values: []string{`for="a"b"`}},
 	}
 
-	_, err = extractor.parseForwardedValues([]string{"for=1.1.1.1, for=2.2.2.2, for=3.3.3.3"})
-	if !errorContains(err, ErrChainTooLong) {
-		t.Errorf("parseForwardedValues() error = %v, want ErrChainTooLong", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, parseErr := extractor.parseForwardedValues(tt.values)
+
+			got := struct {
+				HasErr    bool
+				IsInvalid bool
+			}{
+				HasErr:    parseErr != nil,
+				IsInvalid: errorContains(parseErr, ErrInvalidForwardedHeader),
+			}
+
+			want := struct {
+				HasErr    bool
+				IsInvalid bool
+			}{
+				HasErr:    true,
+				IsInvalid: true,
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("parseForwardedValues() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestParseForwardedForValue(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "unquoted token", input: "1.1.1.1", want: "1.1.1.1"},
+		{name: "quoted token", input: `"1.1.1.1"`, want: "1.1.1.1"},
+		{name: "quoted token with surrounding spaces", input: `  "1.1.1.1"  `, want: "1.1.1.1"},
+		{name: "escaped quote in quoted token", input: `"1.1.1.1\\\"edge"`, want: `1.1.1.1\"edge`},
+		{name: "empty input", input: "", wantErr: true},
+		{name: "spaces only", input: "  ", wantErr: true},
+		{name: "unterminated quote", input: `"1.1.1.1`, wantErr: true},
+		{name: "unexpected inner quote", input: `"a"b"`, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseForwardedForValue(tt.input)
+
+			gotView := struct {
+				Value  string
+				HasErr bool
+			}{
+				Value:  got,
+				HasErr: err != nil,
+			}
+			wantView := struct {
+				Value  string
+				HasErr bool
+			}{
+				Value:  tt.want,
+				HasErr: tt.wantErr,
+			}
+
+			if diff := cmp.Diff(wantView, gotView); diff != "" {
+				t.Fatalf("parseForwardedForValue() mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

@@ -712,6 +712,67 @@ func TestExtract_SecurityModeLax_AllowsFallbackOnUntrustedProxy(t *testing.T) {
 	}
 }
 
+func TestExtract_SingleHeader_UntrustedProxy_StrictVsLax(t *testing.T) {
+	cidrs, err := ParseCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("ParseCIDRs() error = %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		mode    SecurityMode
+		wantErr error
+		want    extractionState
+	}{
+		{
+			name:    "strict mode fails closed",
+			mode:    SecurityModeStrict,
+			wantErr: ErrUntrustedProxy,
+			want:    extractionState{HasIP: false, Source: SourceXRealIP},
+		},
+		{
+			name: "lax mode falls back to remote addr",
+			mode: SecurityModeLax,
+			want: extractionState{HasIP: true, IP: "8.8.8.8", Source: SourceRemoteAddr},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			extractor, newErr := New(
+				TrustProxyPrefixes(cidrs...),
+				Priority(SourceXRealIP, SourceRemoteAddr),
+				WithSecurityMode(tt.mode),
+			)
+			if newErr != nil {
+				t.Fatalf("New() error = %v", newErr)
+			}
+
+			req := &http.Request{
+				RemoteAddr: "8.8.8.8:8080",
+				Header:     make(http.Header),
+			}
+			req.Header.Set("X-Real-IP", "1.1.1.1")
+
+			got, extractErr := extractor.Extract(req)
+
+			if tt.wantErr != nil {
+				if !errors.Is(extractErr, tt.wantErr) {
+					t.Fatalf("error = %v, want %v", extractErr, tt.wantErr)
+				}
+			} else if extractErr != nil {
+				t.Fatalf("Extract() error = %v", extractErr)
+			}
+
+			gotView := extractionStateOf(got)
+
+			if diff := cmp.Diff(tt.want, gotView); diff != "" {
+				t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestExtract_XRealIP(t *testing.T) {
 	extractor, err := New(
 		TrustLoopbackProxy(),
@@ -1384,7 +1445,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 }
 
 func TestExtract_IPv4MappedIPv6(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	req := &http.Request{
 		RemoteAddr: "[::ffff:1.1.1.1]:8080",
@@ -1450,7 +1511,7 @@ func TestExtract_Concurrent(t *testing.T) {
 type contextKey string
 
 func TestExtract_ContextPropagation(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	ctx := context.WithValue(context.Background(), contextKey("test-key"), "test-value")
 	req := &http.Request{
@@ -1652,6 +1713,189 @@ func TestExtractWithOptions_OneShotHelpers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtract_NilRequest_AndNilOneShotHelpers(t *testing.T) {
+	extractor, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	extractionTests := []struct {
+		name string
+		run  func() (Extraction, error)
+		want extractionState
+	}{
+		{
+			name: "Extractor.Extract(nil)",
+			run: func() (Extraction, error) {
+				return extractor.Extract(nil)
+			},
+			want: extractionState{HasIP: false, Source: SourceRemoteAddr},
+		},
+		{
+			name: "ExtractWithOptions(nil)",
+			run: func() (Extraction, error) {
+				return ExtractWithOptions(nil)
+			},
+			want: extractionState{HasIP: false, Source: SourceRemoteAddr},
+		},
+	}
+
+	for _, tt := range extractionTests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, extractErr := tt.run()
+			if !errors.Is(extractErr, ErrSourceUnavailable) {
+				t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+			}
+
+			gotView := extractionStateOf(got)
+
+			if diff := cmp.Diff(tt.want, gotView); diff != "" {
+				t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	addrTests := []struct {
+		name string
+		run  func() (netip.Addr, error)
+	}{
+		{
+			name: "Extractor.ExtractAddr(nil)",
+			run: func() (netip.Addr, error) {
+				return extractor.ExtractAddr(nil)
+			},
+		},
+		{
+			name: "ExtractAddrWithOptions(nil)",
+			run: func() (netip.Addr, error) {
+				return ExtractAddrWithOptions(nil)
+			},
+		},
+	}
+
+	for _, tt := range addrTests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAddr, extractErr := tt.run()
+			if !errors.Is(extractErr, ErrSourceUnavailable) {
+				t.Fatalf("error = %v, want ErrSourceUnavailable", extractErr)
+			}
+
+			if diff := cmp.Diff(false, gotAddr.IsValid()); diff != "" {
+				t.Fatalf("address validity mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestOneShotHelpers_InvalidOptions_PropagateErrors(t *testing.T) {
+	const wantErrText = "header-based sources require trusted proxy prefixes"
+	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
+	input := RequestInput{RemoteAddr: "1.1.1.1:12345"}
+
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "ExtractWithOptions",
+			run: func() error {
+				_, err := ExtractWithOptions(req, Priority(SourceXForwardedFor))
+				return err
+			},
+		},
+		{
+			name: "ExtractAddrWithOptions",
+			run: func() error {
+				_, err := ExtractAddrWithOptions(req, Priority(SourceXForwardedFor))
+				return err
+			},
+		},
+		{
+			name: "ExtractFromWithOptions",
+			run: func() error {
+				_, err := ExtractFromWithOptions(input, Priority(SourceXForwardedFor))
+				return err
+			},
+		},
+		{
+			name: "ExtractAddrFromWithOptions",
+			run: func() error {
+				_, err := ExtractAddrFromWithOptions(input, Priority(SourceXForwardedFor))
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.run()
+			got := errorTextStateOf(err, wantErrText)
+
+			want := errorTextState{
+				HasErr:       true,
+				ContainsText: true,
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("error result mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestExtract_ErrorSourceReporting(t *testing.T) {
+	t.Run("source-aware error keeps source", func(t *testing.T) {
+		extractor := mustNewExtractor(
+			t,
+			TrustProxyAddrs(netip.MustParseAddr("1.1.1.1")),
+			Priority(SourceXRealIP),
+		)
+
+		req := &http.Request{
+			RemoteAddr: "1.1.1.1:8080",
+			Header:     make(http.Header),
+		}
+		req.Header.Add("X-Real-IP", "8.8.8.8")
+		req.Header.Add("X-Real-IP", "9.9.9.9")
+
+		result, err := extractor.Extract(req)
+		if !errors.Is(err, ErrMultipleSingleIPHeaders) {
+			t.Fatalf("error = %v, want ErrMultipleSingleIPHeaders", err)
+		}
+
+		got := extractionStateOf(result)
+		want := extractionState{Source: SourceXRealIP, HasIP: false}
+
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("error result mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("non source-aware error leaves source empty", func(t *testing.T) {
+		extractor := mustNewExtractor(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		req := (&http.Request{
+			RemoteAddr: "1.1.1.1:8080",
+			Header:     make(http.Header),
+		}).WithContext(ctx)
+
+		result, err := extractor.Extract(req)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", err)
+		}
+
+		got := extractionStateOf(result)
+		want := extractionState{Source: "", HasIP: false}
+
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("error result mismatch (-want +got):\n%s", diff)
+		}
+	})
 }
 
 func TestNew_OptionsImmutability(t *testing.T) {

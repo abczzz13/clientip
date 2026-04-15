@@ -10,7 +10,7 @@ import (
 )
 
 func TestSingleHeaderSource_Extract(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	tests := []struct {
 		name        string
@@ -139,7 +139,7 @@ func TestSingleHeaderSource_Extract_MultipleHeaderValues(t *testing.T) {
 }
 
 func TestSingleHeaderSource_Name(t *testing.T) {
-	extractor, _ := New()
+	extractor := mustNewExtractor(t)
 
 	tests := []struct {
 		headerName string

@@ -2,6 +2,7 @@ package prometheus_test
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/abczzz13/clientip"
 	clientipprom "github.com/abczzz13/clientip/prometheus"
+	"github.com/google/go-cmp/cmp"
 	prom "github.com/prometheus/client_golang/prometheus"
 )
 
@@ -115,7 +117,7 @@ func TestIntegration_ExtractWithPrometheusMetrics(t *testing.T) {
 				t.Fatalf("Extract() error = %v", err)
 			}
 
-			got := counterValue(registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"})
+			got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"})
 			if got != 1 {
 				t.Fatalf("ip_extraction_total counter = %v, want 1", got)
 			}
@@ -199,8 +201,201 @@ func TestNewWithRegisterer_TypedNilUsesDefaultRegisterer(t *testing.T) {
 		t.Fatalf("Extract() error = %v", err)
 	}
 
-	if got := counterValue(registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"}); got != 1 {
+	if got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"}); got != 1 {
 		t.Fatalf("ip_extraction_total counter = %v, want 1", got)
+	}
+}
+
+func TestPrometheusMetrics_RecordExtractionFailureCounter(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*clientipprom.PrometheusMetrics)
+		want struct {
+			Success counterObservation
+			Invalid counterObservation
+		}
+	}{
+		{
+			name: "failure only increments invalid label",
+			run: func(metrics *clientipprom.PrometheusMetrics) {
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
+			},
+			want: struct {
+				Success counterObservation
+				Invalid counterObservation
+			}{
+				Success: counterObservation{Value: 0, Found: false},
+				Invalid: counterObservation{Value: 1, Found: true},
+			},
+		},
+		{
+			name: "mixed success and failure counters are independent",
+			run: func(metrics *clientipprom.PrometheusMetrics) {
+				metrics.RecordExtractionSuccess(clientip.SourceRemoteAddr)
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
+			},
+			want: struct {
+				Success counterObservation
+				Invalid counterObservation
+			}{
+				Success: counterObservation{Value: 1, Found: true},
+				Invalid: counterObservation{Value: 2, Found: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := prom.NewRegistry()
+			metrics, err := clientipprom.NewWithRegisterer(registry)
+			if err != nil {
+				t.Fatalf("NewWithRegisterer() error = %v", err)
+			}
+
+			tt.run(metrics)
+
+			got := struct {
+				Success counterObservation
+				Invalid counterObservation
+			}{
+				Success: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"}),
+				Invalid: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "invalid"}),
+			}
+
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("counter mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestPrometheusMetrics_RecordSecurityEventCounter(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*clientipprom.PrometheusMetrics)
+		want struct {
+			InvalidIP    counterObservation
+			ChainTooLong counterObservation
+		}
+	}{
+		{
+			name: "single event increments matching label",
+			run: func(metrics *clientipprom.PrometheusMetrics) {
+				metrics.RecordSecurityEvent("invalid_ip")
+			},
+			want: struct {
+				InvalidIP    counterObservation
+				ChainTooLong counterObservation
+			}{
+				InvalidIP:    counterObservation{Value: 1, Found: true},
+				ChainTooLong: counterObservation{Value: 0, Found: false},
+			},
+		},
+		{
+			name: "different event labels stay independent",
+			run: func(metrics *clientipprom.PrometheusMetrics) {
+				metrics.RecordSecurityEvent("invalid_ip")
+				metrics.RecordSecurityEvent("chain_too_long")
+				metrics.RecordSecurityEvent("chain_too_long")
+			},
+			want: struct {
+				InvalidIP    counterObservation
+				ChainTooLong counterObservation
+			}{
+				InvalidIP:    counterObservation{Value: 1, Found: true},
+				ChainTooLong: counterObservation{Value: 2, Found: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := prom.NewRegistry()
+			metrics, err := clientipprom.NewWithRegisterer(registry)
+			if err != nil {
+				t.Fatalf("NewWithRegisterer() error = %v", err)
+			}
+
+			tt.run(metrics)
+
+			got := struct {
+				InvalidIP    counterObservation
+				ChainTooLong counterObservation
+			}{
+				InvalidIP:    observeCounterValue(t, registry, "ip_extraction_security_events_total", map[string]string{"event": "invalid_ip"}),
+				ChainTooLong: observeCounterValue(t, registry, "ip_extraction_security_events_total", map[string]string{"event": "chain_too_long"}),
+			}
+
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("security event counter mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+type failOnRegisterCall struct {
+	failAt int
+	err    error
+	calls  int
+}
+
+func (r *failOnRegisterCall) Register(prom.Collector) error {
+	r.calls++
+	if r.calls == r.failAt {
+		return r.err
+	}
+
+	return nil
+}
+
+func (r *failOnRegisterCall) MustRegister(...prom.Collector) {}
+
+func (r *failOnRegisterCall) Unregister(prom.Collector) bool {
+	return false
+}
+
+func TestNewWithRegisterer_RegisterFailureByStep(t *testing.T) {
+	baseErr := errors.New("register failed")
+
+	tests := []struct {
+		name       string
+		failAt     int
+		metricName string
+	}{
+		{name: "first metric registration fails", failAt: 1, metricName: "ip_extraction_total"},
+		{name: "second metric registration fails", failAt: 2, metricName: "ip_extraction_security_events_total"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registerer := &failOnRegisterCall{failAt: tt.failAt, err: baseErr}
+			_, err := clientipprom.NewWithRegisterer(registerer)
+
+			got := struct {
+				HasErr         bool
+				WrapsBaseError bool
+				HasMetricName  bool
+			}{
+				HasErr:         err != nil,
+				WrapsBaseError: errors.Is(err, baseErr),
+				HasMetricName:  err != nil && strings.Contains(err.Error(), tt.metricName),
+			}
+
+			want := struct {
+				HasErr         bool
+				WrapsBaseError bool
+				HasMetricName  bool
+			}{
+				HasErr:         true,
+				WrapsBaseError: true,
+				HasMetricName:  true,
+			}
+
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("error result mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -258,10 +453,41 @@ func TestWithRegisterer_OptionError(t *testing.T) {
 	}
 }
 
-func counterValue(registry *prom.Registry, metricName string, labels map[string]string) float64 {
+type counterObservation struct {
+	Value float64
+	Found bool
+}
+
+func observeCounterValue(t testing.TB, registry *prom.Registry, metricName string, labels map[string]string) counterObservation {
+	t.Helper()
+
+	value, found, err := lookupCounterValue(registry, metricName, labels)
+	if err != nil {
+		t.Fatalf("lookupCounterValue(%q, %v) error = %v", metricName, labels, err)
+	}
+
+	return counterObservation{Value: value, Found: found}
+}
+
+func mustCounterValue(t testing.TB, registry *prom.Registry, metricName string, labels map[string]string) float64 {
+	t.Helper()
+
+	value, found, err := lookupCounterValue(registry, metricName, labels)
+	if err != nil {
+		t.Fatalf("lookupCounterValue(%q, %v) error = %v", metricName, labels, err)
+	}
+
+	if !found {
+		t.Fatalf("counter %q with labels %v not found", metricName, labels)
+	}
+
+	return value
+}
+
+func lookupCounterValue(registry *prom.Registry, metricName string, labels map[string]string) (float64, bool, error) {
 	metricFamilies, err := registry.Gather()
 	if err != nil {
-		return 0
+		return 0, false, err
 	}
 
 	for _, family := range metricFamilies {
@@ -279,13 +505,13 @@ func counterValue(registry *prom.Registry, metricName string, labels map[string]
 				continue
 			}
 			if metric.GetCounter() == nil {
-				return 0
+				return 0, false, fmt.Errorf("metric %q with labels %v is not a counter", metricName, labels)
 			}
-			return metric.GetCounter().GetValue()
+			return metric.GetCounter().GetValue(), true, nil
 		}
 	}
 
-	return 0
+	return 0, false, nil
 }
 
 func labelsMatch(metricLabels, labels map[string]string) bool {
