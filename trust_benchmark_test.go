@@ -77,7 +77,7 @@ func BenchmarkChainAnalysisRightmost(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, err := analyzeChainRightmost(parts, policy, true)
+		_, _, err := analyzeChainRightmost(parts, policy, true, parseIP)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func BenchmarkChainAnalysisLeftmost(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, err := analyzeChainLeftmost(parts, policy, true)
+		_, _, err := analyzeChainLeftmost(parts, policy, true, parseIP)
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -16,24 +16,40 @@ func normalizeIP(ip netip.Addr) netip.Addr {
 }
 
 // parseChainIP parses an IP from a chain value that has already been
-// extracted and trimmed by a header parser (XFF, Forwarded).
-// It handles plain IPs and the [ip]:port format from Forwarded headers,
-// but skips the quote-stripping and fallback paths of parseIP.
+// extracted and trimmed by a header parser.
+//
+// This is intentionally stricter than parseIP: it accepts bare IPs,
+// bracketed IPs, and bracketed IPs with a numeric port suffix only.
 func parseChainIP(s string) netip.Addr {
 	ip, err := netip.ParseAddr(s)
 	if err == nil {
 		return ip
 	}
 
-	// Handle [ip]:port from Forwarded header values.
-	// Extract the content between [ and ] without importing net.
-	if len(s) > 2 && s[0] == '[' {
-		if end := strings.IndexByte(s, ']'); end > 1 {
-			ip, err = netip.ParseAddr(s[1:end])
-			if err == nil {
-				return ip
+	if len(s) < 2 || s[0] != '[' {
+		return netip.Addr{}
+	}
+
+	end := strings.IndexByte(s, ']')
+	if end <= 1 {
+		return netip.Addr{}
+	}
+
+	rest := s[end+1:]
+	if len(rest) > 0 {
+		if rest[0] != ':' || len(rest) == 1 {
+			return netip.Addr{}
+		}
+		for i := 1; i < len(rest); i++ {
+			if rest[i] < '0' || rest[i] > '9' {
+				return netip.Addr{}
 			}
 		}
+	}
+
+	ip, err = netip.ParseAddr(s[1:end])
+	if err == nil {
+		return ip
 	}
 
 	return netip.Addr{}

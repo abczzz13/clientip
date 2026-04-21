@@ -105,6 +105,44 @@ func Test_parseRemoteAddr(t *testing.T) {
 	}
 }
 
+func TestParseChainIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    netip.Addr
+		wantErr bool
+	}{
+		{name: "bare ipv4", input: "203.0.113.1", want: netip.MustParseAddr("203.0.113.1")},
+		{name: "bracketed ipv6", input: "[2001:db8::1]", want: netip.MustParseAddr("2001:db8::1")},
+		{name: "bracketed ipv6 with port", input: "[2001:db8::1]:443", want: netip.MustParseAddr("2001:db8::1")},
+		{name: "xff style host port rejected", input: "203.0.113.1:443", wantErr: true},
+		{name: "quoted value rejected", input: `"203.0.113.1"`, wantErr: true},
+		{name: "trailing junk rejected", input: "[2001:db8::1]junk", wantErr: true},
+		{name: "non numeric port rejected", input: "[2001:db8::1]:https", wantErr: true},
+		{name: "missing port digits rejected", input: "[2001:db8::1]:", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseChainIP(tt.input)
+			if tt.wantErr {
+				if got.IsValid() {
+					t.Errorf("parseChainIP(%q) = %v, want invalid", tt.input, got)
+				}
+				return
+			}
+
+			if !got.IsValid() {
+				t.Errorf("parseChainIP(%q) = invalid, want %v", tt.input, tt.want)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("parseChainIP(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeIP(t *testing.T) {
 	tests := []struct {
 		name  string

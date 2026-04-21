@@ -76,8 +76,9 @@ func TestChainExtractor_SingleValidValue(t *testing.T) {
 func TestChainExtractor_ChainWithTrustedProxies(t *testing.T) {
 	trustedCIDR := netip.MustParsePrefix("10.0.0.0/8")
 	ext := chainExtractor{policy: chainPolicy{
-		headerName:  "X-Forwarded-For",
-		parseValues: simpleXFFParse,
+		headerName:    "X-Forwarded-For",
+		parseValues:   simpleXFFParse,
+		parseClientIP: parseIP,
 		trustedProxy: proxyPolicy{
 			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
 			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
@@ -107,6 +108,72 @@ func TestChainExtractor_ChainWithTrustedProxies(t *testing.T) {
 	}
 	if result.TrustedProxyCount != 2 {
 		t.Errorf("TrustedProxyCount = %d, want 2", result.TrustedProxyCount)
+	}
+}
+
+func TestChainExtractor_XFFAllowsHostPortAndQuotedValues(t *testing.T) {
+	trustedCIDR := netip.MustParsePrefix("10.0.0.0/8")
+	ext := chainExtractor{policy: chainPolicy{
+		headerName:    "X-Forwarded-For",
+		parseValues:   simpleXFFParse,
+		parseClientIP: parseIP,
+		trustedProxy: proxyPolicy{
+			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
+			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
+		},
+		selection: RightmostUntrustedIP,
+	}}
+
+	req := requestView{
+		remoteAddrValue: "10.0.0.3:8080",
+		headerMap: map[string][]string{
+			"X-Forwarded-For": {`"8.8.8.8", 10.0.0.1:8443, 10.0.0.2:8443`},
+		},
+	}
+
+	result, failure, err := ext.extract(req, SourceXForwardedFor)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if result.IP != netip.MustParseAddr("8.8.8.8") {
+		t.Fatalf("IP = %v, want 8.8.8.8", result.IP)
+	}
+	if result.TrustedProxyCount != 2 {
+		t.Fatalf("TrustedProxyCount = %d, want 2", result.TrustedProxyCount)
+	}
+}
+
+func TestChainExtractor_ForwardedRejectsBracketedTrailingJunk(t *testing.T) {
+	ext := chainExtractor{policy: chainPolicy{
+		headerName:    "Forwarded",
+		parseClientIP: parseChainIP,
+		parseValues: func(values []string) ([]string, error) {
+			return parseForwardedValues(values, 8)
+		},
+		selection: RightmostUntrustedIP,
+	}}
+
+	req := requestView{
+		headerMap: map[string][]string{
+			"Forwarded": {"for=[2001:db8::1]junk"},
+		},
+	}
+
+	_, failure, err := ext.extract(req, SourceForwarded)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if failure == nil {
+		t.Fatal("expected invalid client IP failure")
+	}
+	if failure.kind != failureInvalidClientIP {
+		t.Fatalf("failure.kind = %v, want failureInvalidClientIP", failure.kind)
+	}
+	if failure.extractedIP != "[2001:db8::1]junk" {
+		t.Fatalf("failure.extractedIP = %q, want %q", failure.extractedIP, "[2001:db8::1]junk")
 	}
 }
 

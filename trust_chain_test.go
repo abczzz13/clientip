@@ -63,7 +63,7 @@ func TestAnalyzeChainRightmostNoCIDRs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			analysis, _, err := analyzeChainRightmost(tt.parts, proxyPolicy{MaxTrustedProxies: tt.maxTrustedProxies}, true)
+			analysis, _, err := analyzeChainRightmost(tt.parts, proxyPolicy{MaxTrustedProxies: tt.maxTrustedProxies}, true, parseIP)
 			if err != nil {
 				t.Fatalf("analyzeChainRightmost() error = %v", err)
 			}
@@ -107,7 +107,7 @@ func TestAnalyzeChainRightmostWithCIDRs(t *testing.T) {
 			active.MinTrustedProxies = tt.minProxies
 			active.MaxTrustedProxies = tt.maxProxies
 
-			analysis, _, err := analyzeChainRightmost(tt.parts, active, true)
+			analysis, _, err := analyzeChainRightmost(tt.parts, active, true, parseIP)
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("analyzeChainRightmost() error = %v, want nil", err)
@@ -164,7 +164,7 @@ func TestAnalyzeChainLeftmostWithCIDRs(t *testing.T) {
 			active.MinTrustedProxies = tt.minProxies
 			active.MaxTrustedProxies = tt.maxProxies
 
-			analysis, _, err := analyzeChainLeftmost(tt.parts, active, true)
+			analysis, _, err := analyzeChainLeftmost(tt.parts, active, true, parseIP)
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("analyzeChainLeftmost() error = %v, want nil", err)

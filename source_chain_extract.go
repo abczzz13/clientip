@@ -8,6 +8,7 @@ import (
 type chainPolicy struct {
 	headerName        string
 	parseValues       func([]string) ([]string, error)
+	parseClientIP     func(string) netip.Addr
 	clientIP          clientIPPolicy
 	trustedProxy      proxyPolicy
 	selection         ChainSelection
@@ -90,11 +91,16 @@ func (e chainExtractor) extract(req requestView, source Source) (Extraction, *ex
 }
 
 func (e chainExtractor) analyzeChain(parts []string) (chainAnalysis, netip.Addr, error) {
-	if e.policy.selection == LeftmostUntrustedIP {
-		return analyzeChainLeftmost(parts, e.policy.trustedProxy, e.policy.collectDebugInfo)
+	parseClientIP := e.policy.parseClientIP
+	if parseClientIP == nil {
+		parseClientIP = parseIP
 	}
 
-	return analyzeChainRightmost(parts, e.policy.trustedProxy, e.policy.collectDebugInfo)
+	if e.policy.selection == LeftmostUntrustedIP {
+		return analyzeChainLeftmost(parts, e.policy.trustedProxy, e.policy.collectDebugInfo, parseClientIP)
+	}
+
+	return analyzeChainRightmost(parts, e.policy.trustedProxy, e.policy.collectDebugInfo, parseClientIP)
 }
 
 func (e chainExtractor) chainSeparator() string {

@@ -51,7 +51,7 @@ func validateProxyCountPolicy(trustedCount int, policy proxyPolicy) error {
 	return nil
 }
 
-func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedIndices bool) (chainAnalysis, netip.Addr, error) {
+func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedIndices bool, parseClientIP func(string) netip.Addr) (chainAnalysis, netip.Addr, error) {
 	trustedCount := 0
 	clientIndex := 0
 	clientIP := netip.Addr{}
@@ -66,11 +66,11 @@ func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedInd
 	for i := len(parts) - 1; i >= 0; i-- {
 		if !hasCIDRs && policy.MaxTrustedProxies > 0 && trustedCount >= policy.MaxTrustedProxies {
 			clientIndex = i
-			clientIP = parseChainIP(parts[i])
+			clientIP = parseClientIP(parts[i])
 			break
 		}
 
-		ip := parseChainIP(parts[i])
+		ip := parseClientIP(parts[i])
 
 		if hasCIDRs && !isTrustedProxy(ip, policy.TrustedProxyMatch, policy.TrustedProxyCIDRs) {
 			clientIndex = i
@@ -98,10 +98,10 @@ func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedInd
 	return analysis, clientIP, nil
 }
 
-func analyzeChainLeftmost(parts []string, policy proxyPolicy, collectTrustedIndices bool) (chainAnalysis, netip.Addr, error) {
+func analyzeChainLeftmost(parts []string, policy proxyPolicy, collectTrustedIndices bool, parseClientIP func(string) netip.Addr) (chainAnalysis, netip.Addr, error) {
 	if len(policy.TrustedProxyCIDRs) == 0 {
 		analysis := chainAnalysis{ClientIndex: 0, TrustedCount: 0}
-		return analysis, parseIP(parts[0]), nil
+		return analysis, parseClientIP(parts[0]), nil
 	}
 
 	trustedCount := 0
@@ -121,7 +121,7 @@ func analyzeChainLeftmost(parts []string, policy proxyPolicy, collectTrustedIndi
 	stillTrailingTrusted := true
 
 	for i := len(parts) - 1; i >= 0; i-- {
-		ip := parseChainIP(parts[i])
+		ip := parseClientIP(parts[i])
 		trusted := isTrustedProxy(ip, policy.TrustedProxyMatch, policy.TrustedProxyCIDRs)
 
 		if stillTrailingTrusted && trusted {
@@ -166,5 +166,5 @@ func analyzeChainLeftmost(parts []string, policy proxyPolicy, collectTrustedIndi
 	}
 
 	analysis.ClientIndex = 0
-	return analysis, parseChainIP(parts[analysis.ClientIndex]), nil
+	return analysis, parseClientIP(parts[analysis.ClientIndex]), nil
 }

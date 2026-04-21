@@ -64,6 +64,7 @@ func (e *Extractor) compileExecutor(spec sourceSpec, configuredSource Source) so
 				}
 				return parts, nil
 			},
+			parseClientIP:     parseChainIP,
 			clientIP:          e.clientIP,
 			trustedProxy:      e.proxy,
 			selection:         e.config.chainSelection,
@@ -105,6 +106,7 @@ func (e *Extractor) compileExecutor(spec sourceSpec, configuredSource Source) so
 				}
 				return parts, nil
 			},
+			parseClientIP:     parseIP,
 			clientIP:          e.clientIP,
 			trustedProxy:      e.proxy,
 			selection:         e.config.chainSelection,
