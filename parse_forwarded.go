@@ -14,7 +14,7 @@ func parseForwardedValues(values []string, maxChainLength int) ([]string, error)
 	parts := make([]string, 0, chainPartsCapacity(values, maxChainLength))
 
 	for _, value := range values {
-		err := scanForwardedSegments(value, ',', func(element string) error {
+		err := scanForwardedSegments(value, ',', "element", func(element string) error {
 			forwardedFor, hasFor, parseErr := parseForwardedElement(element)
 			if parseErr != nil {
 				return parseErr
@@ -47,7 +47,7 @@ func parseForwardedValues(values []string, maxChainLength int) ([]string, error)
 }
 
 func parseForwardedElement(element string) (forwardedFor string, hasFor bool, err error) {
-	err = scanForwardedSegments(element, ';', func(param string) error {
+	err = scanForwardedSegments(element, ';', "parameter", func(param string) error {
 		eq := strings.IndexByte(param, '=')
 		if eq <= 0 {
 			return fmt.Errorf("invalid forwarded parameter %q", param)
@@ -86,7 +86,7 @@ func parseForwardedElement(element string) (forwardedFor string, hasFor bool, er
 	return forwardedFor, hasFor, nil
 }
 
-func scanForwardedSegments(value string, delimiter byte, onSegment func(string) error) error {
+func scanForwardedSegments(value string, delimiter byte, segmentKind string, onSegment func(string) error) error {
 	start := 0
 	inQuotes := false
 	escaped := false
@@ -123,10 +123,11 @@ func scanForwardedSegments(value string, delimiter byte, onSegment func(string) 
 		}
 
 		segment := strings.TrimSpace(value[start:i])
-		if segment != "" {
-			if err := onSegment(segment); err != nil {
-				return err
-			}
+		if segment == "" {
+			return fmt.Errorf("empty forwarded %s in %q", segmentKind, value)
+		}
+		if err := onSegment(segment); err != nil {
+			return err
 		}
 
 		start = i + 1

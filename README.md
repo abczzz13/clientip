@@ -281,6 +281,8 @@ case clientip.ResultUnknown:
 
 `ResultUnknown` covers non-nil errors outside the package's standard extraction and resolution categories.
 
+`ErrInvalidForwardedHeader` covers malformed RFC7239 syntax, including present-but-empty `Forwarded` values and empty elements or parameters introduced by stray delimiters. In strict extraction, malformed `Forwarded` remains terminal and does not fall through to a lower-priority source.
+
 Typed chain-related errors expose additional context:
 
 - `ProxyValidationError`: `Chain`, `TrustedProxyCount`, `MinTrustedProxies`, `MaxTrustedProxies`

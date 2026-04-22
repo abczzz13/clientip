@@ -522,22 +522,36 @@ func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
 
-	req := &http.Request{
-		RemoteAddr: "1.1.1.1:8080",
-		Header:     make(http.Header),
+	tests := []struct {
+		name      string
+		forwarded string
+	}{
+		{name: "unterminated quoted value", forwarded: "for=\"1.1.1.1"},
+		{name: "empty header value", forwarded: ""},
+		{name: "empty element between commas", forwarded: "for=1.1.1.1,, for=8.8.8.8"},
+		{name: "empty parameter between semicolons", forwarded: "for=1.1.1.1;;proto=https"},
 	}
-	req.Header.Set("Forwarded", "for=\"1.1.1.1")
-	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
-	result, err := extractor.Extract(req)
-	if err == nil && result.IP.IsValid() {
-		t.Fatal("expected extraction to fail closed on malformed Forwarded")
-	}
-	if !errors.Is(err, ErrInvalidForwardedHeader) {
-		t.Fatalf("error = %v, want ErrInvalidForwardedHeader", err)
-	}
-	if result.Source != SourceForwarded {
-		t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				RemoteAddr: "1.1.1.1:8080",
+				Header:     make(http.Header),
+			}
+			req.Header.Set("Forwarded", tt.forwarded)
+			req.Header.Set("X-Forwarded-For", "8.8.8.8")
+
+			result, err := extractor.Extract(req)
+			if err == nil && result.IP.IsValid() {
+				t.Fatal("expected extraction to fail closed on malformed Forwarded")
+			}
+			if !errors.Is(err, ErrInvalidForwardedHeader) {
+				t.Fatalf("error = %v, want ErrInvalidForwardedHeader", err)
+			}
+			if result.Source != SourceForwarded {
+				t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
+			}
+		})
 	}
 }
 

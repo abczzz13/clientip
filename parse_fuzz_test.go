@@ -85,7 +85,7 @@ func FuzzParseXFFValues_ErrorShapeAndOutput(f *testing.F) {
 }
 
 func FuzzParseForwardedValues_ErrorShapeAndOutput(f *testing.F) {
-	for _, seed := range []string{"for=1.1.1.1", "for=1.1.1.1, for=8.8.8.8", "for=1.1.1.1;proto=https", `for="[2606:4700:4700::1]:443"`, `for="1.1.1.1\"edge"`, "for", `for="unterminated`, ""} {
+	for _, seed := range []string{"for=1.1.1.1", "for=1.1.1.1, for=8.8.8.8", "for=1.1.1.1;proto=https", `for="[2606:4700:4700::1]:443"`, `for="1.1.1.1\"edge"`, "for", `for="unterminated`, "", "   ", ",for=1.1.1.1", "for=1.1.1.1,", "for=1.1.1.1,,for=8.8.8.8", ";for=1.1.1.1", "for=1.1.1.1;", "for=1.1.1.1;;proto=https"} {
 		f.Add(seed)
 	}
 

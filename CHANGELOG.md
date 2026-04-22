@@ -27,6 +27,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **BREAKING:** `SourceStaticFallback` remains public but is resolver-result-only; it cannot be used in `Config.Sources`.
 - Presets remain `Config` helpers and now document resolver-oriented usage more clearly.
 - Prometheus integration is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`.
+- `X-Forwarded-For` chain extraction again accepts the host:port and quoted forms already supported by `parseIP`, while `Forwarded` stays strict and now rejects present-but-empty values plus empty delimiter-created elements/parameters as malformed.
 - Internal orchestration now sits behind `internal/engine` and concrete source execution behind `internal/source`.
 
 ### Removed

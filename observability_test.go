@@ -39,6 +39,13 @@ func (l *capturedLogger) snapshot() []capturedLogEntry {
 	return entries
 }
 
+func (l *capturedLogger) clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.entries = nil
+}
+
 func attrsToMap(args []any) map[string]any {
 	attrs := make(map[string]any)
 	for i := 0; i+1 < len(args); i += 2 {
@@ -364,27 +371,43 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
 
-	req := newTestRequest("1.1.1.1:8080", "/test/malformed-forwarded")
-	req.Header.Set("Forwarded", "for=\"1.1.1.1")
-
-	result, err := extractor.Extract(req)
-	if err == nil && result.IP.IsValid() {
-		t.Fatal("expected extraction to fail closed on malformed Forwarded")
-	}
-	if !errors.Is(err, ErrInvalidForwardedHeader) {
-		t.Fatalf("error = %v, want ErrInvalidForwardedHeader", err)
-	}
-	if result.Source != SourceForwarded {
-		t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
+	tests := []struct {
+		name      string
+		forwarded string
+		path      string
+	}{
+		{name: "unterminated quoted value", forwarded: "for=\"1.1.1.1", path: "/test/malformed-forwarded/unterminated"},
+		{name: "empty header value", forwarded: "", path: "/test/malformed-forwarded/empty"},
+		{name: "empty element between commas", forwarded: "for=1.1.1.1,, for=8.8.8.8", path: "/test/malformed-forwarded/empty-element"},
 	}
 
-	entries := logger.snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("logged entries = %d, want 1", len(entries))
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger.clear()
 
-	entry := entries[0]
-	assertCommonSecurityWarningAttrs(t, entry.attrs, SecurityEventMalformedForwarded, SourceForwarded, "/test/malformed-forwarded", "1.1.1.1:8080")
+			req := newTestRequest("1.1.1.1:8080", tt.path)
+			req.Header.Set("Forwarded", tt.forwarded)
+
+			result, err := extractor.Extract(req)
+			if err == nil && result.IP.IsValid() {
+				t.Fatal("expected extraction to fail closed on malformed Forwarded")
+			}
+			if !errors.Is(err, ErrInvalidForwardedHeader) {
+				t.Fatalf("error = %v, want ErrInvalidForwardedHeader", err)
+			}
+			if result.Source != SourceForwarded {
+				t.Fatalf("source = %q, want %q", result.Source, SourceForwarded)
+			}
+
+			entries := logger.snapshot()
+			if len(entries) != 1 {
+				t.Fatalf("logged entries = %d, want 1", len(entries))
+			}
+
+			entry := entries[0]
+			assertCommonSecurityWarningAttrs(t, entry.attrs, SecurityEventMalformedForwarded, SourceForwarded, tt.path, "1.1.1.1:8080")
+		})
+	}
 }
 
 func TestExtractInput_UsesInputContextAndPathInLogs(t *testing.T) {
