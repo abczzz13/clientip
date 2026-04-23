@@ -4,169 +4,57 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/textproto"
 )
 
-func (e *Extractor) buildSourceChain(cfg *config) sourceExtractor {
-	sources := make([]sourceExtractor, 0, len(cfg.sourcePriority))
-	for _, configuredSource := range cfg.sourcePriority {
-		spec := compileSpecFromSource(configuredSource)
-		executor := e.compileExecutor(spec, configuredSource)
-		sources = append(sources, compileSource(spec, executor))
+func (e *Extractor) extractChainSource(
+	r requestView,
+	source *configuredSource,
+	chainTooLongMessage string,
+	untrustedProxyMessage string,
+	handleParseError func(error),
+) (Extraction, error) {
+	result, failure, err := source.chain.extract(r, source.source)
+	if err != nil {
+		e.handleChainError(r, source.source, err, chainTooLongMessage, handleParseError)
+		return Extraction{}, err
+	}
+	if failure != nil {
+		if failure.kind == failureSourceUnavailable {
+			return Extraction{}, source.unavailableErr
+		}
+		return Extraction{}, e.adaptChainFailure(r, source.source, failure, untrustedProxyMessage)
 	}
 
-	if len(sources) == 1 {
-		return sources[0]
-	}
-
-	return newChainedSource(sourceIsTerminalError, sources...)
+	e.config.metrics.RecordExtractionSuccess(source.name)
+	return result, nil
 }
 
-func compileSpecFromSource(source Source) sourceSpec {
-	source = canonicalSource(source)
-	spec := sourceSpec{source: source}
-
-	switch source.kind {
-	case sourceForwarded:
-		spec.kind = sourceExtractorKindForwarded
-		spec.headerName = "Forwarded"
-	case sourceXForwardedFor:
-		spec.kind = sourceExtractorKindXForwardedFor
-		spec.headerName = "X-Forwarded-For"
-	case sourceRemoteAddr:
-		spec.kind = sourceExtractorKindRemoteAddr
-	default:
-		spec.kind = sourceExtractorKindSingleHeader
-		headerName, _ := source.headerKey()
-		spec.headerName = textproto.CanonicalMIMEHeaderKey(headerName)
+func (e *Extractor) extractSingleHeaderSource(r requestView, source *configuredSource) (Extraction, error) {
+	result, failure := source.single.extract(r, source.source)
+	if failure != nil {
+		if failure.kind == failureSourceUnavailable {
+			return Extraction{}, source.unavailableErr
+		}
+		return Extraction{}, e.adaptSingleHeaderFailure(r, source.source, failure)
 	}
 
-	return spec
+	e.config.metrics.RecordExtractionSuccess(source.name)
+	return result, nil
 }
 
-func (e *Extractor) compileExecutor(spec sourceSpec, configuredSource Source) sourceExecuteFunc {
-	source := canonicalSource(configuredSource)
-	// Pre-compute source name string once to avoid per-call allocations
-	// from normalizeSourceName (strings.ToLower + ReplaceAll).
-	sourceName := source.String()
-	// Pre-allocate the source-unavailable error once per source to avoid
-	// allocating on every fallback miss in multi-source chains.
-	sourceUnavailableErr := &ExtractionError{Err: ErrSourceUnavailable, Source: source}
-
-	switch spec.kind {
-	case sourceExtractorKindForwarded:
-		ce := chainExtractor{policy: chainPolicy{
-			headerName: "Forwarded",
-			parseValues: func(values []string) ([]string, error) {
-				parts, err := parseForwardedValues(values, e.config.maxChainLength)
-				if err != nil {
-					return nil, adaptForwardedParseError(err, source, e)
-				}
-				return parts, nil
-			},
-			parseClientIP:     parseChainIP,
-			clientIP:          e.clientIP,
-			trustedProxy:      e.proxy,
-			selection:         e.config.chainSelection,
-			collectDebugInfo:  e.config.debugMode,
-			untrustedChainSep: ", ",
-		}}
-		return func(r requestView, _ sourceSpec) (Extraction, error) {
-			result, failure, err := ce.extract(r, source)
-			if err != nil {
-				e.handleChainError(r, source, err,
-					"Forwarded chain exceeds configured maximum length",
-					func(err error) {
-						if !errors.Is(err, ErrInvalidForwardedHeader) {
-							return
-						}
-						e.config.metrics.RecordSecurityEvent(SecurityEventMalformedForwarded)
-						e.logSecurityWarning(r, source, SecurityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
-					},
-				)
-				return Extraction{}, err
-			}
-			if failure != nil {
-				if failure.kind == failureSourceUnavailable {
-					return Extraction{}, sourceUnavailableErr
-				}
-				return Extraction{}, e.adaptChainFailure(r, source, failure, "request received from untrusted proxy while Forwarded is present")
-			}
-			e.config.metrics.RecordExtractionSuccess(sourceName)
-			return result, nil
+func (e *Extractor) extractRemoteAddrSource(r requestView, source *configuredSource) (Extraction, error) {
+	result, failure := source.remote.extract(r.remoteAddr(), source.source)
+	if failure != nil {
+		if failure.kind == failureSourceUnavailable {
+			return Extraction{}, source.unavailableErr
 		}
-
-	case sourceExtractorKindXForwardedFor:
-		ce := chainExtractor{policy: chainPolicy{
-			headerName: "X-Forwarded-For",
-			parseValues: func(values []string) ([]string, error) {
-				parts, err := parseXFFValues(values, e.config.maxChainLength)
-				if err != nil {
-					return nil, adaptXFFParseError(err, source, e)
-				}
-				return parts, nil
-			},
-			parseClientIP:     parseIP,
-			clientIP:          e.clientIP,
-			trustedProxy:      e.proxy,
-			selection:         e.config.chainSelection,
-			collectDebugInfo:  e.config.debugMode,
-			untrustedChainSep: ", ",
-		}}
-		return func(r requestView, _ sourceSpec) (Extraction, error) {
-			result, failure, err := ce.extract(r, source)
-			if err != nil {
-				e.handleChainError(r, source, err,
-					"X-Forwarded-For chain exceeds configured maximum length",
-					nil,
-				)
-				return Extraction{}, err
-			}
-			if failure != nil {
-				if failure.kind == failureSourceUnavailable {
-					return Extraction{}, sourceUnavailableErr
-				}
-				return Extraction{}, e.adaptChainFailure(r, source, failure, "request received from untrusted proxy while X-Forwarded-For is present")
-			}
-			e.config.metrics.RecordExtractionSuccess(sourceName)
-			return result, nil
-		}
-
-	case sourceExtractorKindRemoteAddr:
-		re := remoteAddrExtractor{clientIPPolicy: e.clientIP}
-		return func(r requestView, _ sourceSpec) (Extraction, error) {
-			result, failure := re.extract(r.remoteAddr(), source)
-			if failure != nil {
-				if failure.kind == failureSourceUnavailable {
-					return Extraction{}, sourceUnavailableErr
-				}
-				e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
-				e.config.metrics.RecordExtractionFailure(sourceName)
-				return Extraction{}, adaptRemoteAddrFailure(failure, source)
-			}
-			e.config.metrics.RecordExtractionSuccess(sourceName)
-			return result, nil
-		}
-
-	default:
-		headerName := spec.headerName
-		she := singleHeaderExtractor{policy: singleHeaderPolicy{
-			headerName:   headerName,
-			clientIP:     e.clientIP,
-			trustedProxy: e.proxy,
-		}}
-		return func(r requestView, _ sourceSpec) (Extraction, error) {
-			result, failure := she.extract(r, source)
-			if failure != nil {
-				if failure.kind == failureSourceUnavailable {
-					return Extraction{}, sourceUnavailableErr
-				}
-				return Extraction{}, e.adaptSingleHeaderFailure(r, source, failure)
-			}
-			e.config.metrics.RecordExtractionSuccess(sourceName)
-			return result, nil
-		}
+		e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
+		e.config.metrics.RecordExtractionFailure(source.name)
+		return Extraction{}, adaptRemoteAddrFailure(failure, source.source)
 	}
+
+	e.config.metrics.RecordExtractionSuccess(source.name)
+	return result, nil
 }
 
 func sourceIsTerminalError(err error) bool {

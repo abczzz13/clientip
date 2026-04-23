@@ -14,15 +14,14 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-type countingResolverSource struct {
-	calls      int
-	result     Extraction
-	err        error
-	extractFn  func(requestView) (Extraction, error)
-	sourceName Source
+type countingResolverExtractor struct {
+	calls     int
+	result    Extraction
+	err       error
+	extractFn func(requestView) (Extraction, error)
 }
 
-func (s *countingResolverSource) extract(req requestView) (Extraction, error) {
+func (s *countingResolverExtractor) extract(req requestView) (Extraction, error) {
 	s.calls++
 	if s.extractFn != nil {
 		return s.extractFn(req)
@@ -31,28 +30,13 @@ func (s *countingResolverSource) extract(req requestView) (Extraction, error) {
 	return s.result, s.err
 }
 
-func (s *countingResolverSource) name() string {
-	return "counting"
-}
-
-func (s *countingResolverSource) sourceInfo() Source {
-	if s.sourceName.valid() {
-		return s.sourceName
-	}
-	if s.result.Source.valid() {
-		return s.result.Source
-	}
-
-	return SourceRemoteAddr
-}
-
-func newResolverTestExtractor(source sourceExtractor) *Extractor {
+func newResolverTestExtractor(source *countingResolverExtractor) *Extractor {
 	return &Extractor{
 		config: &config{
 			sourcePriority:   []Source{HeaderSource("X-Test-IP")},
 			sourceHeaderKeys: []string{"X-Test-IP"},
 		},
-		source: source,
+		extractViewFunc: source.extract,
 	}
 }
 
@@ -68,7 +52,7 @@ func mustNewResolver(t *testing.T, extractor *Extractor, config ResolverConfig) 
 }
 
 func TestNewResolver_InvalidConfig(t *testing.T) {
-	extractor := newResolverTestExtractor(&countingResolverSource{})
+	extractor := newResolverTestExtractor(&countingResolverExtractor{})
 
 	tests := []struct {
 		name        string
@@ -116,7 +100,7 @@ func TestNewResolver_InvalidConfig(t *testing.T) {
 }
 
 func TestResolver_ResolveStrict_CachesSuccess(t *testing.T) {
-	source := &countingResolverSource{
+	source := &countingResolverExtractor{
 		result: Extraction{IP: netip.MustParseAddr("8.8.8.8"), Source: SourceXRealIP},
 	}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})
@@ -158,7 +142,7 @@ func TestResolver_ResolveStrict_CachesSuccess(t *testing.T) {
 
 func TestResolver_ResolveStrict_CachesFailure(t *testing.T) {
 	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverSource{err: strictErr}
+	source := &countingResolverExtractor{err: strictErr}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})
 
 	req := &http.Request{RemoteAddr: "203.0.113.10:443", Header: make(http.Header)}
@@ -191,7 +175,7 @@ func TestResolver_ResolveStrict_CachesFailure(t *testing.T) {
 }
 
 func TestResolver_ResolvePreferred_ReusesStrictCachedResult(t *testing.T) {
-	source := &countingResolverSource{
+	source := &countingResolverExtractor{
 		result: Extraction{IP: netip.MustParseAddr("8.8.8.8"), Source: SourceXRealIP},
 	}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{PreferredFallback: PreferredFallbackRemoteAddr})
@@ -221,7 +205,7 @@ func TestResolver_ResolvePreferred_ReusesStrictCachedResult(t *testing.T) {
 
 func TestResolver_ResolvePreferred_ParseRemoteAddrFallback(t *testing.T) {
 	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverSource{err: strictErr}
+	source := &countingResolverExtractor{err: strictErr}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{PreferredFallback: PreferredFallbackRemoteAddr})
 
 	req := &http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}
@@ -262,7 +246,7 @@ func TestResolver_ResolvePreferred_ParseRemoteAddrFallback(t *testing.T) {
 
 func TestResolver_ResolvePreferred_StaticFallback(t *testing.T) {
 	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverSource{err: strictErr}
+	source := &countingResolverExtractor{err: strictErr}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{
 		PreferredFallback: PreferredFallbackStaticIP,
 		StaticFallbackIP:  netip.MustParseAddr("0.0.0.0"),
@@ -297,7 +281,7 @@ func TestResolver_ResolvePreferred_StaticFallback(t *testing.T) {
 }
 
 func TestResolver_ResolvePreferred_DoesNotFallbackOnCanceledOrDeadline(t *testing.T) {
-	resolver := mustNewResolver(t, newResolverTestExtractor(&countingResolverSource{
+	resolver := mustNewResolver(t, newResolverTestExtractor(&countingResolverExtractor{
 		extractFn: func(req requestView) (Extraction, error) {
 			return Extraction{}, req.context().Err()
 		},
@@ -360,7 +344,7 @@ func TestResolver_ResolvePreferred_DoesNotFallbackOnCanceledOrDeadline(t *testin
 }
 
 func TestResolver_ResolveInputStrict_CachesSuccess(t *testing.T) {
-	source := &countingResolverSource{
+	source := &countingResolverExtractor{
 		result: Extraction{IP: netip.MustParseAddr("2001:db8::1"), Source: SourceXRealIP},
 	}
 	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})

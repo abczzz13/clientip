@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 )
 
 // Extractor resolves client IP information from HTTP requests and
@@ -12,10 +13,20 @@ import (
 //
 // Extractor instances are safe for concurrent reuse.
 type Extractor struct {
-	config   *config
-	source   sourceExtractor
-	clientIP clientIPPolicy
-	proxy    proxyPolicy
+	config          *config
+	sources         []configuredSource
+	clientIP        clientIPPolicy
+	proxy           proxyPolicy
+	extractViewFunc func(requestView) (Extraction, error)
+}
+
+type configuredSource struct {
+	source         Source
+	name           string
+	unavailableErr *ExtractionError
+	chain          chainExtractor
+	single         singleHeaderExtractor
+	remote         remoteAddrExtractor
 }
 
 // New creates an Extractor from a Config.
@@ -38,7 +49,7 @@ func New(public Config) (*Extractor, error) {
 			MaxTrustedProxies: cfg.maxTrustedProxies,
 		},
 	}
-	extractor.source = extractor.buildSourceChain(cfg)
+	extractor.sources = extractor.buildConfiguredSources(cfg.sourcePriority)
 
 	return extractor, nil
 }
@@ -56,7 +67,7 @@ func (e *Extractor) Extract(r *http.Request) (Extraction, error) {
 		return e.extractFromRemoteAddr(r.RemoteAddr)
 	}
 
-	return e.extractWithSource(e.source, requestViewFromRequest(r))
+	return e.extractRequestView(requestViewFromRequest(r))
 }
 
 // ExtractAddr resolves only the client IP address.
@@ -81,7 +92,7 @@ func (e *Extractor) ExtractInput(input Input) (Extraction, error) {
 		return e.extractFromRemoteAddr(input.RemoteAddr)
 	}
 
-	return e.extractWithSource(e.source, requestViewFromInput(input))
+	return e.extractRequestView(requestViewFromInput(input))
 }
 
 // ExtractInputAddr resolves only the client IP address from framework-agnostic
@@ -95,22 +106,80 @@ func (e *Extractor) ExtractInputAddr(input Input) (netip.Addr, error) {
 	return extraction.IP, nil
 }
 
-func (e *Extractor) extractWithSource(source sourceExtractor, r requestView) (Extraction, error) {
+func (e *Extractor) extractRequestView(r requestView) (Extraction, error) {
 	if err := r.context().Err(); err != nil {
 		return Extraction{}, err
 	}
 
-	result, err := source.extract(r)
-	if err != nil {
-		fallbackSource := source.sourceInfo()
-		if !result.Source.valid() {
-			result.Source = fallbackSource
+	if e.extractViewFunc != nil {
+		result, err := e.extractViewFunc(r)
+		if err != nil && !result.Source.valid() {
+			result.Source = sourceValueFromError(err)
 		}
-		result.Source = e.getSource(result, err)
 		return result, err
 	}
 
-	return result, nil
+	for i := range e.sources {
+		source := &e.sources[i]
+		if i > 0 {
+			if err := r.context().Err(); err != nil {
+				return Extraction{}, err
+			}
+		}
+
+		var (
+			result Extraction
+			err    error
+		)
+
+		switch source.source.kind {
+		case sourceForwarded:
+			result, err = e.extractChainSource(
+				r,
+				source,
+				"Forwarded chain exceeds configured maximum length",
+				"request received from untrusted proxy while Forwarded is present",
+				func(err error) {
+					if !errors.Is(err, ErrInvalidForwardedHeader) {
+						return
+					}
+					e.config.metrics.RecordSecurityEvent(SecurityEventMalformedForwarded)
+					e.logSecurityWarning(r, source.source, SecurityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
+				},
+			)
+		case sourceXForwardedFor:
+			result, err = e.extractChainSource(
+				r,
+				source,
+				"X-Forwarded-For chain exceeds configured maximum length",
+				"request received from untrusted proxy while X-Forwarded-For is present",
+				nil,
+			)
+		case sourceRemoteAddr:
+			result, err = e.extractRemoteAddrSource(r, source)
+		default:
+			result, err = e.extractSingleHeaderSource(r, source)
+		}
+		if err == nil {
+			return result, nil
+		}
+
+		if sourceIsTerminalError(err) {
+			if !result.Source.valid() {
+				result.Source = sourceValueFromError(err)
+			}
+			return result, err
+		}
+
+		if i == len(e.sources)-1 {
+			if !result.Source.valid() {
+				result.Source = sourceValueFromError(err)
+			}
+			return result, err
+		}
+	}
+
+	return Extraction{}, ErrSourceUnavailable
 }
 
 func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
@@ -122,7 +191,7 @@ func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error)
 			e.config.metrics.RecordExtractionFailure(source.String())
 		}
 		err := adaptRemoteAddrFailure(failure, source)
-		result.Source = e.getSource(result, err)
+		result.Source = sourceValueFromError(err)
 		return result, err
 	}
 
@@ -130,19 +199,77 @@ func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error)
 	return result, nil
 }
 
-// getSource resolves the authoritative source for a result.
-//
-// Precedence: error-embedded source > result source > extractor default.
-func (e *Extractor) getSource(result Extraction, err error) Source {
-	if err != nil {
-		var sourceErr interface{ SourceValue() Source }
-		if errors.As(err, &sourceErr) {
-			return sourceErr.SourceValue()
+func (e *Extractor) buildConfiguredSources(sources []Source) []configuredSource {
+	configured := make([]configuredSource, len(sources))
+	for i, source := range sources {
+		source := source
+		headerName, _ := sourceHeaderKey(source)
+		if headerName != "" {
+			headerName = textproto.CanonicalMIMEHeaderKey(headerName)
 		}
-		return Source{}
+
+		configuredSource := configuredSource{
+			source:         source,
+			name:           source.String(),
+			unavailableErr: &ExtractionError{Err: ErrSourceUnavailable, Source: source},
+		}
+
+		switch source.kind {
+		case sourceForwarded:
+			configuredSource.chain = chainExtractor{policy: chainPolicy{
+				headerName: headerName,
+				parseValues: func(values []string) ([]string, error) {
+					parts, err := parseForwardedValues(values, e.config.maxChainLength)
+					if err != nil {
+						return nil, adaptForwardedParseError(err, source, e)
+					}
+					return parts, nil
+				},
+				parseClientIP:     parseChainIP,
+				clientIP:          e.clientIP,
+				trustedProxy:      e.proxy,
+				selection:         e.config.chainSelection,
+				collectDebugInfo:  e.config.debugMode,
+				untrustedChainSep: ", ",
+			}}
+		case sourceXForwardedFor:
+			configuredSource.chain = chainExtractor{policy: chainPolicy{
+				headerName: headerName,
+				parseValues: func(values []string) ([]string, error) {
+					parts, err := parseXFFValues(values, e.config.maxChainLength)
+					if err != nil {
+						return nil, adaptXFFParseError(err, source, e)
+					}
+					return parts, nil
+				},
+				parseClientIP:     parseIP,
+				clientIP:          e.clientIP,
+				trustedProxy:      e.proxy,
+				selection:         e.config.chainSelection,
+				collectDebugInfo:  e.config.debugMode,
+				untrustedChainSep: ", ",
+			}}
+		case sourceRemoteAddr:
+			configuredSource.remote = remoteAddrExtractor{clientIPPolicy: e.clientIP}
+		default:
+			configuredSource.single = singleHeaderExtractor{policy: singleHeaderPolicy{
+				headerName:   headerName,
+				clientIP:     e.clientIP,
+				trustedProxy: e.proxy,
+			}}
+		}
+
+		configured[i] = configuredSource
 	}
-	if result.Source.valid() {
-		return result.Source
+
+	return configured
+}
+
+func sourceValueFromError(err error) Source {
+	var sourceErr interface{ SourceValue() Source }
+	if errors.As(err, &sourceErr) {
+		return sourceErr.SourceValue()
 	}
-	return e.source.sourceInfo()
+
+	return Source{}
 }
