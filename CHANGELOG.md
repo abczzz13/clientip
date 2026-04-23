@@ -10,6 +10,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `Resolver`, `ResolverConfig`, `PreferredFallback`, and `Resolution` as the request-scoped API for strict and preferred client IP resolution.
 - `StrictResolutionFromContext` and `PreferredResolutionFromContext` for reusing cached resolver state across middleware.
+- `Resolver.ResolveInputStrict` and `Resolver.ResolveInputPreferred` for framework-agnostic request-scoped resolution.
 - `Input`, `ExtractInput`, and `ExtractInputAddr` for framework-agnostic request handling.
 - `ParseRemoteAddr` helper.
 - `ClassifyError`, `ResultKind`, and result classification constants for coarse-grained policy handling.
@@ -26,7 +27,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **BREAKING:** Preferred fallback is explicit resolver behavior with `Resolution.FallbackUsed`; fallback does not emit separate metrics or log events in this phase.
 - **BREAKING:** `SourceStaticFallback` remains public but is resolver-result-only; it cannot be used in `Config.Sources`.
 - Presets remain `Config` helpers and now document resolver-oriented usage more clearly.
-- Prometheus integration is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`.
+- Prometheus integration on `main` is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`. The published adapter module remains pinned to root `v0.0.6` until the matching adapter release is tagged.
 - `X-Forwarded-For` chain extraction again accepts the host:port and quoted forms already supported by `parseIP`, while `Forwarded` stays strict and now rejects present-but-empty values plus empty delimiter-created elements/parameters as malformed.
 - Internal orchestration now sits behind `internal/engine` and concrete source execution behind `internal/source`.
 

@@ -10,6 +10,28 @@ Secure client IP extraction for `net/http` and framework-agnostic request inputs
 
 This project is pre-`v1.0.0` and still before `v0.1.0`, so public APIs may change as the package evolves.
 Any breaking changes are called out in `CHANGELOG.md`.
+This README tracks the current `main` branch rather than the latest tagged release.
+
+## Contents
+
+- [Install](#install)
+- [Choose the API](#choose-the-api)
+- [Common Setups](#common-setups)
+- [Rules To Remember](#rules-to-remember)
+- [Quick Start](#quick-start)
+- [Preferred Resolution And Fallback](#preferred-resolution-and-fallback)
+- [Framework-Agnostic Input](#framework-agnostic-input)
+- [Presets](#presets)
+- [Config](#config)
+- [Low-Level Extraction](#low-level-extraction)
+- [Errors](#errors)
+- [Logging](#logging)
+- [Prometheus Metrics](#prometheus-metrics)
+- [Security Guidance](#security-guidance)
+- [Compatibility](#compatibility)
+- [Performance](#performance)
+- [Maintainer Notes (Multi-Module)](#maintainer-notes-multi-module)
+- [License](#license)
 
 ## Install
 
@@ -23,14 +45,68 @@ Optional Prometheus adapter:
 go get github.com/abczzz13/clientip/prometheus
 ```
 
+> Version note: the published adapter module is still pinned to `github.com/abczzz13/clientip v0.0.6` until the next coordinated release. This README documents the current `main`-branch API, so the Prometheus snippets below describe the upcoming adapter wiring after that release lands.
+
 ## Choose the API
 
-- `Resolver` is the primary API. Use it when middleware, handlers, or framework adapters need to resolve the client IP once and reuse the result on the same request.
-- `Extractor` is the low-level strict primitive. Use it when you only need one extraction call and do not need request-scoped caching or preferred fallback.
-- `Input` is the framework-agnostic carrier for non-`net/http` integrations.
-- `ParseRemoteAddr` and `ClassifyError` are small helpers for explicit fallback and policy code.
+Use this as a quick decision guide:
+
+| Need | Use |
+| --- | --- |
+| Security-sensitive or audit-oriented result | `Resolver.ResolveStrict` or `Extractor` |
+| Best-effort operational IP with explicit fallback | `Resolver.ResolvePreferred` |
+| Framework integration without `*http.Request` | `Input` with `Resolver` or `Extractor` |
+| Parse `RemoteAddr` outside extraction | `ParseRemoteAddr` |
+| Coarse policy branching on error categories | `ClassifyError` |
 
 Construct an `Extractor` once and reuse it. Build a `Resolver` on top when you want strict or preferred request-scoped resolution.
+
+## Common Setups
+
+Most integrations start with a preset and only drop to a fully manual `Config` when the proxy topology is unusual.
+
+Direct app-to-client traffic:
+
+```go
+extractor, err := clientip.New(clientip.PresetDirectConnection())
+```
+
+Reverse proxy on the same host:
+
+```go
+extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
+```
+
+Reverse proxy on a VM or private network:
+
+```go
+extractor, err := clientip.New(clientip.PresetVMReverseProxy())
+```
+
+Custom trusted header source:
+
+```go
+extractor, err := clientip.New(clientip.Config{
+    TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
+    Sources: []clientip.Source{
+        clientip.HeaderSource("CF-Connecting-IP"),
+        clientip.SourceRemoteAddr,
+    },
+})
+```
+
+Framework request input:
+
+Use `Input` when the framework does not hand you `*http.Request` directly. The same extractor and resolver rules still apply.
+
+## Rules To Remember
+
+- `Resolver` is the primary integration-facing API; `Extractor` is the lower-level strict primitive.
+- Header-based sources require `TrustedProxyPrefixes`.
+- Prefer a preset first, then tweak `Config` only when needed.
+- Only configure one proxy-chain source at a time: `SourceForwarded` or `SourceXForwardedFor`.
+- Preferred fallback is operationally useful, but not suitable for authorization, ACLs, or trust-boundary enforcement.
+- `Input.Headers` must preserve repeated header lines as separate slice entries; merging them breaks duplicate detection and chain parsing semantics.
 
 ## Quick Start
 
@@ -180,6 +256,8 @@ Presets configure `Config`, not `ResolverConfig`. Preferred resolver fallback st
 
 `Config` stays flat in the current API.
 
+Most callers should start from `PresetDirectConnection`, `PresetLoopbackReverseProxy`, or `PresetVMReverseProxy`, then adjust the returned `Config` if they need custom trust ranges, source order, or observability wiring.
+
 Important fields:
 
 - `TrustedProxyPrefixes []netip.Prefix`
@@ -316,6 +394,8 @@ Security event labels passed through `Metrics.RecordSecurityEvent(...)` are the 
 
 Construct Prometheus metrics explicitly and pass them through `Config.Metrics`.
 
+This constructor-based wiring reflects the current `main` branch. Tagged-release consumers of `github.com/abczzz13/clientip/prometheus` still get the older adapter release that depends on root `v0.0.6` until the next coordinated adapter tag is published.
+
 ```go
 import clientipprom "github.com/abczzz13/clientip/prometheus"
 
@@ -359,7 +439,8 @@ if err != nil {
 ## Compatibility
 
 - Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
-- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x`.
+- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x` against the released root module until the next coordinated adapter release is tagged.
+- The published adapter module is currently pinned to `github.com/abczzz13/clientip v0.0.6`; the constructor-based `Config.Metrics` wiring documented above becomes the tagged-release path once that coordinated release ships.
 - Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
 
 ## Performance
@@ -387,7 +468,7 @@ You can compare arbitrary files directly via `just bench-compare <before-file> <
 
 - `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.
 - For local co-development, create an uncommitted workspace with `go work init . ./prometheus`.
-- Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`.
+- Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`; until the next coordinated release, this intentionally exercises the released root module `v0.0.6` instead of the unreleased workspace API.
 - `just` and CI validate the adapter in consumer mode by default (`GOWORK=off`); set `CLIENTIP_ADAPTER_GOWORK=auto` locally when you intentionally want workspace-mode adapter checks.
 - Release in this order: tag root module `vX.Y.Z`, bump `prometheus/go.mod` to that version, then tag adapter module `prometheus/vX.Y.Z`.
 
