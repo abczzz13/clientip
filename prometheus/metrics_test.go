@@ -63,51 +63,37 @@ func withIsolatedDefaultRegistry(t *testing.T) *prom.Registry {
 func TestIntegration_ExtractWithPrometheusMetrics(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(t *testing.T) ([]clientip.Option, *prom.Registry)
+		setup func(t *testing.T) (clientip.Config, *prom.Registry)
 	}{
 		{
 			name: "default registerer via explicit metrics",
-			setup: func(t *testing.T) ([]clientip.Option, *prom.Registry) {
+			setup: func(t *testing.T) (clientip.Config, *prom.Registry) {
 				registry := withIsolatedDefaultRegistry(t)
 				metrics, err := clientipprom.New()
 				if err != nil {
 					t.Fatalf("New() error = %v", err)
 				}
-				return []clientip.Option{clientip.WithMetrics(metrics)}, registry
-			},
-		},
-		{
-			name: "default registerer via options helper",
-			setup: func(t *testing.T) ([]clientip.Option, *prom.Registry) {
-				registry := withIsolatedDefaultRegistry(t)
-				return []clientip.Option{clientipprom.WithMetrics()}, registry
+				return clientip.Config{Metrics: metrics}, registry
 			},
 		},
 		{
 			name: "custom registerer via explicit metrics",
-			setup: func(t *testing.T) ([]clientip.Option, *prom.Registry) {
+			setup: func(t *testing.T) (clientip.Config, *prom.Registry) {
 				registry := prom.NewRegistry()
 				metrics, err := clientipprom.NewWithRegisterer(registry)
 				if err != nil {
 					t.Fatalf("NewWithRegisterer() error = %v", err)
 				}
-				return []clientip.Option{clientip.WithMetrics(metrics)}, registry
-			},
-		},
-		{
-			name: "custom registerer via options helper",
-			setup: func(t *testing.T) ([]clientip.Option, *prom.Registry) {
-				registry := prom.NewRegistry()
-				return []clientip.Option{clientipprom.WithRegisterer(registry)}, registry
+				return clientip.Config{Metrics: metrics}, registry
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts, registry := tt.setup(t)
+			cfg, registry := tt.setup(t)
 
-			extractor, err := clientip.New(opts...)
+			extractor, err := clientip.New(cfg)
 			if err != nil {
 				t.Fatalf("clientip.New() error = %v", err)
 			}
@@ -117,49 +103,12 @@ func TestIntegration_ExtractWithPrometheusMetrics(t *testing.T) {
 				t.Fatalf("Extract() error = %v", err)
 			}
 
-			got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"})
+			got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr.String(), "result": "success"})
 			if got != 1 {
 				t.Fatalf("ip_extraction_total counter = %v, want 1", got)
 			}
 		})
 	}
-}
-
-func TestMetricsOptions_Precedence_LastWins(t *testing.T) {
-	t.Run("custom metrics after prometheus factory", func(t *testing.T) {
-		registerErr := errors.New("register failed")
-		customMetrics := newMockMetrics()
-
-		extractor, err := clientip.New(
-			clientipprom.WithRegisterer(failingRegisterer{err: registerErr}),
-			clientip.WithMetrics(customMetrics),
-		)
-		if err != nil {
-			t.Fatalf("clientip.New() error = %v", err)
-		}
-
-		req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
-		if _, err := extractor.Extract(req); err != nil {
-			t.Fatalf("Extract() error = %v", err)
-		}
-
-		if got := customMetrics.getSuccessCount(clientip.SourceRemoteAddr); got != 1 {
-			t.Fatalf("custom metrics success count = %d, want 1", got)
-		}
-	})
-
-	t.Run("prometheus factory after custom metrics", func(t *testing.T) {
-		registerErr := errors.New("register failed")
-		customMetrics := newMockMetrics()
-
-		_, err := clientip.New(
-			clientip.WithMetrics(customMetrics),
-			clientipprom.WithRegisterer(failingRegisterer{err: registerErr}),
-		)
-		if !errors.Is(err, registerErr) {
-			t.Fatalf("clientip.New() error = %v, want wrapped register error", err)
-		}
-	})
 }
 
 func TestNewWithRegisterer_Creation(t *testing.T) {
@@ -178,7 +127,7 @@ func TestNewWithRegisterer_Creation(t *testing.T) {
 		t.Fatal("expected non-nil prometheus metrics instances")
 	}
 
-	metricsA.RecordExtractionSuccess(clientip.SourceRemoteAddr)
+	metricsA.RecordExtractionSuccess(clientip.SourceRemoteAddr.String())
 	metricsB.RecordSecurityEvent("multiple_headers")
 }
 
@@ -191,7 +140,7 @@ func TestNewWithRegisterer_TypedNilUsesDefaultRegisterer(t *testing.T) {
 		t.Fatalf("NewWithRegisterer() error = %v", err)
 	}
 
-	extractor, err := clientip.New(clientip.WithMetrics(metrics))
+	extractor, err := clientip.New(clientip.Config{Metrics: metrics})
 	if err != nil {
 		t.Fatalf("clientip.New() error = %v", err)
 	}
@@ -201,7 +150,7 @@ func TestNewWithRegisterer_TypedNilUsesDefaultRegisterer(t *testing.T) {
 		t.Fatalf("Extract() error = %v", err)
 	}
 
-	if got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"}); got != 1 {
+	if got := mustCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr.String(), "result": "success"}); got != 1 {
 		t.Fatalf("ip_extraction_total counter = %v, want 1", got)
 	}
 }
@@ -218,7 +167,7 @@ func TestPrometheusMetrics_RecordExtractionFailureCounter(t *testing.T) {
 		{
 			name: "failure only increments invalid label",
 			run: func(metrics *clientipprom.PrometheusMetrics) {
-				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr.String())
 			},
 			want: struct {
 				Success counterObservation
@@ -231,9 +180,9 @@ func TestPrometheusMetrics_RecordExtractionFailureCounter(t *testing.T) {
 		{
 			name: "mixed success and failure counters are independent",
 			run: func(metrics *clientipprom.PrometheusMetrics) {
-				metrics.RecordExtractionSuccess(clientip.SourceRemoteAddr)
-				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
-				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr)
+				metrics.RecordExtractionSuccess(clientip.SourceRemoteAddr.String())
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr.String())
+				metrics.RecordExtractionFailure(clientip.SourceRemoteAddr.String())
 			},
 			want: struct {
 				Success counterObservation
@@ -259,8 +208,8 @@ func TestPrometheusMetrics_RecordExtractionFailureCounter(t *testing.T) {
 				Success counterObservation
 				Invalid counterObservation
 			}{
-				Success: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "success"}),
-				Invalid: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr, "result": "invalid"}),
+				Success: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr.String(), "result": "success"}),
+				Invalid: observeCounterValue(t, registry, "ip_extraction_total", map[string]string{"source": clientip.SourceRemoteAddr.String(), "result": "invalid"}),
 			}
 
 			if diff := cmp.Diff(tt.want, got); diff != "" {
@@ -441,15 +390,6 @@ func TestNewWithRegisterer_IncompatibleCollectorType(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "incompatible collector type") {
 		t.Fatalf("error = %q, want incompatible collector type message", err.Error())
-	}
-}
-
-func TestWithRegisterer_OptionError(t *testing.T) {
-	registerErr := errors.New("register failed")
-
-	_, err := clientip.New(clientipprom.WithRegisterer(failingRegisterer{err: registerErr}))
-	if !errors.Is(err, registerErr) {
-		t.Fatalf("clientip.New() error = %v, want wrapped register error", err)
 	}
 }
 

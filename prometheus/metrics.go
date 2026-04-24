@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/abczzz13/clientip"
 	prom "github.com/prometheus/client_golang/prometheus"
 )
 
@@ -13,30 +12,6 @@ import (
 type PrometheusMetrics struct {
 	extractionTotal *prom.CounterVec
 	securityEvents  *prom.CounterVec
-}
-
-// WithMetrics returns a clientip.Option that installs
-// Prometheus-backed metrics using prom.DefaultRegisterer.
-func WithMetrics() clientip.Option {
-	return withMetricsFactory(New)
-}
-
-// WithRegisterer returns a clientip.Option that installs
-// Prometheus-backed metrics using the provided registerer.
-//
-// If registerer is nil, prom.DefaultRegisterer is used.
-func WithRegisterer(registerer prom.Registerer) clientip.Option {
-	return withMetricsFactory(func() (*PrometheusMetrics, error) {
-		return NewWithRegisterer(registerer)
-	})
-}
-
-// withMetricsFactory adapts a PrometheusMetrics constructor into a
-// clientip.Option.
-func withMetricsFactory(factory func() (*PrometheusMetrics, error)) clientip.Option {
-	return clientip.WithMetricsFactory(func() (clientip.Metrics, error) {
-		return factory()
-	})
 }
 
 // New creates Prometheus-backed metrics and registers its collectors on

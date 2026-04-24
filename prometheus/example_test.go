@@ -22,8 +22,13 @@ func counterValue(registry *prom.Registry, metricName string, labels map[string]
 	return value
 }
 
-func ExampleWithMetrics() {
-	extractor, err := clientip.New(clientipprom.WithMetrics())
+func ExampleNew_configMetrics() {
+	metrics, err := clientipprom.New()
+	if err != nil {
+		panic(err)
+	}
+
+	extractor, err := clientip.New(clientip.Config{Metrics: metrics})
 	if err != nil {
 		panic(err)
 	}
@@ -40,10 +45,15 @@ func ExampleWithMetrics() {
 	// Output: 1.1.1.1 remote_addr
 }
 
-func ExampleWithRegisterer() {
+func ExampleNewWithRegisterer_configMetrics() {
 	registry := prom.NewRegistry()
 
-	extractor, err := clientip.New(clientipprom.WithRegisterer(registry))
+	metrics, err := clientipprom.NewWithRegisterer(registry)
+	if err != nil {
+		panic(err)
+	}
+
+	extractor, err := clientip.New(clientip.Config{Metrics: metrics})
 	if err != nil {
 		panic(err)
 	}
@@ -57,7 +67,7 @@ func ExampleWithRegisterer() {
 	}
 
 	fmt.Printf("%.0f\n", counterValue(registry, "ip_extraction_total", map[string]string{
-		"source": clientip.SourceRemoteAddr,
+		"source": clientip.SourceRemoteAddr.String(),
 		"result": "success",
 	}))
 	// Output: 1
@@ -69,7 +79,7 @@ func ExampleNew() {
 		panic(err)
 	}
 
-	extractor, err := clientip.New(clientip.WithMetrics(metrics))
+	extractor, err := clientip.New(clientip.Config{Metrics: metrics})
 	if err != nil {
 		panic(err)
 	}
@@ -94,7 +104,7 @@ func ExampleNewWithRegisterer() {
 		panic(err)
 	}
 
-	extractor, err := clientip.New(clientip.WithMetrics(metrics))
+	extractor, err := clientip.New(clientip.Config{Metrics: metrics})
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +118,7 @@ func ExampleNewWithRegisterer() {
 	}
 
 	fmt.Printf("%.0f\n", counterValue(registry, "ip_extraction_total", map[string]string{
-		"source": clientip.SourceRemoteAddr,
+		"source": clientip.SourceRemoteAddr.String(),
 		"result": "success",
 	}))
 	// Output: 1

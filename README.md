@@ -45,7 +45,7 @@ Optional Prometheus adapter:
 go get github.com/abczzz13/clientip/prometheus
 ```
 
-> Version note: the published adapter module is still pinned to `github.com/abczzz13/clientip v0.0.6` until the next coordinated release. This README documents the current `main`-branch API, so the Prometheus snippets below describe the upcoming adapter wiring after that release lands.
+> Version note: the published adapter module `github.com/abczzz13/clientip/prometheus@v0.0.5` depends on `github.com/abczzz13/clientip v0.0.7`. This README documents the current `main` branch.
 
 ## Choose the API
 
@@ -394,7 +394,7 @@ Security event labels passed through `Metrics.RecordSecurityEvent(...)` are the 
 
 Construct Prometheus metrics explicitly and pass them through `Config.Metrics`.
 
-This constructor-based wiring reflects the current `main` branch. Tagged-release consumers of `github.com/abczzz13/clientip/prometheus` still get the older adapter release that depends on root `v0.0.6` until the next coordinated adapter tag is published.
+This constructor-based wiring is the current tagged-release path for `github.com/abczzz13/clientip/prometheus@v0.0.5`, which depends on root `v0.0.7`.
 
 ```go
 import clientipprom "github.com/abczzz13/clientip/prometheus"
@@ -439,8 +439,8 @@ if err != nil {
 ## Compatibility
 
 - Core module (`github.com/abczzz13/clientip`) supports Go `1.21+`.
-- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) has a minimum Go version of `1.21`; CI currently validates consumer mode on Go `1.21.x` and `1.26.x` against the released root module until the next coordinated adapter release is tagged.
-- The published adapter module is currently pinned to `github.com/abczzz13/clientip v0.0.6`; the constructor-based `Config.Metrics` wiring documented above becomes the tagged-release path once that coordinated release ships.
+- Optional Prometheus adapter (`github.com/abczzz13/clientip/prometheus`) supports Go `1.21+`; CI validates consumer mode on Go `1.21.x` and `1.26.x`.
+- The published adapter module `github.com/abczzz13/clientip/prometheus@v0.0.5` depends on `github.com/abczzz13/clientip v0.0.7`.
 - Prometheus client dependency in the adapter is pinned to `github.com/prometheus/client_golang v1.21.1`.
 
 ## Performance
@@ -468,7 +468,7 @@ You can compare arbitrary files directly via `just bench-compare <before-file> <
 
 - `prometheus/go.mod` intentionally does not use a local `replace` directive for `github.com/abczzz13/clientip`.
 - For local co-development, create an uncommitted workspace with `go work init . ./prometheus`.
-- Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`; until the next coordinated release, this intentionally exercises the released root module `v0.0.6` instead of the unreleased workspace API.
+- Validate the adapter as a consumer with `GOWORK=off go -C prometheus test ./...`; this intentionally exercises the latest released root module instead of the unreleased workspace API.
 - `just` and CI validate the adapter in consumer mode by default (`GOWORK=off`); set `CLIENTIP_ADAPTER_GOWORK=auto` locally when you intentionally want workspace-mode adapter checks.
 - Release in this order: tag root module `vX.Y.Z`, bump `prometheus/go.mod` to that version, then tag adapter module `prometheus/vX.Y.Z`.
 
