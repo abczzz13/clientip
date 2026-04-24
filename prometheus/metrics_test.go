@@ -14,32 +14,7 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 )
 
-type mockMetrics struct {
-	mu           sync.Mutex
-	successCount map[string]int
-}
-
 var defaultRegistryMu sync.Mutex
-
-func newMockMetrics() *mockMetrics {
-	return &mockMetrics{successCount: make(map[string]int)}
-}
-
-func (m *mockMetrics) RecordExtractionSuccess(source string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.successCount[source]++
-}
-
-func (m *mockMetrics) RecordExtractionFailure(string) {}
-
-func (m *mockMetrics) RecordSecurityEvent(string) {}
-
-func (m *mockMetrics) getSuccessCount(source string) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.successCount[source]
-}
 
 func withIsolatedDefaultRegistry(t *testing.T) *prom.Registry {
 	t.Helper()
