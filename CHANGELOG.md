@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-04-24
+
 ### Added
 
 - `Resolver`, `ResolverConfig`, `PreferredFallback`, and `Resolution` as the request-scoped API for strict and preferred client IP resolution.
