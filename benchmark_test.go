@@ -3,12 +3,31 @@ package clientip
 import (
 	"context"
 	"net/http"
-	"net/netip"
 	"testing"
 )
 
+func mustBenchmarkExtractor(b *testing.B, cfg Config) *Extractor {
+	b.Helper()
+	extractor, err := New(cfg)
+	if err != nil {
+		b.Fatalf("New() error = %v", err)
+	}
+	return extractor
+}
+
+func benchmarkExtractionLoop(b *testing.B, extract func() (Extraction, error)) {
+	b.Helper()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := extract()
+		if err != nil || !result.IP.IsValid() {
+			b.Fatal("extraction failed")
+		}
+	}
+}
+
 func BenchmarkExtract_RemoteAddr(b *testing.B) {
-	extractor, _ := New()
+	extractor, _ := New(DefaultConfig())
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
@@ -24,10 +43,10 @@ func BenchmarkExtract_RemoteAddr(b *testing.B) {
 }
 
 func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -45,12 +64,12 @@ func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 
 func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(2),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = cidrs
+	cfg.MinTrustedProxies = 1
+	cfg.MaxTrustedProxies = 2
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
 		Header:     make(http.Header),
@@ -67,10 +86,10 @@ func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 }
 
 func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -87,10 +106,10 @@ func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
 }
 
 func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceForwarded, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -108,12 +127,12 @@ func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
 
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(5),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = cidrs
+	cfg.MinTrustedProxies = 1
+	cfg.MaxTrustedProxies = 5
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.5:12345",
 		Header:     make(http.Header),
@@ -131,13 +150,13 @@ func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 
 func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(2),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-		WithDebugInfo(true),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = cidrs
+	cfg.MinTrustedProxies = 1
+	cfg.MaxTrustedProxies = 2
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	cfg.DebugInfo = true
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
 		Header:     make(http.Header),
@@ -158,13 +177,13 @@ func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 
 func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(3),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-		WithChainSelection(LeftmostUntrustedIP),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = cidrs
+	cfg.MinTrustedProxies = 1
+	cfg.MaxTrustedProxies = 3
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	cfg.ChainSelection = LeftmostUntrustedIP
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "173.245.48.5:443",
 		Header:     make(http.Header),
@@ -181,14 +200,10 @@ func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 }
 
 func BenchmarkExtract_CustomHeader(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(
-			HeaderSource("CF-Connecting-IP"),
-			SourceXForwardedFor,
-			SourceRemoteAddr,
-		),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{HeaderSource("CF-Connecting-IP"), SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -205,10 +220,10 @@ func BenchmarkExtract_CustomHeader(b *testing.B) {
 }
 
 func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -225,7 +240,7 @@ func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
 }
 
 func BenchmarkExtract_Parallel(b *testing.B) {
-	extractor, _ := New()
+	extractor, _ := New(DefaultConfig())
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
@@ -243,8 +258,8 @@ func BenchmarkExtract_Parallel(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
-	extractor, _ := New()
-	input := RequestInput{
+	extractor, _ := New(DefaultConfig())
+	input := Input{
 		Context:    context.Background(),
 		RemoteAddr: "1.1.1.1:12345",
 		Headers:    make(http.Header),
@@ -252,7 +267,7 @@ func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result, err := extractor.ExtractFrom(input)
+		result, err := extractor.ExtractInput(input)
 		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
@@ -260,13 +275,13 @@ func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	headers := make(http.Header)
 	headers.Set("X-Forwarded-For", "1.1.1.1")
-	input := RequestInput{
+	input := Input{
 		Context:    context.Background(),
 		RemoteAddr: "127.0.0.1:12345",
 		Headers:    headers,
@@ -274,7 +289,7 @@ func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result, err := extractor.ExtractFrom(input)
+		result, err := extractor.ExtractInput(input)
 		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
@@ -282,12 +297,12 @@ func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
-	extractor, _ := New(
-		WithTrustedLoopbackProxy(),
-		WithSourcePriority(SourceXForwardedFor, SourceRemoteAddr),
-	)
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor, _ := New(cfg)
 	xffValues := []string{"1.1.1.1"}
-	input := RequestInput{
+	input := Input{
 		Context:    context.Background(),
 		RemoteAddr: "127.0.0.1:12345",
 		Headers: HeaderValuesFunc(func(name string) []string {
@@ -300,33 +315,61 @@ func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result, err := extractor.ExtractFrom(input)
+		result, err := extractor.ExtractInput(input)
 		if err != nil || !result.IP.IsValid() {
 			b.Fatal("extraction failed")
 		}
 	}
 }
 
-func BenchmarkParseIP(b *testing.B) {
-	testCases := []string{
-		"1.1.1.1",
-		"  1.1.1.1  ",
-		"1.1.1.1:8080",
-		"[2606:4700:4700::1]",
-		"[2606:4700:4700::1]:8080",
-		`"1.1.1.1"`,
+func BenchmarkExtract_RequestVsInput_RemoteAddr(b *testing.B) {
+	extractor := mustBenchmarkExtractor(b, DefaultConfig())
+	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
+	input := Input{Context: context.Background(), RemoteAddr: "1.1.1.1:12345"}
+
+	b.Run("request", func(b *testing.B) {
+		benchmarkExtractionLoop(b, func() (Extraction, error) { return extractor.Extract(req) })
+	})
+
+	b.Run("input", func(b *testing.B) {
+		benchmarkExtractionLoop(b, func() (Extraction, error) { return extractor.ExtractInput(input) })
+	})
+}
+
+func BenchmarkExtract_RequestVsInput_XForwardedFor(b *testing.B) {
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
+	extractor := mustBenchmarkExtractor(b, cfg)
+	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+	inputHTTP := Input{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Headers:    http.Header{"X-Forwarded-For": {"1.1.1.1"}},
+	}
+	inputFunc := Input{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Headers: HeaderValuesFunc(func(name string) []string {
+			if name == "X-Forwarded-For" {
+				return []string{"1.1.1.1"}
+			}
+			return nil
+		}),
 	}
 
-	for _, tc := range testCases {
-		b.Run(tc, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				ip := parseIP(tc)
-				if !ip.IsValid() {
-					b.Fatal("parsing failed")
-				}
-			}
-		})
-	}
+	b.Run("request", func(b *testing.B) {
+		benchmarkExtractionLoop(b, func() (Extraction, error) { return extractor.Extract(req) })
+	})
+
+	b.Run("input_http_header", func(b *testing.B) {
+		benchmarkExtractionLoop(b, func() (Extraction, error) { return extractor.ExtractInput(inputHTTP) })
+	})
+
+	b.Run("input_header_func", func(b *testing.B) {
+		benchmarkExtractionLoop(b, func() (Extraction, error) { return extractor.ExtractInput(inputFunc) })
+	})
 }
 
 func BenchmarkParseCIDRs(b *testing.B) {
@@ -340,112 +383,6 @@ func BenchmarkParseCIDRs(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := ParseCIDRs(cidrs...)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkIsTrustedProxy(b *testing.B) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-	extractor := &Extractor{
-		config: &config{
-			trustedProxyCIDRs: cidrs,
-		},
-	}
-
-	testIPs := []netip.Addr{
-		netip.MustParseAddr("10.0.0.1"),
-		netip.MustParseAddr("172.16.0.1"),
-		netip.MustParseAddr("192.168.1.1"),
-		netip.MustParseAddr("1.1.1.1"),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, ip := range testIPs {
-			extractor.isTrustedProxy(ip)
-		}
-	}
-}
-
-func BenchmarkIsTrustedProxy_LargeCIDRSet_Precomputed(b *testing.B) {
-	const prefixCount = 4096
-	prefixes := make([]netip.Prefix, 0, prefixCount)
-	for i := 0; i < prefixCount; i++ {
-		secondOctet := byte((i / 16) % 256)
-		thirdOctet := byte(i % 256)
-		prefixes = append(prefixes, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, secondOctet, thirdOctet, 0}), 24))
-	}
-
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(prefixes...),
-		WithMinTrustedProxies(0),
-		WithMaxTrustedProxies(0),
-	)
-	ip := netip.MustParseAddr("10.128.8.8")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if !extractor.isTrustedProxy(ip) {
-			b.Fatal("expected trusted proxy")
-		}
-	}
-}
-
-func BenchmarkIsTrustedProxy_LargeCIDRSet_LinearFallback(b *testing.B) {
-	const prefixCount = 4096
-	prefixes := make([]netip.Prefix, 0, prefixCount)
-	for i := 0; i < prefixCount; i++ {
-		secondOctet := byte((i / 16) % 256)
-		thirdOctet := byte(i % 256)
-		prefixes = append(prefixes, netip.PrefixFrom(netip.AddrFrom4([4]byte{10, secondOctet, thirdOctet, 0}), 24))
-	}
-
-	extractor := &Extractor{config: &config{trustedProxyCIDRs: prefixes}}
-	ip := netip.MustParseAddr("10.128.8.8")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if !extractor.isTrustedProxy(ip) {
-			b.Fatal("expected trusted proxy")
-		}
-	}
-}
-
-func BenchmarkChainAnalysis_Rightmost(b *testing.B) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(3),
-	)
-
-	parts := []string{"1.1.1.1", "8.8.8.8", "10.0.0.1", "10.0.0.2"}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := extractor.analyzeChainRightmost(parts)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkChainAnalysis_Leftmost(b *testing.B) {
-	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	extractor, _ := New(
-		WithTrustedProxyPrefixes(cidrs...),
-		WithMinTrustedProxies(1),
-		WithMaxTrustedProxies(3),
-		WithChainSelection(LeftmostUntrustedIP),
-	)
-
-	parts := []string{"1.1.1.1", "8.8.8.8", "10.0.0.1", "10.0.0.2"}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, err := extractor.analyzeChainLeftmost(parts)
 		if err != nil {
 			b.Fatal(err)
 		}

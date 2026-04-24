@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"strings"
 )
 
 var (
@@ -186,8 +185,4 @@ func ParseCIDRs(cidrs ...string) ([]netip.Prefix, error) {
 		prefixes = append(prefixes, prefix)
 	}
 	return prefixes, nil
-}
-
-func normalizeSourceName(headerName string) string {
-	return strings.ToLower(strings.ReplaceAll(headerName, "-", "_"))
 }

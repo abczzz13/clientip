@@ -1,53 +1,35 @@
 package clientip
 
-// PresetDirectConnection configures extraction for direct client-to-app
+// PresetDirectConnection configures strict extraction for direct client-to-app
 // traffic.
 //
 // This preset extracts from RemoteAddr only.
-func PresetDirectConnection() Option {
-	return WithSourcePriority(builtinSource(sourceRemoteAddr))
+func PresetDirectConnection() Config {
+	cfg := DefaultConfig()
+	cfg.Sources = []Source{builtinSource(sourceRemoteAddr)}
+	return cfg
 }
 
 // PresetLoopbackReverseProxy configures extraction for apps behind a reverse
 // proxy on the same host (for example NGINX on localhost).
 //
-// It trusts loopback proxy CIDRs and uses X-Forwarded-For with RemoteAddr
-// fallback.
-func PresetLoopbackReverseProxy() Option {
-	return func(c *config) error {
-		return applyOptions(c,
-			WithTrustedLoopbackProxy(),
-			WithSourcePriority(builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)),
-		)
-	}
+// It trusts loopback proxy CIDRs and prioritizes X-Forwarded-For before
+// RemoteAddr within the extractor's strict source order.
+func PresetLoopbackReverseProxy() Config {
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+	cfg.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
+	return cfg
 }
 
 // PresetVMReverseProxy configures extraction for apps behind a reverse proxy
 // in a typical VM or private-network setup.
 //
-// It trusts loopback and private proxy CIDRs and uses X-Forwarded-For with
-// RemoteAddr fallback.
-func PresetVMReverseProxy() Option {
-	return func(c *config) error {
-		return applyOptions(c,
-			WithTrustedLocalProxyDefaults(),
-			WithSourcePriority(builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)),
-		)
-	}
-}
-
-// PresetPreferredHeaderThenXFFLax configures extraction to prefer a single
-// custom header, then fall back to X-Forwarded-For and RemoteAddr.
-//
-// It also enables SecurityModeLax so invalid values in the preferred header
-// can fall through to lower-priority sources.
-//
-// Header-based sources still require trusted proxy CIDRs.
-func PresetPreferredHeaderThenXFFLax(header string) Option {
-	return func(c *config) error {
-		return applyOptions(c,
-			WithSourcePriority(HeaderSource(header), builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)),
-			WithSecurityMode(SecurityModeLax),
-		)
-	}
+// It trusts loopback and private proxy CIDRs and prioritizes X-Forwarded-For
+// before RemoteAddr within the extractor's strict source order.
+func PresetVMReverseProxy() Config {
+	cfg := DefaultConfig()
+	cfg.TrustedProxyPrefixes = LocalProxyPrefixes()
+	cfg.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
+	return cfg
 }

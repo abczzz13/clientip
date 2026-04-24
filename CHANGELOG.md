@@ -8,27 +8,33 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
-- Parser fuzz targets for `parseIP`, `parseRemoteAddr`, `parseXFFValues`, and `parseForwardedValues`, plus new `just fuzz` and `just fuzz-one` maintainer commands.
-- Expanded regression coverage for extraction behavior, request-input header adaptation, logger/metrics reporting, typed error formatting, and Prometheus adapter examples/tests.
+- `Resolver`, `ResolverConfig`, `PreferredFallback`, and `Resolution` as the request-scoped API for strict and preferred client IP resolution.
+- `StrictResolutionFromContext` and `PreferredResolutionFromContext` for reusing cached resolver state across middleware.
+- `Resolver.ResolveInputStrict` and `Resolver.ResolveInputPreferred` for framework-agnostic request-scoped resolution.
+- `Input`, `ExtractInput`, and `ExtractInputAddr` for framework-agnostic request handling.
+- `ParseRemoteAddr` helper.
+- `ClassifyError`, `ResultKind`, and result classification constants for coarse-grained policy handling.
+- Exported `SecurityEvent...` constants and public `SourceStaticFallback`.
+- Updated docs, examples, presets, and Prometheus examples around the resolver-first architecture.
 
 ### Changed
 
-- Option naming is now consistently `With...` for policy options (`WithTrustedProxyPrefixes`, `WithMinTrustedProxies`, `WithMaxTrustedProxies`, `WithAllowPrivateIPs`, `WithAllowedReservedClientPrefixes`, `WithMaxChainLength`, and related trust helpers).
-- Internal chain extraction logic from `xff.go` is split into focused files (`chain_capacity.go`, `chain_validation.go`, `xff_parse.go`, `chain_analysis.go`) with no behavior change.
-- No-op call options now reuse the existing config and source chain when policy is unchanged.
-- Typed-nil `RequestInput.Headers` providers are treated as absent instead of being invoked.
-- The optional Prometheus adapter module now depends on `github.com/abczzz13/clientip v0.0.6`.
-- Typed source API with an opaque `Source` type, `HeaderSource(string)`, fully typed `Extraction.Source` / `ExtractionError.Source`, and `WithSourcePriority(...Source)`.
-- Per-call policy API via `CallOption` and helpers such as `WithCallSecurityMode`, `WithCallSourcePriority`, and `WithCallTrustedProxyPrefixes`.
-- **BREAKING:** `Extractor.Extract`, `Extractor.ExtractAddr`, `Extractor.ExtractFrom`, and `Extractor.ExtractAddrFrom` now accept `...CallOption` (instead of `...OverrideOptions`).
-- **BREAKING:** `Extractor.Extract(nil)` and `Extractor.ExtractAddr(nil)` now return `ErrNilRequest`.
-- **BREAKING:** `NormalizeSourceName` has been removed; use `HeaderSource(name).String()` when you need the canonical identifier for an arbitrary header name.
-- **BREAKING:** custom `Source` text/JSON encoding now uses canonical MIME header names (for example `Cf-Connecting-Ip`) instead of underscore-normalized identifiers such as `cf_connecting_ip`; `Source.String()` still returns the underscore-normalized identifier.
+- **BREAKING:** `Resolver` is now the primary documented API. `Extractor` remains as the strict low-level primitive.
+- **BREAKING:** `RequestInput` is renamed to `Input`, `ExtractFrom` is renamed to `ExtractInput`, and `ExtractAddrFrom` is renamed to `ExtractInputAddr`.
+- **BREAKING:** `Overrides`, `ExtractWith`, `ExtractAddrWith`, `ExtractFromWith`, and `ExtractAddrFromWith` are removed.
+- **BREAKING:** `SecurityMode` is removed. Preferred behavior now lives on `Resolver.ResolvePreferred`.
+- **BREAKING:** `ResolverConfig` now uses explicit `PreferredFallback` selection instead of competing fallback knobs.
+- **BREAKING:** Preferred fallback is explicit resolver behavior with `Resolution.FallbackUsed`; fallback does not emit separate metrics or log events in this phase.
+- **BREAKING:** `SourceStaticFallback` remains public but is resolver-result-only; it cannot be used in `Config.Sources`.
+- Presets remain `Config` helpers and now document resolver-oriented usage more clearly.
+- Prometheus integration on `main` is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`. The published adapter module remains pinned to root `v0.0.6` until the matching adapter release is tagged.
+- `X-Forwarded-For` chain extraction again accepts the host:port and quoted forms already supported by `parseIP`, while `Forwarded` stays strict and now rejects present-but-empty values plus empty delimiter-created elements/parameters as malformed.
+- Internal orchestration now sits behind `internal/engine` and concrete source execution behind `internal/source`.
 
 ### Removed
 
-- Per-call `OverrideOptions` and `Set(...)` in favor of `CallOption`.
-- One-shot helpers `ExtractWithOptions`, `ExtractAddrWithOptions`, `ExtractFromWithOptions`, and `ExtractAddrFromWithOptions`.
+- Per-call override APIs and the old security-mode split.
+- The older extraction naming built around `RequestInput` and `ExtractFrom`.
 
 ## [0.0.6] - 2026-02-18
 

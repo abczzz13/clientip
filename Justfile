@@ -42,7 +42,9 @@ bench-all *args:
 
 bench-save name pattern="." count="6" *args:
   @mkdir -p .bench
-  @bash -eo pipefail -c 'outfile="$1"; echo "Saving benchmark sample to $outfile"; go test -run "^$" -bench "{{pattern}}" -benchmem -count={{count}} ./... {{args}} | tee "$outfile"; GOWORK={{adapter_gowork}} go -C prometheus test -run "^$" -bench "{{pattern}}" -benchmem -count={{count}} ./... {{args}} | tee -a "$outfile"' _ ".bench/{{name}}.txt"
+  @echo "Saving benchmark sample to .bench/{{name}}.txt"
+  @go test -run "^$" -bench "{{pattern}}" -benchmem -count={{count}} ./... {{args}} > ".bench/{{name}}.txt"
+  @GOWORK={{adapter_gowork}} go -C prometheus test -run "^$" -bench "{{pattern}}" -benchmem -count={{count}} ./... {{args}} >> ".bench/{{name}}.txt"
 
 bench-compare-saved before after:
   @just bench-compare ".bench/{{before}}.txt" ".bench/{{after}}.txt"
