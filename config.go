@@ -18,16 +18,22 @@ const (
 )
 
 // ChainSelection controls how the client candidate is selected from a parsed
-// proxy chain after trusted proxy validation.
+// Forwarded or X-Forwarded-For proxy chain after trusted proxy validation. The
+// default is RightmostUntrustedIP.
 type ChainSelection int
 
 const (
 	// Start at 1 to avoid zero-value confusion and make invalid selections
 	// explicit.
 	//
-	// RightmostUntrustedIP selects the rightmost untrusted address in the chain.
+	// RightmostUntrustedIP selects the rightmost untrusted address before the
+	// trailing trusted proxy suffix. This is the default and recommended mode for
+	// most deployments.
 	RightmostUntrustedIP ChainSelection = iota + 1
-	// LeftmostUntrustedIP selects the leftmost untrusted address in the chain.
+	// LeftmostUntrustedIP selects the leftmost untrusted address before the
+	// trailing trusted proxy suffix. Use it only when trusted proxies are
+	// configured and the forwarded chain is produced or sanitized by those
+	// trusted proxies.
 	LeftmostUntrustedIP
 )
 
@@ -56,11 +62,15 @@ type Config struct {
 	AllowPrivateIPs               bool
 	AllowedReservedClientPrefixes []netip.Prefix
 	MaxChainLength                int
-	ChainSelection                ChainSelection
-	DebugInfo                     bool
-	Sources                       []Source
-	Logger                        Logger
-	Metrics                       Metrics
+	// ChainSelection selects the client candidate from Forwarded and
+	// X-Forwarded-For chains. Leave zero for the default
+	// RightmostUntrustedIP. LeftmostUntrustedIP requires TrustedProxyPrefixes
+	// when a chain source is configured.
+	ChainSelection ChainSelection
+	DebugInfo      bool
+	Sources        []Source
+	Logger         Logger
+	Metrics        Metrics
 }
 
 // DefaultConfig returns the default extractor configuration.

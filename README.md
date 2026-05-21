@@ -51,13 +51,13 @@ go get github.com/abczzz13/clientip/prometheus
 
 Use this as a quick decision guide:
 
-| Need | Use |
-| --- | --- |
-| Security-sensitive or audit-oriented result | `Resolver.ResolveStrict` or `Extractor` |
-| Best-effort operational IP with explicit fallback | `Resolver.ResolvePreferred` |
-| Framework integration without `*http.Request` | `Input` with `Resolver` or `Extractor` |
-| Parse `RemoteAddr` outside extraction | `ParseRemoteAddr` |
-| Coarse policy branching on error categories | `ClassifyError` |
+| Need                                              | Use                                     |
+| ------------------------------------------------- | --------------------------------------- |
+| Security-sensitive or audit-oriented result       | `Resolver.ResolveStrict` or `Extractor` |
+| Best-effort operational IP with explicit fallback | `Resolver.ResolvePreferred`             |
+| Framework integration without `*http.Request`     | `Input` with `Resolver` or `Extractor`  |
+| Parse `RemoteAddr` outside extraction             | `ParseRemoteAddr`                       |
+| Coarse policy branching on error categories       | `ClassifyError`                         |
 
 Construct an `Extractor` once and reuse it. Build a `Resolver` on top when you want strict or preferred request-scoped resolution.
 
@@ -293,6 +293,11 @@ Resolver-only result source:
 
 - `SourceStaticFallback`
 
+Chain selection applies to `SourceForwarded` and `SourceXForwardedFor`:
+
+- `RightmostUntrustedIP` is the default and recommended mode for most deployments. It walks left from the trailing trusted proxy suffix and selects the nearest untrusted hop.
+- `LeftmostUntrustedIP` selects the earliest untrusted entry before the trailing trusted proxy suffix. Use it only when `TrustedProxyPrefixes` are configured and your trusted proxies produce or sanitize the forwarded chain; `New` rejects this mode for chain sources without trusted proxy prefixes.
+
 `Extractor` walks `Config.Sources` in order. `ErrSourceUnavailable` allows the next source to run, while security-significant failures remain terminal.
 
 ## Low-Level Extraction
@@ -434,7 +439,7 @@ if err != nil {
 - Do not include multiple competing header-based sources for security decisions.
 - Do not trust broad proxy CIDRs unless they are truly under your control.
 - Header-based sources require `TrustedProxyPrefixes`.
-- `LeftmostUntrustedIP` only makes sense when trusted proxy prefixes are configured.
+- Use `LeftmostUntrustedIP` only with trusted proxy prefixes and a forwarded chain that your trusted proxies produce or sanitize.
 
 ## Compatibility
 
