@@ -41,14 +41,16 @@ var (
 	SourceXRealIP = Source{kind: sourceXRealIP}
 	// SourceRemoteAddr resolves from Request.RemoteAddr.
 	SourceRemoteAddr = Source{kind: sourceRemoteAddr}
-	// SourceStaticFallback identifies resolver-only static fallback output.
+	// SourceStaticFallback identifies resolver-only static fallback output. It
+	// cannot be used in Config.Sources.
 	SourceStaticFallback = Source{kind: sourceStaticFallback}
 )
 
 // Source identifies one extraction source in priority order.
 //
-// Use built-in constants for standard sources and HeaderSource for custom
-// headers.
+// Source values are opaque. Use built-in values for standard sources and
+// HeaderSource for custom headers; compare sources with Equal or String rather
+// than inspecting fields.
 type Source struct {
 	kind       sourceKind
 	headerName string
@@ -59,6 +61,11 @@ func builtinSource(kind sourceKind) Source {
 }
 
 // HeaderSource returns a source backed by a custom HTTP header name.
+//
+// The name is trimmed and canonicalized as a MIME header key. Built-in header
+// names and aliases resolve to their built-in Source values. An empty or
+// whitespace-only name produces an invalid Source that New rejects when used in
+// Config.Sources.
 func HeaderSource(name string) Source {
 	return sourceFromString(name)
 }
@@ -131,11 +138,18 @@ func canonicalizeSources(sources []Source) []Source {
 	return resolved
 }
 
+// String returns the canonical source identifier.
+//
+// Built-in sources use stable snake_case identifiers. Custom header sources use
+// a lower-case, underscore-separated form of the canonical header name.
 func (s Source) String() string {
 	return s.name()
 }
 
 // Equal reports whether two sources represent the same canonical source.
+//
+// Equal canonicalizes custom-header names and built-in aliases before
+// comparison.
 func (s Source) Equal(other Source) bool {
 	return canonicalSource(s) == canonicalSource(other)
 }
@@ -203,6 +217,9 @@ func (s Source) MarshalText() ([]byte, error) {
 }
 
 // UnmarshalText parses a source from a built-in alias or header name.
+//
+// Empty input produces an invalid Source; New rejects invalid sources in
+// Config.Sources.
 func (s *Source) UnmarshalText(text []byte) error {
 	if s == nil {
 		return errors.New("clientip.Source: UnmarshalText on nil pointer")

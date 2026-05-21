@@ -30,6 +30,9 @@ type configuredSource struct {
 }
 
 // New creates an Extractor from a Config.
+//
+// New applies default values, normalizes prefixes and sources, validates the
+// resulting configuration, and returns an Extractor safe for concurrent reuse.
 func New(public Config) (*Extractor, error) {
 	cfg, err := configFromPublic(public)
 	if err != nil {
@@ -55,6 +58,10 @@ func New(public Config) (*Extractor, error) {
 }
 
 // Extract resolves client IP and metadata for the request.
+//
+// Configured sources are attempted in order. ErrSourceUnavailable allows the
+// next source to run; malformed headers, proxy-trust failures, chain limits,
+// invalid client IPs, and context errors are terminal.
 func (e *Extractor) Extract(r *http.Request) (Extraction, error) {
 	if r == nil {
 		return Extraction{}, ErrNilRequest
@@ -82,6 +89,8 @@ func (e *Extractor) ExtractAddr(r *http.Request) (netip.Addr, error) {
 
 // ExtractInput resolves client IP and metadata from framework-agnostic request
 // input.
+//
+// It follows the same source ordering and terminal-error rules as Extract.
 func (e *Extractor) ExtractInput(input Input) (Extraction, error) {
 	ctx := requestInputContext(input)
 	if err := ctx.Err(); err != nil {

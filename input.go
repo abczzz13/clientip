@@ -6,7 +6,8 @@ import "context"
 //
 // Implementations should return one slice entry per received header line.
 // Single-IP sources rely on per-line values to detect duplicates, and chain
-// sources preserve wire order across repeated lines.
+// sources preserve wire order across repeated lines. Do not merge duplicate
+// header lines into one comma-joined value.
 //
 // Header names are requested in canonical MIME format (for example
 // "X-Forwarded-For").
@@ -30,11 +31,15 @@ func (f HeaderValuesFunc) Values(name string) []string {
 
 // Input provides framework-agnostic request data for extraction.
 //
-// Context defaults to context.Background() when nil.
+// Context defaults to context.Background() when nil. Resolver methods return an
+// updated Input so request-scoped cached resolution state can flow through the
+// call path.
 //
 // For Headers, preserve repeated header lines as separate values for each
 // header name (for example two X-Forwarded-For lines should yield a slice with
-// length 2, and two X-Real-IP lines should also yield length 2).
+// length 2, and two X-Real-IP lines should also yield length 2). A nil Headers
+// provider makes header-based sources unavailable; SourceRemoteAddr can still
+// run if it is included in Config.Sources.
 type Input struct {
 	Context    context.Context
 	RemoteAddr string

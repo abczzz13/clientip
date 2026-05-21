@@ -36,6 +36,9 @@
 //	    log.Fatal(err)
 //	}
 //
+//	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
+//	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+//
 //	req, resolution := resolver.ResolveStrict(req)
 //	if resolution.Err != nil {
 //	    log.Printf("resolve failed: %v", resolution.Err)
@@ -63,7 +66,10 @@
 // # Config, Sources, And Security
 //
 // Config stays flat in the current public API. Presets return Config values and
-// can be tweaked before construction.
+// can be tweaked before construction. Zero values generally select safe
+// defaults: nil Sources means RemoteAddr only, zero MaxChainLength means
+// DefaultMaxChainLength, nil Logger disables logging, and nil Metrics disables
+// metrics.
 //
 // Source values stay public and opaque. Use the built-in extractor sources for
 // request-derived extraction, SourceStaticFallback for resolver static fallback
@@ -84,7 +90,9 @@
 // and the forwarded chain is produced or sanitized by those proxies.
 //
 // Preferred resolver fallback is explicit and operationally useful, but it is
-// not suitable for authorization or trust-boundary enforcement.
+// not suitable for authorization or trust-boundary enforcement. Context
+// cancellation and deadline errors remain terminal and do not use preferred
+// fallback.
 //
 // # Observability
 //

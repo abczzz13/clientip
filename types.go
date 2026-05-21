@@ -47,7 +47,9 @@ var (
 
 // ExtractionError wraps a source-specific extraction failure.
 type ExtractionError struct {
-	Err    error
+	// Err is the underlying sentinel or wrapped error.
+	Err error
+	// Source is the extraction source associated with Err.
 	Source Source
 }
 
@@ -75,9 +77,12 @@ func (e *ExtractionError) SourceValue() Source {
 // expects a single header line.
 type MultipleHeadersError struct {
 	ExtractionError
+	// HeaderCount is the number of header-line values received for HeaderName.
 	HeaderCount int
-	HeaderName  string
-	RemoteAddr  string
+	// HeaderName is the canonical header name, when known.
+	HeaderName string
+	// RemoteAddr is the request RemoteAddr observed while validating the header.
+	RemoteAddr string
 }
 
 // Error implements error.
@@ -94,9 +99,13 @@ func (e *MultipleHeadersError) Error() string {
 // ProxyValidationError reports failures from trusted-proxy chain validation.
 type ProxyValidationError struct {
 	ExtractionError
-	Chain             string
+	// Chain is the parsed proxy chain rendered as a comma-separated string.
+	Chain string
+	// TrustedProxyCount is the number of trusted proxies found in the chain.
 	TrustedProxyCount int
+	// MinTrustedProxies is the configured minimum trusted-proxy count.
 	MinTrustedProxies int
+	// MaxTrustedProxies is the configured maximum trusted-proxy count.
 	MaxTrustedProxies int
 }
 
@@ -109,9 +118,14 @@ func (e *ProxyValidationError) Error() string {
 // InvalidIPError reports an invalid or implausible extracted client IP.
 type InvalidIPError struct {
 	ExtractionError
-	Chain          string
-	ExtractedIP    string
-	Index          int
+	// Chain is the parsed proxy chain when the invalid IP came from a chain
+	// source.
+	Chain string
+	// ExtractedIP is the invalid or implausible IP string.
+	ExtractedIP string
+	// Index is the selected client index in Chain, or 0 for non-chain sources.
+	Index int
+	// TrustedProxies is the number of trusted proxies found in Chain.
 	TrustedProxies int
 }
 
@@ -130,6 +144,7 @@ func (e *InvalidIPError) Error() string {
 // RemoteAddrError reports an invalid or implausible Request.RemoteAddr value.
 type RemoteAddrError struct {
 	ExtractionError
+	// RemoteAddr is the original remote address string.
 	RemoteAddr string
 }
 
@@ -141,8 +156,10 @@ func (e *RemoteAddrError) Error() string {
 // ChainTooLongError reports an overlong Forwarded/X-Forwarded-For chain.
 type ChainTooLongError struct {
 	ExtractionError
+	// ChainLength is the number of parsed chain entries.
 	ChainLength int
-	MaxLength   int
+	// MaxLength is the configured maximum chain length.
+	MaxLength int
 }
 
 // Error implements error.
@@ -153,8 +170,11 @@ func (e *ChainTooLongError) Error() string {
 
 // ChainDebugInfo describes parsed chain-analysis details for diagnostics.
 type ChainDebugInfo struct {
-	FullChain      []string
-	ClientIndex    int
+	// FullChain contains the parsed Forwarded or X-Forwarded-For chain.
+	FullChain []string
+	// ClientIndex is the index selected as the client candidate.
+	ClientIndex int
+	// TrustedIndices are the indexes identified as trusted proxies.
 	TrustedIndices []int
 }
 
@@ -165,16 +185,26 @@ type ChainDebugInfo struct {
 // For additional diagnostics (such as chain details or trusted-proxy counts),
 // inspect typed errors like ProxyValidationError and InvalidIPError.
 type Extraction struct {
+	// IP is the normalized client IP when extraction succeeds.
 	IP netip.Addr
 
+	// Source identifies where IP came from. On error it may identify the source
+	// that failed.
 	Source Source
 
+	// TrustedProxyCount is the number of trusted proxies observed in a chain
+	// source.
 	TrustedProxyCount int
 
+	// DebugInfo contains optional parsed chain details when Config.DebugInfo is
+	// enabled and a chain source succeeds.
 	DebugInfo *ChainDebugInfo
 }
 
 // ParseCIDRs parses one or more CIDR strings.
+//
+// The returned prefixes are suitable for Config.TrustedProxyPrefixes or
+// Config.AllowedReservedClientPrefixes.
 func ParseCIDRs(cidrs ...string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(cidrs))
 	for _, cidr := range cidrs {

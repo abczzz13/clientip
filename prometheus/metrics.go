@@ -9,6 +9,9 @@ import (
 )
 
 // PrometheusMetrics is a Prometheus-backed implementation of clientip.Metrics.
+//
+// It exports ip_extraction_total{source,result} and
+// ip_extraction_security_events_total{event} counters.
 type PrometheusMetrics struct {
 	extractionTotal *prom.CounterVec
 	securityEvents  *prom.CounterVec
@@ -16,6 +19,9 @@ type PrometheusMetrics struct {
 
 // New creates Prometheus-backed metrics and registers its collectors on
 // prom.DefaultRegisterer.
+//
+// If compatible collectors with the same names are already registered, they are
+// reused.
 func New() (*PrometheusMetrics, error) {
 	return NewWithRegisterer(nil)
 }

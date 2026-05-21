@@ -65,19 +65,19 @@ Construct an `Extractor` once and reuse it. Build a `Resolver` on top when you w
 
 Most integrations start with a preset and only drop to a fully manual `Config` when the proxy topology is unusual.
 
-Direct app-to-client traffic:
+Direct app-to-client traffic (no proxy headers are trusted):
 
 ```go
 extractor, err := clientip.New(clientip.PresetDirectConnection())
 ```
 
-Reverse proxy on the same host:
+Reverse proxy on the same host (for example NGINX or Caddy on loopback):
 
 ```go
 extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
 ```
 
-Reverse proxy on a VM or private network:
+Reverse proxy on a VM or private network (loopback plus RFC1918/ULA proxy ranges):
 
 ```go
 extractor, err := clientip.New(clientip.PresetVMReverseProxy())
@@ -133,6 +133,7 @@ if resolution.Err != nil {
 
 fmt.Printf("Client IP: %s from %s\n", resolution.IP, resolution.Source)
 
+// Use the returned request when reading cached resolver state.
 if cached, ok := clientip.StrictResolutionFromContext(req.Context()); ok {
     fmt.Printf("Cached: %s\n", cached.IP)
 }
@@ -171,8 +172,9 @@ fmt.Printf("Client IP: %s from %s (fallback=%t)\n", resolution.IP, resolution.So
 Important fallback guidance:
 
 - Preferred fallback is explicit and only lives on `Resolver`.
-- `PreferredFallbackRemoteAddr` is operationally useful, but it is not equivalent to validated proxy-header extraction.
+- `PreferredFallbackRemoteAddr` parses `RemoteAddr`; it is operationally useful, but it is not equivalent to validated proxy-header extraction.
 - Preferred resolution is not suitable for authorization, ACLs, or other trust-boundary decisions.
+- Context cancellation and deadline errors remain terminal and do not use preferred fallback.
 - Fallback observability is result-only in this phase. Inspect `Resolution.FallbackUsed`; do not expect a separate fallback metric or log event.
 
 If you want a synthetic fallback value instead of `RemoteAddr`, set `ResolverConfig{PreferredFallback: clientip.PreferredFallbackStaticIP, StaticFallbackIP: ...}`. Successful static fallback reports `SourceStaticFallback`.
@@ -199,7 +201,7 @@ if cached, ok := clientip.StrictResolutionFromContext(input.Context); ok {
 }
 ```
 
-`Input.Headers` must preserve repeated header lines as separate slice entries. Do not merge duplicate lines into a single comma-joined string.
+`Input.Headers` must preserve repeated header lines as separate slice entries. Do not merge duplicate lines into a single comma-joined string. If `Headers` is nil, header-based sources are unavailable; `SourceRemoteAddr` can still run if it is included in `Config.Sources`.
 
 For `fasthttp`/Fiber style integrations:
 
@@ -260,17 +262,17 @@ Most callers should start from `PresetDirectConnection`, `PresetLoopbackReverseP
 
 Important fields:
 
-- `TrustedProxyPrefixes []netip.Prefix`
-- `MinTrustedProxies int`
-- `MaxTrustedProxies int`
-- `AllowPrivateIPs bool`
-- `AllowedReservedClientPrefixes []netip.Prefix`
-- `MaxChainLength int`
-- `ChainSelection ChainSelection`
-- `DebugInfo bool`
-- `Sources []Source`
-- `Logger Logger`
-- `Metrics Metrics`
+- `TrustedProxyPrefixes []netip.Prefix`: upstream proxies allowed to supply header-based client IPs. Header sources require this to be non-empty.
+- `MinTrustedProxies int`: require at least this many trusted proxies in parsed `Forwarded`/`X-Forwarded-For` chains. `0` means no minimum.
+- `MaxTrustedProxies int`: reject chains with more than this many trusted proxies. `0` means no maximum.
+- `AllowPrivateIPs bool`: allow private RFC1918/ULA client IPs. Loopback, link-local, multicast, and unspecified addresses are still rejected.
+- `AllowedReservedClientPrefixes []netip.Prefix`: allow selected reserved/special-use client ranges, such as documentation ranges in tests.
+- `MaxChainLength int`: maximum parsed `Forwarded`/`X-Forwarded-For` chain length. `0` uses `DefaultMaxChainLength`.
+- `ChainSelection ChainSelection`: choose the client candidate from a chain. `0` uses `RightmostUntrustedIP`.
+- `DebugInfo bool`: include parsed chain details in successful chain-source extractions.
+- `Sources []Source`: strict extraction order. `nil` uses the default `RemoteAddr` source; an explicit empty slice is invalid.
+- `Logger Logger`: optional security-event logger. `nil` disables logging.
+- `Metrics Metrics`: optional extraction/security metrics sink. `nil` disables metrics.
 
 Useful helpers:
 
@@ -438,7 +440,8 @@ if err != nil {
 - Do not use preferred fallback for authorization, ACLs, or trust-boundary enforcement.
 - Do not include multiple competing header-based sources for security decisions.
 - Do not trust broad proxy CIDRs unless they are truly under your control.
-- Header-based sources require `TrustedProxyPrefixes`.
+- Header-based sources require `TrustedProxyPrefixes`; the immediate `RemoteAddr` must match one of those prefixes when a header is present.
+- Preserve repeated header lines in framework adapters so duplicate single-IP headers can be detected.
 - Use `LeftmostUntrustedIP` only with trusted proxy prefixes and a forwarded chain that your trusted proxies produce or sanitize.
 
 ## Compatibility
