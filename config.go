@@ -55,25 +55,65 @@ func (s ChainSelection) valid() bool {
 }
 
 // Config configures an Extractor.
+//
+// Start from DefaultConfig or one of the Preset... helpers unless you need a
+// custom proxy topology. New normalizes prefixes and sources before validation.
 type Config struct {
-	TrustedProxyPrefixes          []netip.Prefix
-	MinTrustedProxies             int
-	MaxTrustedProxies             int
-	AllowPrivateIPs               bool
+	// TrustedProxyPrefixes contains upstream proxy ranges that are allowed to
+	// supply header-based client IPs. Any header source in Sources requires this
+	// field to be non-empty, and the immediate RemoteAddr must match one of these
+	// prefixes when a header is present.
+	TrustedProxyPrefixes []netip.Prefix
+
+	// MinTrustedProxies rejects parsed proxy chains with fewer than this many
+	// trusted proxies. A value of 0 means no minimum.
+	MinTrustedProxies int
+
+	// MaxTrustedProxies rejects parsed proxy chains with more than this many
+	// trusted proxies. A value of 0 means no maximum.
+	MaxTrustedProxies int
+
+	// AllowPrivateIPs allows RFC1918 and unique-local client addresses. Loopback,
+	// link-local, multicast, and unspecified addresses are still rejected.
+	AllowPrivateIPs bool
+
+	// AllowedReservedClientPrefixes allows selected reserved or special-use
+	// client ranges that are otherwise rejected, such as documentation prefixes in
+	// tests.
 	AllowedReservedClientPrefixes []netip.Prefix
-	MaxChainLength                int
+
+	// MaxChainLength limits the number of IPs accepted in Forwarded and
+	// X-Forwarded-For chains. A value of 0 uses DefaultMaxChainLength.
+	MaxChainLength int
+
 	// ChainSelection selects the client candidate from Forwarded and
 	// X-Forwarded-For chains. Leave zero for the default
 	// RightmostUntrustedIP. LeftmostUntrustedIP requires TrustedProxyPrefixes
 	// when a chain source is configured.
 	ChainSelection ChainSelection
-	DebugInfo      bool
-	Sources        []Source
-	Logger         Logger
-	Metrics        Metrics
+
+	// DebugInfo includes parsed chain details in successful chain-source
+	// extractions. It is intended for diagnostics rather than hot-path logging.
+	DebugInfo bool
+
+	// Sources is the strict extraction order. A nil slice uses the default
+	// RemoteAddr-only source; an explicit empty slice is invalid.
+	Sources []Source
+
+	// Logger receives security-significant extractor events. Nil disables
+	// logging. Typed nil implementations are rejected during validation.
+	Logger Logger
+
+	// Metrics receives extraction outcome and security event counters. Nil
+	// disables metrics. Typed nil implementations are rejected during validation.
+	Metrics Metrics
 }
 
 // DefaultConfig returns the default extractor configuration.
+//
+// The default is safe for direct client-to-app traffic: RemoteAddr only,
+// RightmostUntrustedIP chain selection, DefaultMaxChainLength, no trusted proxy
+// prefixes, and no-op logging/metrics.
 func DefaultConfig() Config {
 	return Config{
 		MaxChainLength: DefaultMaxChainLength,
@@ -101,6 +141,9 @@ func LocalProxyPrefixes() []netip.Prefix {
 
 // ProxyPrefixesFromAddrs converts individual proxy addresses into host-sized
 // trusted prefixes.
+//
+// IPv4 addresses become /32 prefixes, IPv6 addresses become /128 prefixes, and
+// IPv4-mapped IPv6 addresses are normalized to IPv4 before conversion.
 func ProxyPrefixesFromAddrs(addrs ...netip.Addr) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(addrs))
 	for _, addr := range addrs {

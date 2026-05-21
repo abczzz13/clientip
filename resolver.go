@@ -29,14 +29,21 @@ type resolverState struct {
 
 // PreferredFallback controls which explicit fallback ResolvePreferred applies
 // after strict extraction fails.
+//
+// Preferred fallback is for operational use cases only. It is not equivalent to
+// strict trusted-proxy validation and should not be used for authorization or
+// trust-boundary decisions.
 type PreferredFallback uint8
 
 const (
-	// PreferredFallbackNone leaves ResolvePreferred without a fallback path.
+	// PreferredFallbackNone leaves ResolvePreferred without a fallback path; the
+	// preferred result is the strict result.
 	PreferredFallbackNone PreferredFallback = iota
-	// PreferredFallbackRemoteAddr falls back to parsed RemoteAddr.
+	// PreferredFallbackRemoteAddr falls back to ParseRemoteAddr(RemoteAddr) when
+	// strict extraction fails for a non-context error.
 	PreferredFallbackRemoteAddr
-	// PreferredFallbackStaticIP falls back to StaticFallbackIP.
+	// PreferredFallbackStaticIP falls back to StaticFallbackIP when strict
+	// extraction fails for a non-context error.
 	PreferredFallbackStaticIP
 )
 
@@ -47,17 +54,25 @@ func (f PreferredFallback) valid() bool {
 // ResolverConfig configures Resolver preferred fallback behavior.
 type ResolverConfig struct {
 	// PreferredFallback selects which explicit fallback ResolvePreferred applies
-	// after strict extraction fails.
+	// after strict extraction fails. The zero value disables fallback.
 	PreferredFallback PreferredFallback
 	// StaticFallbackIP is required when PreferredFallback is
-	// PreferredFallbackStaticIP.
+	// PreferredFallbackStaticIP and must be unset for other fallback modes.
 	StaticFallbackIP netip.Addr
 }
 
 // Resolution captures a resolver result, including fallback metadata.
 type Resolution struct {
+	// Extraction contains the IP and source metadata. It may still contain a
+	// Source when Err is non-nil.
 	Extraction
-	Err          error
+
+	// Err is the strict extraction error, or nil when strict extraction or
+	// preferred fallback produced a usable IP.
+	Err error
+
+	// FallbackUsed reports whether ResolvePreferred returned a configured
+	// fallback result instead of the strict extraction result.
 	FallbackUsed bool
 }
 
@@ -67,12 +82,19 @@ func (r Resolution) OK() bool {
 }
 
 // Resolver orchestrates strict and preferred resolution on top of Extractor.
+//
+// Resolver instances are safe for concurrent reuse. Each resolved request or
+// Input receives request-scoped cache state in its context; use the returned
+// request or Input to preserve that state.
 type Resolver struct {
 	extractor *Extractor
 	config    ResolverConfig
 }
 
 // NewResolver creates a Resolver for a reusable Extractor.
+//
+// The extractor must be non-nil. PreferredFallbackStaticIP requires a valid
+// StaticFallbackIP, and other fallback modes reject StaticFallbackIP.
 func NewResolver(extractor *Extractor, config ResolverConfig) (*Resolver, error) {
 	if extractor == nil {
 		return nil, fmt.Errorf("invalid resolver configuration: %w", errNilResolverExtractor)
@@ -98,6 +120,10 @@ func NewResolver(extractor *Extractor, config ResolverConfig) (*Resolver, error)
 }
 
 // ResolveStrict resolves client IP information without fallback.
+//
+// It returns a request whose context contains the cached strict resolution. Use
+// the returned request for downstream handlers that call
+// StrictResolutionFromContext.
 func (r *Resolver) ResolveStrict(req *http.Request) (*http.Request, Resolution) {
 	if r == nil || r.extractor == nil {
 		return req, Resolution{Err: errNilResolverExtractor}
@@ -177,6 +203,10 @@ func (s *resolverState) PreferredValue() (Resolution, bool) {
 
 // ResolvePreferred resolves client IP information using the configured
 // preferred fallback policy after strict extraction fails.
+//
+// Context cancellation and deadline errors remain terminal and do not use
+// fallback. The returned request context contains both the strict result and the
+// preferred result.
 func (r *Resolver) ResolvePreferred(req *http.Request) (*http.Request, Resolution) {
 	if r == nil || r.extractor == nil {
 		return req, Resolution{Err: errNilResolverExtractor}
@@ -196,7 +226,11 @@ func (r *Resolver) ResolvePreferred(req *http.Request) (*http.Request, Resolutio
 	return req, preferred
 }
 
-// ResolveInputStrict resolves client IP information from framework-agnostic input without fallback.
+// ResolveInputStrict resolves client IP information from framework-agnostic
+// input without fallback.
+//
+// It returns an Input whose Context contains the cached strict resolution. Use
+// the returned Input when calling StrictResolutionFromContext later.
 func (r *Resolver) ResolveInputStrict(input Input) (Input, Resolution) {
 	if r == nil || r.extractor == nil {
 		return input, Resolution{Err: errNilResolverExtractor}
@@ -210,6 +244,10 @@ func (r *Resolver) ResolveInputStrict(input Input) (Input, Resolution) {
 // ResolveInputPreferred resolves client IP information from framework-agnostic
 // input using the configured preferred fallback policy after strict extraction
 // fails.
+//
+// Context cancellation and deadline errors remain terminal and do not use
+// fallback. The returned Input.Context contains both the strict result and the
+// preferred result.
 func (r *Resolver) ResolveInputPreferred(input Input) (Input, Resolution) {
 	if r == nil || r.extractor == nil {
 		return input, Resolution{Err: errNilResolverExtractor}
@@ -227,6 +265,8 @@ func (r *Resolver) ResolveInputPreferred(input Input) (Input, Resolution) {
 }
 
 // StrictResolutionFromContext returns the cached strict resolution, if present.
+//
+// Pass the context from the request or Input returned by a Resolver method.
 func StrictResolutionFromContext(ctx context.Context) (Resolution, bool) {
 	state, ok := resolverStateFromContext(ctx)
 	if !ok {
@@ -236,7 +276,11 @@ func StrictResolutionFromContext(ctx context.Context) (Resolution, bool) {
 	return state.StrictValue()
 }
 
-// PreferredResolutionFromContext returns the cached preferred resolution, if present.
+// PreferredResolutionFromContext returns the cached preferred resolution, if
+// present.
+//
+// Pass the context from the request or Input returned by ResolvePreferred or
+// ResolveInputPreferred.
 func PreferredResolutionFromContext(ctx context.Context) (Resolution, bool) {
 	state, ok := resolverStateFromContext(ctx)
 	if !ok {

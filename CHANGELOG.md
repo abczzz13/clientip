@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified README guidance and Go documentation for config defaults, resolver fallback, framework header handling, source semantics, and Prometheus metrics wiring.
+
 ## [0.0.7] - 2026-04-24
 
 ### Added
@@ -29,7 +33,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **BREAKING:** Preferred fallback is explicit resolver behavior with `Resolution.FallbackUsed`; fallback does not emit separate metrics or log events in this phase.
 - **BREAKING:** `SourceStaticFallback` remains public but is resolver-result-only; it cannot be used in `Config.Sources`.
 - Presets remain `Config` helpers and now document resolver-oriented usage more clearly.
-- Prometheus integration on `main` is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`. The published adapter module remains pinned to root `v0.0.6` until the matching adapter release is tagged.
+- Prometheus integration on `main` is constructor-based: build metrics with `prometheus.New()` or `prometheus.NewWithRegisterer(...)` and assign them through `Config.Metrics`. The published adapter module `github.com/abczzz13/clientip/prometheus@v0.0.5` depends on root `v0.0.7`.
 - `X-Forwarded-For` chain extraction again accepts the host:port and quoted forms already supported by `parseIP`, while `Forwarded` stays strict and now rejects present-but-empty values plus empty delimiter-created elements/parameters as malformed.
 - Internal orchestration now sits behind `internal/engine` and concrete source execution behind `internal/source`.
 
