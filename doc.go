@@ -77,6 +77,12 @@
 // TrustedProxyPrefixes directly, optionally using LoopbackProxyPrefixes,
 // PrivateProxyPrefixes, LocalProxyPrefixes, or ProxyPrefixesFromAddrs.
 //
+// ChainSelection applies to SourceForwarded and SourceXForwardedFor. The
+// default RightmostUntrustedIP selects the nearest untrusted hop before the
+// trailing trusted proxy suffix. LeftmostUntrustedIP selects the earliest
+// untrusted entry and should only be used when trusted proxies are configured
+// and the forwarded chain is produced or sanitized by those proxies.
+//
 // Preferred resolver fallback is explicit and operationally useful, but it is
 // not suitable for authorization or trust-boundary enforcement.
 //
