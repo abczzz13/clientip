@@ -199,19 +199,19 @@ func TestNew_ConfigScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver, err := New(tt.buildConfig())
+			resolver, err := newResolverFromOptions(tt.buildConfig())
 			if tt.wantErrText != "" {
 				if err == nil {
-					t.Fatalf("New() error = nil, want containing %q", tt.wantErrText)
+					t.Fatalf("newResolverFromOptions() error = nil, want containing %q", tt.wantErrText)
 				}
 				if !strings.Contains(err.Error(), tt.wantErrText) {
-					t.Fatalf("New() error = %q, want containing %q", err.Error(), tt.wantErrText)
+					t.Fatalf("newResolverFromOptions() error = %q, want containing %q", err.Error(), tt.wantErrText)
 				}
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("New() error = %v", err)
+				t.Fatalf("newResolverFromOptions() error = %v", err)
 			}
 
 			if diff := cmp.Diff(tt.want, snapshotConfig(resolver.extractor.config)); diff != "" {
@@ -301,12 +301,12 @@ func TestNew_InvalidConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.buildConfig())
+			_, err := newResolverFromOptions(tt.buildConfig())
 			if err == nil {
-				t.Fatalf("New() error = nil, want containing %q", tt.wantErrText)
+				t.Fatalf("newResolverFromOptions() error = nil, want containing %q", tt.wantErrText)
 			}
 			if !strings.Contains(err.Error(), tt.wantErrText) {
-				t.Fatalf("New() error = %q, want containing %q", err.Error(), tt.wantErrText)
+				t.Fatalf("newResolverFromOptions() error = %q, want containing %q", err.Error(), tt.wantErrText)
 			}
 		})
 	}
@@ -388,10 +388,10 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resolver, err := New(tt.buildConfig())
+			resolver, err := newResolverFromOptions(tt.buildConfig())
 			if tt.wantErrText == "" && tt.wantSources != nil {
 				if err != nil {
-					t.Fatalf("New() error = %v", err)
+					t.Fatalf("newResolverFromOptions() error = %v", err)
 				}
 
 				if diff := cmp.Diff(tt.wantSources, resolver.extractor.config.sourcePriority); diff != "" {
@@ -403,7 +403,7 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 			got := errorTextStateOf(err, tt.wantErrText)
 			want := errorTextState{HasErr: true, ContainsText: true}
 			if diff := cmp.Diff(want, got); diff != "" {
-				t.Fatalf("New() error mismatch (-want +got):\n%s", diff)
+				t.Fatalf("newResolverFromOptions() error mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -413,9 +413,9 @@ func TestWithTrustedPrivateProxyRanges_AddsExpectedCIDRs(t *testing.T) {
 	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = PrivateProxyPrefixes()
 
-	resolver, err := New(cfg)
+	resolver, err := newResolverFromOptions(cfg)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newResolverFromOptions() error = %v", err)
 	}
 
 	got := snapshotConfig(resolver.extractor.config).TrustedProxyCIDRs

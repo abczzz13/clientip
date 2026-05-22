@@ -401,4 +401,3 @@ func TestExtractInput_UsesInputContextInLogs(t *testing.T) {
 
 	assertCommonSecurityWarningAttrs(t, entry.attrs, SecurityEventChainTooLong, SourceXForwardedFor, "", "1.1.1.1:8080")
 }
-

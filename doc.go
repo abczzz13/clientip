@@ -55,9 +55,10 @@
 // New uses functional options. Zero options select safe defaults: RemoteAddr
 // only, DefaultMaxChainLength, no-op logging, and no-op observation.
 //
-// Source values stay public and opaque. Use the built-in extractor sources for
-// request-derived extraction, SourceStaticFallback for resolver static fallback
-// results, and HeaderSource for custom headers.
+// Source values are public. Use the built-in extractor sources for
+// request-derived extraction and HeaderSource for custom headers.
+// SourceStaticFallback is a result-only sentinel that appears in Result.Source
+// after a successful StaticFallback; it cannot be configured with WithSources.
 //
 // Resolver walks configured sources in order. Source-unavailable errors allow
 // the next source to run, while malformed headers, proxy-trust failures, chain

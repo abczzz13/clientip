@@ -3,7 +3,6 @@ package clientip
 import (
 	"context"
 	"net/http"
-	"net/textproto"
 )
 
 type headerValuesFunc func(name string) []string
@@ -32,19 +31,8 @@ func (r requestView) path() string {
 	return r.pathValue
 }
 
-func (r requestView) values(name string) []string {
-	if r.headerMap != nil {
-		return r.headerMap[textproto.CanonicalMIMEHeaderKey(name)]
-	}
-	if r.headerFunc != nil {
-		return r.headerFunc(name)
-	}
-
-	return nil
-}
-
-// valuesCanonical performs a header lookup without canonicalizing the name.
-// Callers must pass an already-canonical MIME header key (e.g. "X-Forwarded-For").
+// valuesCanonical performs a header lookup. Callers must pass an
+// already-canonical MIME header key (e.g. "X-Forwarded-For").
 func (r requestView) valuesCanonical(name string) []string {
 	if r.headerMap != nil {
 		return r.headerMap[name]

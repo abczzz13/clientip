@@ -41,16 +41,19 @@ var (
 	SourceXRealIP = Source{kind: sourceXRealIP}
 	// SourceRemoteAddr resolves from Request.RemoteAddr.
 	SourceRemoteAddr = Source{kind: sourceRemoteAddr}
-	// SourceStaticFallback identifies resolver-only static fallback output. It
-	// cannot be configured with WithSources.
+	// SourceStaticFallback is a result-only sentinel. It appears in Result.Source
+	// when ResolveOperational returns a StaticFallback IP. Passing it to
+	// WithSources is rejected by New.
 	SourceStaticFallback = Source{kind: sourceStaticFallback}
 )
 
 // Source identifies one extraction source in priority order.
 //
-// Source values are opaque. Use built-in values for standard sources and
-// HeaderSource for custom headers; compare sources with Equal or String rather
-// than inspecting fields.
+// Construct Source values with the built-in variables (SourceForwarded,
+// SourceXForwardedFor, ...) or HeaderSource for custom headers. Sources stored
+// by the resolver are canonicalized at construction time, so == comparison
+// against a built-in or HeaderSource-produced value is reliable. Use Equal when
+// comparing values that may not yet be canonical (for example, raw user input).
 type Source struct {
 	kind       sourceKind
 	headerName string

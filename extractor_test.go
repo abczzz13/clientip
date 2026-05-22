@@ -1278,7 +1278,6 @@ func TestExtract_NilRequest(t *testing.T) {
 	if !errors.Is(extractErr, ErrNilRequest) {
 		t.Fatalf("error = %v, want ErrNilRequest", extractErr)
 	}
-
 }
 
 func TestExtract_ErrorSourceReporting(t *testing.T) {
@@ -1543,7 +1542,6 @@ func TestExtractInput_NilContextDefaultsBackground(t *testing.T) {
 	if got, want := extraction.Source, SourceRemoteAddr; got != want {
 		t.Fatalf("Source = %q, want %q", got, want)
 	}
-
 }
 
 func TestNew_ConfigInputImmutability(t *testing.T) {
