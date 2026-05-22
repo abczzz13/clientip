@@ -117,10 +117,6 @@ type options struct {
 	// logging. Typed nil implementations are rejected during validation.
 	Logger Logger
 
-	// metrics receives internal extraction counters. It is intentionally
-	// unexported; use Observer for public result-level observation.
-	metrics metricsSink
-
 	// Observer receives one event per resolver call on a valid Resolver. Nil
 	// disables observation. Typed nil implementations are rejected during
 	// validation.
@@ -248,9 +244,9 @@ type config struct {
 	sourcePriority   []Source
 	sourceHeaderKeys []string
 
-	logger   Logger
-	metrics  metricsSink
-	observer Observer
+	logger     Logger
+	loggerNoop bool
+	observer   Observer
 }
 
 func (c *config) validate() error {
@@ -291,9 +287,6 @@ func (c *config) validate() error {
 
 	if isNilValue(c.logger) {
 		return fmt.Errorf("logger cannot be nil")
-	}
-	if isNilValue(c.metrics) {
-		return fmt.Errorf("metrics cannot be nil")
 	}
 	if isNilValue(c.observer) {
 		return fmt.Errorf("observer cannot be nil")
@@ -444,7 +437,7 @@ func defaultConfig() *config {
 		maxChainLength:    defaults.MaxChainLength,
 		chainSelection:    defaults.ChainSelection,
 		logger:            noopLogger{},
-		metrics:           noopMetricSink{},
+		loggerNoop:        true,
 		observer:          noopObserver{},
 		sourcePriority:    cloneSources(defaults.Sources),
 	}
@@ -486,9 +479,7 @@ func configFromPublic(public options) (*config, error) {
 
 	if public.Logger != nil {
 		cfg.logger = public.Logger
-	}
-	if public.metrics != nil {
-		cfg.metrics = public.metrics
+		cfg.loggerNoop = false
 	}
 	if public.Observer != nil {
 		cfg.observer = public.Observer

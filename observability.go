@@ -40,36 +40,6 @@ type noopLogger struct{}
 
 func (noopLogger) WarnContext(context.Context, string, ...any) {}
 
-// metricsSink records extraction outcomes and security events emitted by the
-// internal extractor. It is kept unexported; Observer is the public integration
-// point.
-//
-// Implementations should be safe for concurrent use, as a single extractor
-// instance is typically shared across many goroutines.
-//
-// Security event labels are the exported SecurityEvent... constants.
-type metricsSink interface {
-	// RecordExtractionSuccess is called when a source successfully returns a
-	// client IP.
-	RecordExtractionSuccess(source string)
-	// RecordExtractionFailure is called when a source is attempted but cannot
-	// return a valid client IP.
-	RecordExtractionFailure(source string)
-	// RecordSecurityEvent is called when the extractor observes a
-	// security-relevant condition.
-	RecordSecurityEvent(event string)
-}
-
-// noopMetricSink is the default metricsSink implementation when metrics are not
-// explicitly configured.
-type noopMetricSink struct{}
-
-func (noopMetricSink) RecordExtractionSuccess(string) {}
-
-func (noopMetricSink) RecordExtractionFailure(string) {}
-
-func (noopMetricSink) RecordSecurityEvent(string) {}
-
 // Observer receives one event per resolver call on a valid Resolver.
 //
 // Implementations should be safe for concurrent use. Observer is result-level,
