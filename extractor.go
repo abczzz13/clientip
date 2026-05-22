@@ -12,11 +12,8 @@ import (
 //
 // extractor instances are safe for concurrent reuse.
 type extractor struct {
-	config          *config
-	sources         []configuredSource
-	clientIP        clientIPPolicy
-	proxy           proxyPolicy
-	extractViewFunc func(requestView) (Extraction, error)
+	config  *config
+	sources []configuredSource
 }
 
 type configuredSource struct {
@@ -39,19 +36,7 @@ func newExtractor(public options) (*extractor, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	extractor := &extractor{
-		config: cfg,
-		clientIP: clientIPPolicy{
-			AllowPrivateIPs:             cfg.allowPrivateIPs,
-			AllowReservedClientPrefixes: cfg.allowReservedClientPrefixes,
-		},
-		proxy: proxyPolicy{
-			TrustedProxyCIDRs: cfg.trustedProxyCIDRs,
-			TrustedProxyMatch: cfg.trustedProxyMatch,
-			MinTrustedProxies: cfg.minTrustedProxies,
-			MaxTrustedProxies: cfg.maxTrustedProxies,
-		},
-	}
+	extractor := &extractor{config: cfg}
 	extractor.sources = extractor.buildConfiguredSources(cfg.sourcePriority)
 
 	return extractor, nil
@@ -67,6 +52,10 @@ func (e *extractor) Extract(r *http.Request) (Extraction, error) {
 		return Extraction{}, ErrNilRequest
 	}
 
+	// sourceHeaderKeys is empty only when the configured sources contain no
+	// header-based source. Validation guarantees at least one configured
+	// source, so reaching this branch means the only configured source is
+	// SourceRemoteAddr.
 	if len(e.config.sourceHeaderKeys) == 0 {
 		if ctx := r.Context(); ctx.Err() != nil {
 			return Extraction{}, ctx.Err()
@@ -87,23 +76,18 @@ func (e *extractor) ExtractInput(input Input) (Extraction, error) {
 		return Extraction{}, err
 	}
 
+	// See Extract: an empty sourceHeaderKeys means SourceRemoteAddr is the
+	// only configured source.
 	if len(e.config.sourceHeaderKeys) == 0 {
 		return e.extractFromRemoteAddr(input.RemoteAddr)
 	}
 
 	return e.extractRequestView(requestViewFromInput(input))
 }
+
 func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 	if err := r.context().Err(); err != nil {
 		return Extraction{}, err
-	}
-
-	if e.extractViewFunc != nil {
-		result, err := e.extractViewFunc(r)
-		if err != nil && !result.Source.valid() {
-			result.Source = sourceValueFromError(err)
-		}
-		return result, err
 	}
 
 	for i := range e.sources {
@@ -170,7 +154,7 @@ func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 
 func (e *extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
 	source := builtinSource(sourceRemoteAddr)
-	result, failure := remoteAddrExtractor{clientIPPolicy: e.clientIP}.extract(remoteAddr, source)
+	result, failure := remoteAddrExtractor{clientIPPolicy: e.config.clientIP}.extract(remoteAddr, source)
 	if failure != nil {
 		err := adaptRemoteAddrFailure(failure, source)
 		result.Source = source
@@ -207,8 +191,8 @@ func (e *extractor) buildConfiguredSources(sources []Source) []configuredSource 
 					return parts, nil
 				},
 				parseClientIP:     parseChainIP,
-				clientIP:          e.clientIP,
-				trustedProxy:      e.proxy,
+				clientIP:          e.config.clientIP,
+				trustedProxy:      e.config.proxy,
 				selection:         e.config.chainSelection,
 				collectDebugInfo:  e.config.debugMode,
 				untrustedChainSep: ", ",
@@ -224,19 +208,19 @@ func (e *extractor) buildConfiguredSources(sources []Source) []configuredSource 
 					return parts, nil
 				},
 				parseClientIP:     parseIP,
-				clientIP:          e.clientIP,
-				trustedProxy:      e.proxy,
+				clientIP:          e.config.clientIP,
+				trustedProxy:      e.config.proxy,
 				selection:         e.config.chainSelection,
 				collectDebugInfo:  e.config.debugMode,
 				untrustedChainSep: ", ",
 			}}
 		case sourceRemoteAddr:
-			configuredSource.remote = remoteAddrExtractor{clientIPPolicy: e.clientIP}
+			configuredSource.remote = remoteAddrExtractor{clientIPPolicy: e.config.clientIP}
 		default:
 			configuredSource.single = singleHeaderExtractor{policy: singleHeaderPolicy{
 				headerName:   headerName,
-				clientIP:     e.clientIP,
-				trustedProxy: e.proxy,
+				clientIP:     e.config.clientIP,
+				trustedProxy: e.config.proxy,
 			}}
 		}
 
@@ -244,13 +228,4 @@ func (e *extractor) buildConfiguredSources(sources []Source) []configuredSource 
 	}
 
 	return configured
-}
-
-func sourceValueFromError(err error) Source {
-	var sourceErr interface{ SourceValue() Source }
-	if errors.As(err, &sourceErr) {
-		return sourceErr.SourceValue()
-	}
-
-	return Source{}
 }

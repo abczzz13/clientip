@@ -33,10 +33,10 @@ func RemoteAddrFallback() Fallback { return Fallback{mode: fallbackRemoteAddr} }
 
 // StaticFallback falls back to a configured static IP.
 //
-// Static fallback is a caller-supplied operational value. It is normalized, but
-// not checked against the package's client-IP plausibility policy; callers that
-// need a routable or policy-valid fallback should validate that before passing
-// it here.
+// Static fallback is a caller-supplied operational value. It is normalized,
+// but not checked against the package's client-IP plausibility policy; callers
+// that need a routable or policy-valid fallback should validate that before
+// passing it here.
 func StaticFallback(ip netip.Addr) Fallback {
 	return Fallback{mode: fallbackStaticIP, staticIP: normalizeIP(ip)}
 }
@@ -71,6 +71,12 @@ func (r FallbackReason) String() string {
 }
 
 // Result captures a resolver result, including fallback metadata.
+//
+// On strict success Source identifies the extraction source that produced IP.
+// On fallback success Source is SourceRemoteAddr for RemoteAddrFallback or
+// SourceStaticFallback for StaticFallback, and FallbackReason carries the
+// strict failure category that triggered the fallback. On error Source may
+// still identify the source that failed.
 type Result struct {
 	// Extraction contains the IP and source metadata. It may still contain a
 	// Source when Err is non-nil.
@@ -93,10 +99,8 @@ func (r Result) OK() bool {
 	return r.Err == nil && r.IP.IsValid()
 }
 
-// IsValid reports whether the result contains a usable IP without error.
-func (r Result) IsValid() bool { return r.OK() }
-
-// Classify returns a coarse result kind suitable for policy and metrics labels.
+// Classify returns a coarse result kind suitable for policy and metrics
+// labels.
 func (r Result) Classify() ResultKind {
 	if r.FallbackUsed {
 		return ResultFallback
@@ -200,8 +204,8 @@ func (r *Resolver) ResolveHeaders(ctx context.Context, remoteAddr string, header
 	return r.ResolveInput(Input{Context: ctx, RemoteAddr: remoteAddr, Headers: headers})
 }
 
-// Middleware returns pass-through net/http middleware that stores Result in the
-// request context. It never rejects; downstream handlers decide policy.
+// Middleware returns pass-through net/http middleware that stores Result in
+// the request context. It never rejects; downstream handlers decide policy.
 func (r *Resolver) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -251,10 +255,9 @@ func (r *Resolver) applyFallback(remoteAddr string, fallback Fallback, strictErr
 			}, true
 		}
 	case fallbackStaticIP:
-		ip := normalizeIP(fallback.staticIP)
-		if ip.IsValid() {
+		if fallback.staticIP.IsValid() {
 			return Result{
-				Extraction:     Extraction{IP: ip, Source: SourceStaticFallback},
+				Extraction:     Extraction{IP: fallback.staticIP, Source: SourceStaticFallback},
 				FallbackUsed:   true,
 				FallbackReason: reason,
 			}, true

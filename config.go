@@ -16,10 +16,6 @@ type optionFunc func(*options)
 
 func (f optionFunc) applyOption(c *options) { f(c) }
 
-// applyOption lets internal tests and preset code apply a complete options
-// snapshot.
-func (c options) applyOption(dst *options) { *dst = c }
-
 const (
 	// DefaultMaxChainLength is the maximum number of IPs allowed in a proxy
 	// chain. This prevents DoS attacks using extremely long header values that
@@ -40,8 +36,8 @@ const (
 	// explicit.
 	//
 	// RightmostUntrustedIP selects the rightmost untrusted address before the
-	// trailing trusted proxy suffix. This is the default and recommended mode for
-	// most deployments.
+	// trailing trusted proxy suffix. This is the default and recommended mode
+	// for most deployments.
 	RightmostUntrustedIP ChainSelection = iota + 1
 	// LeftmostUntrustedIP selects the leftmost untrusted address before the
 	// trailing trusted proxy suffix. Use it only when trusted proxies are
@@ -70,12 +66,13 @@ func (s ChainSelection) valid() bool {
 // options configures an extractor.
 //
 // Start from defaultOptions or one of the Preset... helpers unless you need a
-// custom proxy topology. New normalizes prefixes and sources before validation.
+// custom proxy topology. New normalizes prefixes and sources before
+// validation.
 type options struct {
 	// TrustedProxyPrefixes contains upstream proxy ranges that are allowed to
-	// supply header-based client IPs. Any header source in Sources requires this
-	// field to be non-empty, and the immediate RemoteAddr must match one of these
-	// prefixes when a header is present.
+	// supply header-based client IPs. Any header source in Sources requires
+	// this field to be non-empty, and the immediate RemoteAddr must match one
+	// of these prefixes when a header is present.
 	TrustedProxyPrefixes []netip.Prefix
 
 	// MinTrustedProxies rejects parsed proxy chains with fewer than this many
@@ -86,13 +83,14 @@ type options struct {
 	// trusted proxies. A value of 0 means no maximum.
 	MaxTrustedProxies int
 
-	// AllowPrivateIPs allows RFC1918 and unique-local client addresses. Loopback,
-	// link-local, multicast, and unspecified addresses are still rejected.
+	// AllowPrivateIPs allows RFC1918 and unique-local client addresses.
+	// Loopback, link-local, multicast, and unspecified addresses are still
+	// rejected.
 	AllowPrivateIPs bool
 
 	// AllowedReservedClientPrefixes allows selected reserved or special-use
-	// client ranges that are otherwise rejected, such as documentation prefixes in
-	// tests.
+	// client ranges that are otherwise rejected, such as documentation
+	// prefixes in tests.
 	AllowedReservedClientPrefixes []netip.Prefix
 
 	// MaxChainLength limits the number of IPs accepted in Forwarded and
@@ -100,13 +98,14 @@ type options struct {
 	MaxChainLength int
 
 	// ChainSelection selects the client candidate from Forwarded and
-	// X-Forwarded-For chains. Leave zero for the default
-	// RightmostUntrustedIP. LeftmostUntrustedIP requires TrustedProxyPrefixes
-	// when a chain source is configured.
+	// X-Forwarded-For chains. Leave zero for the default RightmostUntrustedIP.
+	// LeftmostUntrustedIP requires TrustedProxyPrefixes when a chain source is
+	// configured.
 	ChainSelection ChainSelection
 
 	// DebugInfo includes parsed chain details in successful chain-source
-	// extractions. It is intended for diagnostics rather than hot-path logging.
+	// extractions. It is intended for diagnostics rather than hot-path
+	// logging.
 	DebugInfo bool
 
 	// Sources is the strict extraction order. A nil slice uses the default
@@ -182,8 +181,8 @@ func WithObserver(observer Observer) Option {
 // defaultOptions returns the default extractor configuration.
 //
 // The default is safe for direct client-to-app traffic: RemoteAddr only,
-// RightmostUntrustedIP chain selection, DefaultMaxChainLength, no trusted proxy
-// prefixes, and no-op logging/metrics.
+// RightmostUntrustedIP chain selection, DefaultMaxChainLength, no trusted
+// proxy prefixes, and no-op logging/metrics.
 func defaultOptions() options {
 	return options{
 		MaxChainLength: DefaultMaxChainLength,
@@ -243,6 +242,13 @@ type config struct {
 
 	sourcePriority   []Source
 	sourceHeaderKeys []string
+
+	// clientIP and proxy are derived from the fields above and populated by
+	// configFromPublic after all other normalization is complete. They are
+	// kept here so source extractors can capture stable handles without
+	// round-tripping through config on every hot-path call.
+	clientIP clientIPPolicy
+	proxy    proxyPolicy
 
 	logger     Logger
 	loggerNoop bool
@@ -487,6 +493,16 @@ func configFromPublic(public options) (*config, error) {
 
 	cfg.sourceHeaderKeys = sourceHeaderKeys(cfg.sourcePriority)
 	cfg.trustedProxyMatch = newPrefixMatcher(cfg.trustedProxyCIDRs)
+	cfg.clientIP = clientIPPolicy{
+		AllowPrivateIPs:             cfg.allowPrivateIPs,
+		AllowReservedClientPrefixes: cfg.allowReservedClientPrefixes,
+	}
+	cfg.proxy = proxyPolicy{
+		TrustedProxyCIDRs: cfg.trustedProxyCIDRs,
+		TrustedProxyMatch: cfg.trustedProxyMatch,
+		MinTrustedProxies: cfg.minTrustedProxies,
+		MaxTrustedProxies: cfg.maxTrustedProxies,
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, err

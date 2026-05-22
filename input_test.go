@@ -191,7 +191,7 @@ func TestRequestViewFromInput_HeaderProviderPaths(t *testing.T) {
 				Values     []string
 			}{
 				RemoteAddr: view.remoteAddr(),
-				Values:     view.values(tt.headerName),
+				Values:     view.valuesCanonical(tt.headerName),
 			}
 
 			want := struct {

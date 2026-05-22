@@ -17,6 +17,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Added pass-through `Resolver.Middleware()` and `FromContext` for net/http integrations.
 - Added `Result`, fallback metadata, `Result.Classify()`, and result-level `Observer` wiring.
 - **BREAKING:** Prometheus adapter now implements `Observer` and records only `ip_resolution_total{source,result}`.
+- **BREAKING:** Prometheus adapter type renamed from `PrometheusMetrics` to `Observer` to avoid package-name stutter at call sites.
 - Clarified README guidance and Go documentation for config defaults, resolver fallback, framework header handling, source semantics, and Prometheus metrics wiring.
 
 Older API names appearing below are historical release notes for already-published versions.

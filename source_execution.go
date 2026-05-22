@@ -112,7 +112,8 @@ func (e *extractor) logProxyValidationWarning(r requestView, source Source, err 
 
 	var proxyErr *ProxyValidationError
 	if errors.As(err, &proxyErr) {
-		e.logSecurityWarning(r, source, event, msg,
+		e.logSecurityWarning(
+			r, source, event, msg,
 			"trusted_proxy_count", proxyErr.TrustedProxyCount,
 			"min_trusted_proxies", proxyErr.MinTrustedProxies,
 			"max_trusted_proxies", proxyErr.MaxTrustedProxies,
@@ -133,7 +134,8 @@ func (e *extractor) handleChainError(
 	if errors.Is(err, ErrChainTooLong) && !e.config.loggerNoop {
 		var chainErr *ChainTooLongError
 		if errors.As(err, &chainErr) {
-			e.logSecurityWarning(r, source, SecurityEventChainTooLong, chainTooLongMessage,
+			e.logSecurityWarning(
+				r, source, SecurityEventChainTooLong, chainTooLongMessage,
 				"chain_length", chainErr.ChainLength,
 				"max_length", chainErr.MaxLength,
 			)
@@ -167,7 +169,7 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 	case failureProxyValidation:
 		err := &ProxyValidationError{
 			ExtractionError: ExtractionError{
-				Err:    proxyCountError(failure.trustedProxyCount, e.proxy),
+				Err:    proxyCountError(failure.trustedProxyCount, e.config.proxy),
 				Source: source,
 			},
 			Chain:             failure.chain,
@@ -201,7 +203,8 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 	case failureSourceUnavailable:
 		return &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName}
 	case failureMultipleHeaders:
-		e.logSecurityWarning(r, sourceName, SecurityEventMultipleHeaders, "multiple single-IP headers received - possible spoofing attempt",
+		e.logSecurityWarning(
+			r, sourceName, SecurityEventMultipleHeaders, "multiple single-IP headers received - possible spoofing attempt",
 			"header", failure.headerName,
 			"header_count", failure.headerCount,
 		)
@@ -212,7 +215,8 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 			RemoteAddr:      failure.remoteAddr,
 		}
 	case failureUntrustedProxy:
-		e.logSecurityWarning(r, sourceName, SecurityEventUntrustedProxy, "request received from untrusted proxy while single-header source is present",
+		e.logSecurityWarning(
+			r, sourceName, SecurityEventUntrustedProxy, "request received from untrusted proxy while single-header source is present",
 			"header", failure.headerName,
 		)
 		return &ProxyValidationError{

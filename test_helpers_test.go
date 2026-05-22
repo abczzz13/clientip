@@ -93,6 +93,17 @@ func mustNewExtractor(t *testing.T, cfg options) *extractor {
 	return extractor
 }
 
+// newResolverFromOptions builds a *Resolver from an internal options value.
+// Tests use it when they want to assert on normalized config without round-
+// tripping through the public functional-option API.
+func newResolverFromOptions(opts options) (*Resolver, error) {
+	extractor, err := newExtractor(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Resolver{extractor: extractor}, nil
+}
+
 func mustProxyPrefixesFromAddrs(t *testing.T, addrs ...netip.Addr) []netip.Prefix {
 	t.Helper()
 
