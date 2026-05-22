@@ -1,12 +1,13 @@
-module github.com/abczzz13/clientip/prometheus
+module github.com/abczzz13/clientip/observe/prometheus
 
 go 1.21
 
 require (
 	github.com/abczzz13/clientip v0.0.7
-	github.com/google/go-cmp v0.7.0
 	github.com/prometheus/client_golang v1.21.1
 )
+
+replace github.com/abczzz13/clientip => ../..
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
