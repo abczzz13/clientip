@@ -25,7 +25,6 @@ func (e *extractor) extractChainSource(
 		return Extraction{}, e.adaptChainFailure(r, source.source, failure, untrustedProxyMessage)
 	}
 
-	e.config.metrics.RecordExtractionSuccess(source.name)
 	return result, nil
 }
 
@@ -38,7 +37,6 @@ func (e *extractor) extractSingleHeaderSource(r requestView, source *configuredS
 		return Extraction{}, e.adaptSingleHeaderFailure(r, source.source, failure)
 	}
 
-	e.config.metrics.RecordExtractionSuccess(source.name)
 	return result, nil
 }
 
@@ -48,12 +46,9 @@ func (e *extractor) extractRemoteAddrSource(r requestView, source *configuredSou
 		if failure.kind == failureSourceUnavailable {
 			return Extraction{}, source.unavailableErr
 		}
-		e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
-		e.config.metrics.RecordExtractionFailure(source.name)
 		return Extraction{}, adaptRemoteAddrFailure(failure, source.source)
 	}
 
-	e.config.metrics.RecordExtractionSuccess(source.name)
 	return result, nil
 }
 
@@ -77,6 +72,10 @@ func sourceIsTerminalError(err error) bool {
 }
 
 func (e *extractor) logSecurityWarning(r requestView, source Source, event, msg string, attrs ...any) {
+	if e.config.loggerNoop {
+		return
+	}
+
 	baseAttrs := []any{
 		"event", event,
 		"source", source.String(),
@@ -102,6 +101,10 @@ func proxyValidationWarningDetails(err error) (event, msg string, ok bool) {
 }
 
 func (e *extractor) logProxyValidationWarning(r requestView, source Source, err error) {
+	if e.config.loggerNoop {
+		return
+	}
+
 	event, msg, ok := proxyValidationWarningDetails(err)
 	if !ok {
 		return
@@ -127,7 +130,7 @@ func (e *extractor) handleChainError(
 	chainTooLongMessage string,
 	handleParseError func(error),
 ) {
-	if errors.Is(err, ErrChainTooLong) {
+	if errors.Is(err, ErrChainTooLong) && !e.config.loggerNoop {
 		var chainErr *ChainTooLongError
 		if errors.As(err, &chainErr) {
 			e.logSecurityWarning(r, source, SecurityEventChainTooLong, chainTooLongMessage,
@@ -142,8 +145,6 @@ func (e *extractor) handleChainError(
 	if handleParseError != nil {
 		handleParseError(err)
 	}
-
-	e.config.metrics.RecordExtractionFailure(source.String())
 }
 
 func (e *extractor) adaptChainFailure(r requestView, source Source, failure *extractionFailure, untrustedProxyMessage string) error {
@@ -155,9 +156,7 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 	case failureSourceUnavailable:
 		return &ExtractionError{Err: ErrSourceUnavailable, Source: source}
 	case failureUntrustedProxy:
-		e.config.metrics.RecordSecurityEvent(SecurityEventUntrustedProxy)
 		e.logSecurityWarning(r, source, SecurityEventUntrustedProxy, untrustedProxyMessage)
-		e.config.metrics.RecordExtractionFailure(source.String())
 		return &ProxyValidationError{
 			ExtractionError:   ExtractionError{Err: ErrUntrustedProxy, Source: source},
 			Chain:             failure.chain,
@@ -168,7 +167,7 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 	case failureProxyValidation:
 		err := &ProxyValidationError{
 			ExtractionError: ExtractionError{
-				Err:    e.validateProxyCount(failure.trustedProxyCount),
+				Err:    proxyCountError(failure.trustedProxyCount, e.proxy),
 				Source: source,
 			},
 			Chain:             failure.chain,
@@ -177,14 +176,10 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 			MaxTrustedProxies: failure.maxTrustedProxies,
 		}
 		e.logProxyValidationWarning(r, source, err)
-		e.config.metrics.RecordExtractionFailure(source.String())
 		return err
 	case failureEmptyChain:
-		e.config.metrics.RecordExtractionFailure(source.String())
 		return &ExtractionError{Err: ErrInvalidIP, Source: source}
 	case failureInvalidClientIP:
-		e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
-		e.config.metrics.RecordExtractionFailure(source.String())
 		return &InvalidIPError{
 			ExtractionError: ExtractionError{Err: ErrInvalidIP, Source: source},
 			Chain:           failure.chain,
@@ -193,7 +188,6 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 			TrustedProxies:  failure.trustedProxyCount,
 		}
 	default:
-		e.config.metrics.RecordExtractionFailure(source.String())
 		return &ExtractionError{Err: ErrInvalidIP, Source: source}
 	}
 }
@@ -207,12 +201,10 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 	case failureSourceUnavailable:
 		return &ExtractionError{Err: ErrSourceUnavailable, Source: sourceName}
 	case failureMultipleHeaders:
-		e.config.metrics.RecordSecurityEvent(SecurityEventMultipleHeaders)
 		e.logSecurityWarning(r, sourceName, SecurityEventMultipleHeaders, "multiple single-IP headers received - possible spoofing attempt",
 			"header", failure.headerName,
 			"header_count", failure.headerCount,
 		)
-		e.config.metrics.RecordExtractionFailure(sourceName.String())
 		return &MultipleHeadersError{
 			ExtractionError: ExtractionError{Err: ErrMultipleSingleIPHeaders, Source: sourceName},
 			HeaderCount:     failure.headerCount,
@@ -220,11 +212,9 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 			RemoteAddr:      failure.remoteAddr,
 		}
 	case failureUntrustedProxy:
-		e.config.metrics.RecordSecurityEvent(SecurityEventUntrustedProxy)
 		e.logSecurityWarning(r, sourceName, SecurityEventUntrustedProxy, "request received from untrusted proxy while single-header source is present",
 			"header", failure.headerName,
 		)
-		e.config.metrics.RecordExtractionFailure(sourceName.String())
 		return &ProxyValidationError{
 			ExtractionError:   ExtractionError{Err: ErrUntrustedProxy, Source: sourceName},
 			Chain:             failure.chain,
@@ -233,8 +223,6 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 			MaxTrustedProxies: failure.maxTrustedProxies,
 		}
 	case failureInvalidClientIP:
-		e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
-		e.config.metrics.RecordExtractionFailure(sourceName.String())
 		return &InvalidIPError{
 			ExtractionError: ExtractionError{Err: ErrInvalidIP, Source: sourceName},
 			ExtractedIP:     failure.extractedIP,
@@ -281,13 +269,11 @@ func adaptXFFParseError(err error, source Source, extractor *extractor) error {
 	return err
 }
 
-func adaptChainLengthError(err error, source Source, extractor *extractor) error {
+func adaptChainLengthError(err error, source Source, _ *extractor) error {
 	var chainErr *chainTooLongParseError
 	if !errors.As(err, &chainErr) {
 		return nil
 	}
-
-	extractor.config.metrics.RecordSecurityEvent(SecurityEventChainTooLong)
 
 	return &ChainTooLongError{
 		ExtractionError: ExtractionError{Err: ErrChainTooLong, Source: source},
@@ -296,34 +282,20 @@ func adaptChainLengthError(err error, source Source, extractor *extractor) error
 	}
 }
 
-func (e *extractor) validateProxyCount(trustedCount int) error {
-	err := validateProxyCountPolicy(trustedCount, e.proxy)
+func proxyCountError(trustedCount int, proxy proxyPolicy) error {
+	err := validateProxyCountPolicy(trustedCount, proxy)
 	if err == nil {
 		return nil
 	}
 
 	switch {
 	case errors.Is(err, ErrNoTrustedProxies):
-		e.config.metrics.RecordSecurityEvent(SecurityEventNoTrustedProxies)
 		return ErrNoTrustedProxies
 	case errors.Is(err, ErrTooFewTrustedProxies):
-		e.config.metrics.RecordSecurityEvent(SecurityEventTooFewTrustedProxies)
 		return ErrTooFewTrustedProxies
 	case errors.Is(err, ErrTooManyTrustedProxies):
-		e.config.metrics.RecordSecurityEvent(SecurityEventTooManyTrustedProxies)
 		return ErrTooManyTrustedProxies
 	default:
 		return err
-	}
-}
-
-func (e *extractor) recordInvalidClientIPDisposition(disposition clientIPDisposition) {
-	switch disposition {
-	case clientIPInvalid:
-		e.config.metrics.RecordSecurityEvent(SecurityEventInvalidIP)
-	case clientIPReserved:
-		e.config.metrics.RecordSecurityEvent(SecurityEventReservedIP)
-	case clientIPPrivate:
-		e.config.metrics.RecordSecurityEvent(SecurityEventPrivateIP)
 	}
 }

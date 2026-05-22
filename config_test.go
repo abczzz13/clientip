@@ -10,14 +10,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-type testTypedNilMetricSink struct{}
-
-func (*testTypedNilMetricSink) RecordExtractionSuccess(string) {}
-
-func (*testTypedNilMetricSink) RecordExtractionFailure(string) {}
-
-func (*testTypedNilMetricSink) RecordSecurityEvent(string) {}
-
 type configSnapshot struct {
 	TrustedProxyCIDRs     []string
 	MinTrustedProxies     int
@@ -283,15 +275,6 @@ func TestNew_InvalidConfig(t *testing.T) {
 				return cfg
 			},
 			wantErrText: "logger cannot be nil",
-		},
-		{
-			name: "typed nil metrics",
-			buildConfig: func() options {
-				cfg := defaultOptions()
-				cfg.metrics = (*testTypedNilMetricSink)(nil)
-				return cfg
-			},
-			wantErrText: "metrics cannot be nil",
 		},
 		{
 			name: "leftmost without trusted proxies",

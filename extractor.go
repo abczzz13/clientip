@@ -130,7 +130,6 @@ func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 					if !errors.Is(err, ErrInvalidForwardedHeader) {
 						return
 					}
-					e.config.metrics.RecordSecurityEvent(SecurityEventMalformedForwarded)
 					e.logSecurityWarning(r, source.source, SecurityEventMalformedForwarded, "malformed Forwarded header received", "parse_error", err.Error())
 				},
 			)
@@ -153,14 +152,14 @@ func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 
 		if sourceIsTerminalError(err) {
 			if !result.Source.valid() {
-				result.Source = sourceValueFromError(err)
+				result.Source = source.source
 			}
 			return result, err
 		}
 
 		if i == len(e.sources)-1 {
 			if !result.Source.valid() {
-				result.Source = sourceValueFromError(err)
+				result.Source = source.source
 			}
 			return result, err
 		}
@@ -173,16 +172,11 @@ func (e *extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error)
 	source := builtinSource(sourceRemoteAddr)
 	result, failure := remoteAddrExtractor{clientIPPolicy: e.clientIP}.extract(remoteAddr, source)
 	if failure != nil {
-		if failure.kind != failureSourceUnavailable {
-			e.recordInvalidClientIPDisposition(failure.clientIPDisposition)
-			e.config.metrics.RecordExtractionFailure(source.String())
-		}
 		err := adaptRemoteAddrFailure(failure, source)
-		result.Source = sourceValueFromError(err)
+		result.Source = source
 		return result, err
 	}
 
-	e.config.metrics.RecordExtractionSuccess(source.String())
 	return result, nil
 }
 
