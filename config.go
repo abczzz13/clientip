@@ -7,6 +7,19 @@ import (
 	"slices"
 )
 
+// Option configures a Resolver.
+type Option interface {
+	applyOption(*options)
+}
+
+type optionFunc func(*options)
+
+func (f optionFunc) applyOption(c *options) { f(c) }
+
+// applyOption lets internal tests and preset code apply a complete options
+// snapshot.
+func (c options) applyOption(dst *options) { *dst = c }
+
 const (
 	// DefaultMaxChainLength is the maximum number of IPs allowed in a proxy
 	// chain. This prevents DoS attacks using extremely long header values that
@@ -54,11 +67,11 @@ func (s ChainSelection) valid() bool {
 	return s == RightmostUntrustedIP || s == LeftmostUntrustedIP
 }
 
-// Config configures an Extractor.
+// options configures an extractor.
 //
-// Start from DefaultConfig or one of the Preset... helpers unless you need a
+// Start from defaultOptions or one of the Preset... helpers unless you need a
 // custom proxy topology. New normalizes prefixes and sources before validation.
-type Config struct {
+type options struct {
 	// TrustedProxyPrefixes contains upstream proxy ranges that are allowed to
 	// supply header-based client IPs. Any header source in Sources requires this
 	// field to be non-empty, and the immediate RemoteAddr must match one of these
@@ -104,18 +117,79 @@ type Config struct {
 	// logging. Typed nil implementations are rejected during validation.
 	Logger Logger
 
-	// Metrics receives extraction outcome and security event counters. Nil
-	// disables metrics. Typed nil implementations are rejected during validation.
-	Metrics Metrics
+	// metrics receives internal extraction counters. It is intentionally
+	// unexported; use Observer for public result-level observation.
+	metrics metricsSink
+
+	// Observer receives one event per resolver call on a valid Resolver. Nil
+	// disables observation. Typed nil implementations are rejected during
+	// validation.
+	Observer Observer
 }
 
-// DefaultConfig returns the default extractor configuration.
+// WithTrustedProxies declares upstream proxy ranges allowed to supply
+// header-based client IPs.
+func WithTrustedProxies(prefixes ...netip.Prefix) Option {
+	return optionFunc(func(c *options) { c.TrustedProxyPrefixes = clonePrefixes(prefixes) })
+}
+
+// WithMinTrustedProxies rejects chains with fewer than n trusted proxies.
+func WithMinTrustedProxies(n int) Option {
+	return optionFunc(func(c *options) { c.MinTrustedProxies = n })
+}
+
+// WithMaxTrustedProxies rejects chains with more than n trusted proxies.
+func WithMaxTrustedProxies(n int) Option {
+	return optionFunc(func(c *options) { c.MaxTrustedProxies = n })
+}
+
+// WithAllowPrivateIPs allows RFC1918 and unique-local client addresses.
+func WithAllowPrivateIPs() Option {
+	return optionFunc(func(c *options) { c.AllowPrivateIPs = true })
+}
+
+// WithAllowedReservedClientPrefixes allows selected special-use client ranges.
+func WithAllowedReservedClientPrefixes(prefixes ...netip.Prefix) Option {
+	return optionFunc(func(c *options) { c.AllowedReservedClientPrefixes = clonePrefixes(prefixes) })
+}
+
+// WithMaxChainLength caps Forwarded and X-Forwarded-For chain length.
+func WithMaxChainLength(max int) Option {
+	return optionFunc(func(c *options) { c.MaxChainLength = max })
+}
+
+// WithChainSelection sets the chain client-candidate selection algorithm.
+func WithChainSelection(selection ChainSelection) Option {
+	return optionFunc(func(c *options) { c.ChainSelection = selection })
+}
+
+// WithDebugInfo includes parsed chain diagnostics on successful chain results.
+func WithDebugInfo() Option {
+	return optionFunc(func(c *options) { c.DebugInfo = true })
+}
+
+// WithSources sets the strict extraction source order.
+func WithSources(sources ...Source) Option {
+	return optionFunc(func(c *options) { c.Sources = cloneSources(sources) })
+}
+
+// WithLogger configures security-significant warning logs.
+func WithLogger(logger Logger) Option {
+	return optionFunc(func(c *options) { c.Logger = logger })
+}
+
+// WithObserver configures result-level observation.
+func WithObserver(observer Observer) Option {
+	return optionFunc(func(c *options) { c.Observer = observer })
+}
+
+// defaultOptions returns the default extractor configuration.
 //
 // The default is safe for direct client-to-app traffic: RemoteAddr only,
 // RightmostUntrustedIP chain selection, DefaultMaxChainLength, no trusted proxy
 // prefixes, and no-op logging/metrics.
-func DefaultConfig() Config {
-	return Config{
+func defaultOptions() options {
+	return options{
 		MaxChainLength: DefaultMaxChainLength,
 		ChainSelection: RightmostUntrustedIP,
 		Sources:        []Source{builtinSource(sourceRemoteAddr)},
@@ -174,8 +248,9 @@ type config struct {
 	sourcePriority   []Source
 	sourceHeaderKeys []string
 
-	logger  Logger
-	metrics Metrics
+	logger   Logger
+	metrics  metricsSink
+	observer Observer
 }
 
 func (c *config) validate() error {
@@ -220,6 +295,9 @@ func (c *config) validate() error {
 	if isNilValue(c.metrics) {
 		return fmt.Errorf("metrics cannot be nil")
 	}
+	if isNilValue(c.observer) {
+		return fmt.Errorf("observer cannot be nil")
+	}
 	return nil
 }
 
@@ -241,7 +319,7 @@ func (c *config) validateSourcePriority() (hasHeaderSource, hasChainSource bool,
 
 		switch source.kind {
 		case sourceStaticFallback:
-			return false, false, fmt.Errorf("source %q is resolver-only and cannot be used in Config.Sources", source)
+			return false, false, fmt.Errorf("source %q is resolver-only and cannot be configured with WithSources", source)
 		case sourceForwarded:
 			seenForwarded = true
 			hasChainSource = true
@@ -358,7 +436,7 @@ func mergeUniquePrefixes(existing []netip.Prefix, additions ...netip.Prefix) []n
 }
 
 func defaultConfig() *config {
-	defaults := DefaultConfig()
+	defaults := defaultOptions()
 	return &config{
 		minTrustedProxies: defaults.MinTrustedProxies,
 		maxTrustedProxies: defaults.MaxTrustedProxies,
@@ -366,12 +444,13 @@ func defaultConfig() *config {
 		maxChainLength:    defaults.MaxChainLength,
 		chainSelection:    defaults.ChainSelection,
 		logger:            noopLogger{},
-		metrics:           noopMetrics{},
+		metrics:           noopMetricSink{},
+		observer:          noopObserver{},
 		sourcePriority:    cloneSources(defaults.Sources),
 	}
 }
 
-func configFromPublic(public Config) (*config, error) {
+func configFromPublic(public options) (*config, error) {
 	cfg := defaultConfig()
 
 	if public.TrustedProxyPrefixes != nil {
@@ -408,8 +487,11 @@ func configFromPublic(public Config) (*config, error) {
 	if public.Logger != nil {
 		cfg.logger = public.Logger
 	}
-	if public.Metrics != nil {
-		cfg.metrics = public.Metrics
+	if public.metrics != nil {
+		cfg.metrics = public.metrics
+	}
+	if public.Observer != nil {
+		cfg.observer = public.Observer
 	}
 
 	cfg.sourceHeaderKeys = sourceHeaderKeys(cfg.sourcePriority)

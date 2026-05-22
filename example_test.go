@@ -9,13 +9,8 @@ import (
 	"github.com/abczzz13/clientip"
 )
 
-func ExampleResolver_ResolveStrict() {
-	extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
-	if err != nil {
-		panic(err)
-	}
-
-	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+func ExampleResolver_Resolve() {
+	resolver, err := clientip.New(clientip.PresetLoopbackReverseProxy())
 	if err != nil {
 		panic(err)
 	}
@@ -23,95 +18,53 @@ func ExampleResolver_ResolveStrict() {
 	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
 	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
-	req, resolution := resolver.ResolveStrict(req)
-	if resolution.Err != nil {
-		panic(resolution.Err)
+	result := resolver.Resolve(req)
+	if result.Err != nil {
+		panic(result.Err)
 	}
 
-	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
-
-	cached, ok := clientip.StrictResolutionFromContext(req.Context())
-	fmt.Println(ok, cached.IP)
-	// Output:
-	// 8.8.8.8 x_forwarded_for false
-	// true 8.8.8.8
+	fmt.Println(result.IP, result.Source, result.FallbackUsed)
+	// Output: 8.8.8.8 x_forwarded_for false
 }
 
-func ExampleResolver_ResolvePreferred() {
-	extractor, err := clientip.New(clientip.Config{
-		TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
-		Sources:              []clientip.Source{clientip.SourceXForwardedFor},
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{PreferredFallback: clientip.PreferredFallbackRemoteAddr})
+func ExampleResolver_ResolveOperational() {
+	resolver, err := clientip.New(
+		clientip.WithTrustedProxies(clientip.LoopbackProxyPrefixes()...),
+		clientip.WithSources(clientip.SourceXForwardedFor),
+	)
 	if err != nil {
 		panic(err)
 	}
 
 	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
 
-	_, resolution := resolver.ResolvePreferred(req)
-	if resolution.Err != nil {
-		panic(resolution.Err)
+	result := resolver.ResolveOperational(req, clientip.RemoteAddrFallback())
+	if result.Err != nil {
+		panic(result.Err)
 	}
 
-	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
-	// Output:
-	// 1.1.1.1 remote_addr true
+	fmt.Println(result.IP, result.Source, result.FallbackUsed)
+	// Output: 1.1.1.1 remote_addr true
 }
 
-func ExamplePreferredResolutionFromContext() {
-	extractor, err := clientip.New(clientip.DefaultConfig())
+func ExampleResolver_Middleware() {
+	resolver, err := clientip.New()
 	if err != nil {
 		panic(err)
 	}
 
-	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
-	if err != nil {
-		panic(err)
-	}
+	handler := resolver.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result, ok := clientip.FromContext(r.Context())
+		fmt.Println(ok, result.IP, result.Source)
+	}))
 
 	req := &http.Request{RemoteAddr: "8.8.4.4:12345", Header: make(http.Header)}
-
-	req, resolution := resolver.ResolvePreferred(req)
-	if resolution.Err != nil {
-		panic(resolution.Err)
-	}
-
-	cached, ok := clientip.PreferredResolutionFromContext(req.Context())
-	fmt.Println(ok, cached.IP == resolution.IP, cached.Source)
-	// Output:
-	// true true remote_addr
-}
-
-func ExampleExtractor_Extract() {
-	extractor, err := clientip.New(clientip.DefaultConfig())
-	if err != nil {
-		panic(err)
-	}
-
-	req := &http.Request{RemoteAddr: "8.8.4.4:12345", Header: make(http.Header)}
-
-	extraction, err := extractor.Extract(req)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(extraction.IP, extraction.Source)
-	// Output:
-	// 8.8.4.4 remote_addr
+	handler.ServeHTTP(noopResponseWriter{}, req)
+	// Output: true 8.8.4.4 remote_addr
 }
 
 func ExamplePresetVMReverseProxy() {
-	extractor, err := clientip.New(clientip.PresetVMReverseProxy())
-	if err != nil {
-		panic(err)
-	}
-
-	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+	resolver, err := clientip.New(clientip.PresetVMReverseProxy())
 	if err != nil {
 		panic(err)
 	}
@@ -119,25 +72,20 @@ func ExamplePresetVMReverseProxy() {
 	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
 	req.Header.Set("X-Forwarded-For", "1.1.1.1")
 
-	_, resolution := resolver.ResolveStrict(req)
-	if resolution.Err != nil {
-		panic(resolution.Err)
+	result := resolver.Resolve(req)
+	if result.Err != nil {
+		panic(result.Err)
 	}
 
-	fmt.Println(resolution.IP, resolution.Source)
+	fmt.Println(result.IP, result.Source)
 	// Output: 1.1.1.1 x_forwarded_for
 }
 
-func ExampleResolver_ResolveInputPreferred() {
-	extractor, err := clientip.New(clientip.Config{
-		TrustedProxyPrefixes: clientip.LoopbackProxyPrefixes(),
-		Sources:              []clientip.Source{clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr},
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+func ExampleResolver_ResolveInput() {
+	resolver, err := clientip.New(
+		clientip.WithTrustedProxies(clientip.LoopbackProxyPrefixes()...),
+		clientip.WithSources(clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -146,7 +94,6 @@ func ExampleResolver_ResolveInputPreferred() {
 	input := clientip.Input{
 		Context:    context.Background(),
 		RemoteAddr: "127.0.0.1:12345",
-		Path:       "/framework-request",
 		Headers: clientip.HeaderValuesFunc(func(name string) []string {
 			if name == cfHeader {
 				return []string{"8.8.8.8"}
@@ -155,15 +102,17 @@ func ExampleResolver_ResolveInputPreferred() {
 		}),
 	}
 
-	input, resolution := resolver.ResolveInputPreferred(input)
-	if resolution.Err != nil {
-		panic(resolution.Err)
+	result := resolver.ResolveInput(input)
+	if result.Err != nil {
+		panic(result.Err)
 	}
 
-	cached, ok := clientip.PreferredResolutionFromContext(input.Context)
-	fmt.Println(resolution.IP, resolution.Source, resolution.FallbackUsed)
-	fmt.Println(ok, cached.Source)
-	// Output:
-	// 8.8.8.8 cf_connecting_ip false
-	// true cf_connecting_ip
+	fmt.Println(result.IP, result.Source, result.FallbackUsed)
+	// Output: 8.8.8.8 cf_connecting_ip false
 }
+
+type noopResponseWriter struct{}
+
+func (noopResponseWriter) Header() http.Header       { return http.Header{} }
+func (noopResponseWriter) Write([]byte) (int, error) { return 0, nil }
+func (noopResponseWriter) WriteHeader(int)           {}

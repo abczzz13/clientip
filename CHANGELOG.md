@@ -8,7 +8,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Changed
 
+- **BREAKING:** `New(opts ...Option)` now constructs the primary `*Resolver` directly using functional options.
+- **BREAKING:** `Config`, `Extractor`, `ResolverConfig`, `PreferredFallback`, `Resolution`, `NewResolver`, `ResolveStrict`, `ResolvePreferred`, and strict/preferred context helpers are removed from the public API.
+- **BREAKING:** `Resolve` and `ResolveOperational` are the strict and best-effort APIs. Operational fallback is selected per call.
+- **BREAKING:** `Resolver.Extract*` convenience methods are removed; use `Resolve`, `ResolveInput`, or `ResolveHeaders` and read `Result.IP`/`Result.Err`.
+- **BREAKING:** `Input` no longer carries `Path`; framework integrations provide context, remote address, and headers only.
+- **BREAKING:** Presets are option bundles for the new constructor.
+- Added pass-through `Resolver.Middleware()` and `FromContext` for net/http integrations.
+- Added `Result`, fallback metadata, `Result.Classify()`, and result-level `Observer` wiring.
+- **BREAKING:** Prometheus adapter now implements `Observer` and records only `ip_resolution_total{source,result}`.
 - Clarified README guidance and Go documentation for config defaults, resolver fallback, framework header handling, source semantics, and Prometheus metrics wiring.
+
+Older API names appearing below are historical release notes for already-published versions.
 
 ## [0.0.7] - 2026-04-24
 

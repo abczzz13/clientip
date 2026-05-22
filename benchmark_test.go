@@ -3,14 +3,15 @@ package clientip
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"testing"
 )
 
-func mustBenchmarkExtractor(b *testing.B, cfg Config) *Extractor {
+func mustBenchmarkExtractor(b *testing.B, cfg options) *extractor {
 	b.Helper()
-	extractor, err := New(cfg)
+	extractor, err := newExtractor(cfg)
 	if err != nil {
-		b.Fatalf("New() error = %v", err)
+		b.Fatalf("newExtractor() error = %v", err)
 	}
 	return extractor
 }
@@ -26,8 +27,25 @@ func benchmarkExtractionLoop(b *testing.B, extract func() (Extraction, error)) {
 	}
 }
 
+func benchmarkResultLoop(b *testing.B, resolve func() Result) {
+	b.Helper()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result := resolve()
+		if result.Err != nil || !result.IP.IsValid() {
+			b.Fatal("resolution failed")
+		}
+	}
+}
+
+type benchmarkResponseWriter struct{}
+
+func (benchmarkResponseWriter) Header() http.Header       { return http.Header{} }
+func (benchmarkResponseWriter) Write([]byte) (int, error) { return 0, nil }
+func (benchmarkResponseWriter) WriteHeader(int)           {}
+
 func BenchmarkExtract_RemoteAddr(b *testing.B) {
-	extractor, _ := New(DefaultConfig())
+	extractor, _ := newExtractor(defaultOptions())
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
@@ -42,11 +60,21 @@ func BenchmarkExtract_RemoteAddr(b *testing.B) {
 	}
 }
 
+func BenchmarkResolve_RemoteAddr(b *testing.B) {
+	resolver, _ := New()
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:12345",
+		Header:     make(http.Header),
+	}
+
+	benchmarkResultLoop(b, func() Result { return resolver.Resolve(req) })
+}
+
 func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -62,14 +90,74 @@ func BenchmarkExtract_XForwardedFor_Simple(b *testing.B) {
 	}
 }
 
+func BenchmarkResolve_XForwardedFor_Simple(b *testing.B) {
+	resolver, _ := New(PresetLoopbackReverseProxy())
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "1.1.1.1")
+
+	benchmarkResultLoop(b, func() Result { return resolver.Resolve(req) })
+}
+
+func BenchmarkResolveInput_XForwardedFor_HTTPHeader(b *testing.B) {
+	resolver, _ := New(PresetLoopbackReverseProxy())
+	headers := make(http.Header)
+	headers.Set("X-Forwarded-For", "1.1.1.1")
+	input := Input{
+		Context:    context.Background(),
+		RemoteAddr: "127.0.0.1:12345",
+		Headers:    headers,
+	}
+
+	benchmarkResultLoop(b, func() Result { return resolver.ResolveInput(input) })
+}
+
+func BenchmarkResolveOperational_StaticFallback(b *testing.B) {
+	resolver, _ := New(
+		WithTrustedProxies(LoopbackProxyPrefixes()...),
+		WithSources(SourceXForwardedFor),
+	)
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+	fallback := StaticFallback(netip.MustParseAddr("0.0.0.0"))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result := resolver.ResolveOperational(req, fallback)
+		if result.Err != nil || !result.FallbackUsed || !result.IP.IsValid() {
+			b.Fatal("operational resolution failed")
+		}
+	}
+}
+
+func BenchmarkResolve_Middleware(b *testing.B) {
+	resolver, _ := New()
+	handler := resolver.Middleware()(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	req := &http.Request{
+		RemoteAddr: "1.1.1.1:12345",
+		Header:     make(http.Header),
+	}
+	w := benchmarkResponseWriter{}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		handler.ServeHTTP(w, req)
+	}
+}
+
 func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 2
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
 		Header:     make(http.Header),
@@ -86,10 +174,10 @@ func BenchmarkExtract_XForwardedFor_WithTrustedProxies(b *testing.B) {
 }
 
 func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -106,10 +194,10 @@ func BenchmarkExtract_Forwarded_Simple(b *testing.B) {
 }
 
 func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -127,12 +215,12 @@ func BenchmarkExtract_Forwarded_WithParams(b *testing.B) {
 
 func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 5
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.5:12345",
 		Header:     make(http.Header),
@@ -150,13 +238,13 @@ func BenchmarkExtract_XForwardedFor_LongChain(b *testing.B) {
 
 func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 2
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	cfg.DebugInfo = true
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "10.0.0.1:12345",
 		Header:     make(http.Header),
@@ -177,13 +265,13 @@ func BenchmarkExtract_WithDebugInfo(b *testing.B) {
 
 func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 	cidrs, _ := ParseCIDRs("173.245.48.0/20")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 3
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	cfg.ChainSelection = LeftmostUntrustedIP
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "173.245.48.5:443",
 		Header:     make(http.Header),
@@ -200,10 +288,10 @@ func BenchmarkExtract_LeftmostUntrustedSelection(b *testing.B) {
 }
 
 func BenchmarkExtract_CustomHeader(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{HeaderSource("CF-Connecting-IP"), SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -220,10 +308,10 @@ func BenchmarkExtract_CustomHeader(b *testing.B) {
 }
 
 func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	req := &http.Request{
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
@@ -240,7 +328,7 @@ func BenchmarkExtract_Fallback_MissingPreferredHeader(b *testing.B) {
 }
 
 func BenchmarkExtract_Parallel(b *testing.B) {
-	extractor, _ := New(DefaultConfig())
+	extractor, _ := newExtractor(defaultOptions())
 	req := &http.Request{
 		RemoteAddr: "1.1.1.1:12345",
 		Header:     make(http.Header),
@@ -258,7 +346,7 @@ func BenchmarkExtract_Parallel(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
-	extractor, _ := New(DefaultConfig())
+	extractor, _ := newExtractor(defaultOptions())
 	input := Input{
 		Context:    context.Background(),
 		RemoteAddr: "1.1.1.1:12345",
@@ -275,10 +363,10 @@ func BenchmarkExtractFrom_HTTP_RemoteAddr(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	headers := make(http.Header)
 	headers.Set("X-Forwarded-For", "1.1.1.1")
 	input := Input{
@@ -297,10 +385,10 @@ func BenchmarkExtractFrom_HTTP_XForwardedFor_Simple(b *testing.B) {
 }
 
 func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
-	extractor, _ := New(cfg)
+	extractor, _ := newExtractor(cfg)
 	xffValues := []string{"1.1.1.1"}
 	input := Input{
 		Context:    context.Background(),
@@ -323,7 +411,7 @@ func BenchmarkExtractFrom_HeaderValuesFunc_XForwardedFor_Simple(b *testing.B) {
 }
 
 func BenchmarkExtract_RequestVsInput_RemoteAddr(b *testing.B) {
-	extractor := mustBenchmarkExtractor(b, DefaultConfig())
+	extractor := mustBenchmarkExtractor(b, defaultOptions())
 	req := &http.Request{RemoteAddr: "1.1.1.1:12345", Header: make(http.Header)}
 	input := Input{Context: context.Background(), RemoteAddr: "1.1.1.1:12345"}
 
@@ -337,7 +425,7 @@ func BenchmarkExtract_RequestVsInput_RemoteAddr(b *testing.B) {
 }
 
 func BenchmarkExtract_RequestVsInput_XForwardedFor(b *testing.B) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustBenchmarkExtractor(b, cfg)

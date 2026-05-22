@@ -3,355 +3,279 @@ package clientip
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/netip"
-	"sync"
 )
 
 var errNilResolverExtractor = errors.New("resolver extractor cannot be nil")
 
-type resolverStateContextKey struct{}
+type resultContextKey struct{}
 
-type resolutionSlot struct {
-	set   bool
-	value Resolution
+// Fallback controls per-call operational fallback behavior.
+type Fallback struct {
+	mode     fallbackMode
+	staticIP netip.Addr
 }
 
-// resolverState caches strict and preferred resolutions for one request.
-// The mutex is held during compute() to guarantee at-most-once extraction;
-// concurrent callers on the same request block until the first completes.
-type resolverState struct {
-	mu        sync.Mutex
-	strict    resolutionSlot
-	preferred resolutionSlot
-}
-
-// PreferredFallback controls which explicit fallback ResolvePreferred applies
-// after strict extraction fails.
-//
-// Preferred fallback is for operational use cases only. It is not equivalent to
-// strict trusted-proxy validation and should not be used for authorization or
-// trust-boundary decisions.
-type PreferredFallback uint8
+type fallbackMode uint8
 
 const (
-	// PreferredFallbackNone leaves ResolvePreferred without a fallback path; the
-	// preferred result is the strict result.
-	PreferredFallbackNone PreferredFallback = iota
-	// PreferredFallbackRemoteAddr falls back to ParseRemoteAddr(RemoteAddr) when
-	// strict extraction fails for a non-context error.
-	PreferredFallbackRemoteAddr
-	// PreferredFallbackStaticIP falls back to StaticFallbackIP when strict
-	// extraction fails for a non-context error.
-	PreferredFallbackStaticIP
+	fallbackNone fallbackMode = iota
+	fallbackRemoteAddr
+	fallbackStaticIP
 )
 
-func (f PreferredFallback) valid() bool {
-	return f == PreferredFallbackNone || f == PreferredFallbackRemoteAddr || f == PreferredFallbackStaticIP
+// NoFallback disables operational fallback.
+func NoFallback() Fallback { return Fallback{mode: fallbackNone} }
+
+// RemoteAddrFallback falls back to the connecting peer address.
+func RemoteAddrFallback() Fallback { return Fallback{mode: fallbackRemoteAddr} }
+
+// StaticFallback falls back to a configured static IP.
+//
+// Static fallback is a caller-supplied operational value. It is normalized, but
+// not checked against the package's client-IP plausibility policy; callers that
+// need a routable or policy-valid fallback should validate that before passing
+// it here.
+func StaticFallback(ip netip.Addr) Fallback {
+	return Fallback{mode: fallbackStaticIP, staticIP: normalizeIP(ip)}
 }
 
-// ResolverConfig configures Resolver preferred fallback behavior.
-type ResolverConfig struct {
-	// PreferredFallback selects which explicit fallback ResolvePreferred applies
-	// after strict extraction fails. The zero value disables fallback.
-	PreferredFallback PreferredFallback
-	// StaticFallbackIP is required when PreferredFallback is
-	// PreferredFallbackStaticIP and must be unset for other fallback modes.
-	StaticFallbackIP netip.Addr
+// FallbackReason describes why ResolveOperational used fallback.
+type FallbackReason uint8
+
+const (
+	FallbackReasonNone FallbackReason = iota
+	FallbackReasonUntrustedProxy
+	FallbackReasonMalformedHeader
+	FallbackReasonSourceUnavailable
+	FallbackReasonInvalidIP
+)
+
+// String returns the stable label for r.
+func (r FallbackReason) String() string {
+	switch r {
+	case FallbackReasonNone:
+		return "none"
+	case FallbackReasonUntrustedProxy:
+		return "untrusted_proxy"
+	case FallbackReasonMalformedHeader:
+		return "malformed_header"
+	case FallbackReasonSourceUnavailable:
+		return "source_unavailable"
+	case FallbackReasonInvalidIP:
+		return "invalid_ip"
+	default:
+		return "unknown"
+	}
 }
 
-// Resolution captures a resolver result, including fallback metadata.
-type Resolution struct {
+// Result captures a resolver result, including fallback metadata.
+type Result struct {
 	// Extraction contains the IP and source metadata. It may still contain a
 	// Source when Err is non-nil.
 	Extraction
 
 	// Err is the strict extraction error, or nil when strict extraction or
-	// preferred fallback produced a usable IP.
+	// operational fallback produced a usable IP.
 	Err error
 
-	// FallbackUsed reports whether ResolvePreferred returned a configured
+	// FallbackUsed reports whether ResolveOperational returned a configured
 	// fallback result instead of the strict extraction result.
 	FallbackUsed bool
+
+	// FallbackReason reports why operational fallback was used.
+	FallbackReason FallbackReason
 }
 
 // OK reports whether the resolution produced a usable IP without error.
-func (r Resolution) OK() bool {
+func (r Result) OK() bool {
 	return r.Err == nil && r.IP.IsValid()
 }
 
-// Resolver orchestrates strict and preferred resolution on top of Extractor.
+// IsValid reports whether the result contains a usable IP without error.
+func (r Result) IsValid() bool { return r.OK() }
+
+// Classify returns a coarse result kind suitable for policy and metrics labels.
+func (r Result) Classify() ResultKind {
+	if r.FallbackUsed {
+		return ResultFallback
+	}
+	return ClassifyError(r.Err)
+}
+
+// Resolver resolves client IP information using the configured trust policy.
 //
-// Resolver instances are safe for concurrent reuse. Each resolved request or
-// Input receives request-scoped cache state in its context; use the returned
-// request or Input to preserve that state.
+// Resolver instances are safe for concurrent reuse.
 type Resolver struct {
-	extractor *Extractor
-	config    ResolverConfig
+	extractor *extractor
 }
 
-// NewResolver creates a Resolver for a reusable Extractor.
-//
-// The extractor must be non-nil. PreferredFallbackStaticIP requires a valid
-// StaticFallbackIP, and other fallback modes reject StaticFallbackIP.
-func NewResolver(extractor *Extractor, config ResolverConfig) (*Resolver, error) {
-	if extractor == nil {
-		return nil, fmt.Errorf("invalid resolver configuration: %w", errNilResolverExtractor)
-	}
-
-	config.StaticFallbackIP = normalizeIP(config.StaticFallbackIP)
-	if !config.PreferredFallback.valid() {
-		return nil, fmt.Errorf("invalid resolver configuration: unsupported preferred fallback %d", config.PreferredFallback)
-	}
-
-	switch config.PreferredFallback {
-	case PreferredFallbackNone, PreferredFallbackRemoteAddr:
-		if config.StaticFallbackIP.IsValid() {
-			return nil, fmt.Errorf("invalid resolver configuration: StaticFallbackIP requires PreferredFallbackStaticIP")
+// New constructs a Resolver from options. With no options, the resolver uses a
+// safe direct-connection configuration that only consults RemoteAddr.
+func New(opts ...Option) (*Resolver, error) {
+	public := options{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
 		}
-	case PreferredFallbackStaticIP:
-		if !config.StaticFallbackIP.IsValid() {
-			return nil, fmt.Errorf("invalid resolver configuration: PreferredFallbackStaticIP requires StaticFallbackIP")
-		}
+		opt.applyOption(&public)
 	}
 
-	return &Resolver{extractor: extractor, config: config}, nil
+	extractor, err := newExtractor(public)
+	if err != nil {
+		return nil, err
+	}
+	return &Resolver{extractor: extractor}, nil
 }
 
-// ResolveStrict resolves client IP information without fallback.
-//
-// It returns a request whose context contains the cached strict resolution. Use
-// the returned request for downstream handlers that call
-// StrictResolutionFromContext.
-func (r *Resolver) ResolveStrict(req *http.Request) (*http.Request, Resolution) {
+// Resolve resolves client IP information without fallback.
+func (r *Resolver) Resolve(req *http.Request) Result {
 	if r == nil || r.extractor == nil {
-		return req, Resolution{Err: errNilResolverExtractor}
+		return Result{Err: errNilResolverExtractor}
 	}
 	if req == nil {
-		return nil, Resolution{Err: ErrNilRequest}
+		result := Result{Err: ErrNilRequest}
+		r.observe(context.Background(), result)
+		return result
 	}
 
-	req, state := requestWithResolverState(req)
-	resolution := state.ResolveStrict(func() Resolution { return r.resolveStrictRequest(req) })
-	return req, resolution
+	result := r.resolveStrictRequest(req)
+	r.observe(req.Context(), result)
+	return result
 }
 
-func (s *resolverState) ResolveStrict(compute func() Resolution) Resolution {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.strict.set {
-		return s.strict.value
-	}
-
-	value := compute()
-	s.strict = resolutionSlot{set: true, value: value}
-	return value
-}
-
-func (s *resolverState) ResolvePreferred(
-	computeStrict func() Resolution,
-	shouldFallback func(Resolution) bool,
-	fallback func(Resolution) (Resolution, bool),
-) Resolution {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.preferred.set {
-		return s.preferred.value
-	}
-
-	strict := s.strict.value
-	if !s.strict.set {
-		strict = computeStrict()
-		s.strict = resolutionSlot{set: true, value: strict}
-	}
-
-	preferred := strict
-	if shouldFallback != nil && shouldFallback(strict) && fallback != nil {
-		if resolved, ok := fallback(strict); ok {
-			preferred = resolved
-		}
-	}
-
-	s.preferred = resolutionSlot{set: true, value: preferred}
-	return preferred
-}
-
-func (s *resolverState) StrictValue() (Resolution, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.strict.set {
-		return Resolution{}, false
-	}
-
-	return s.strict.value, true
-}
-
-func (s *resolverState) PreferredValue() (Resolution, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.preferred.set {
-		return Resolution{}, false
-	}
-
-	return s.preferred.value, true
-}
-
-// ResolvePreferred resolves client IP information using the configured
-// preferred fallback policy after strict extraction fails.
-//
-// Context cancellation and deadline errors remain terminal and do not use
-// fallback. The returned request context contains both the strict result and the
-// preferred result.
-func (r *Resolver) ResolvePreferred(req *http.Request) (*http.Request, Resolution) {
+// ResolveOperational resolves client IP information with per-call best-effort
+// fallback. When fallback succeeds, Err is nil and fallback metadata is set.
+func (r *Resolver) ResolveOperational(req *http.Request, fallback Fallback) Result {
 	if r == nil || r.extractor == nil {
-		return req, Resolution{Err: errNilResolverExtractor}
+		return Result{Err: errNilResolverExtractor}
 	}
 	if req == nil {
-		return nil, Resolution{Err: ErrNilRequest}
+		result := Result{Err: ErrNilRequest}
+		r.observe(context.Background(), result)
+		return result
 	}
 
-	req, state := requestWithResolverState(req)
-	preferred := state.ResolvePreferred(
-		func() Resolution { return r.resolveStrictRequest(req) },
-		func(strict Resolution) bool {
-			return strict.Err != nil && !isResolverTerminalContextError(strict.Err)
-		},
-		func(Resolution) (Resolution, bool) { return r.preferredFallback(req.RemoteAddr) },
-	)
-	return req, preferred
+	strict := r.resolveStrictRequest(req)
+	result := strict
+	if strict.Err != nil && !isResolverTerminalContextError(strict.Err) {
+		if resolved, ok := r.applyFallback(req.RemoteAddr, fallback, strict.Err); ok {
+			result = resolved
+		}
+	}
+	r.observe(req.Context(), result)
+	return result
 }
 
-// ResolveInputStrict resolves client IP information from framework-agnostic
-// input without fallback.
-//
-// It returns an Input whose Context contains the cached strict resolution. Use
-// the returned Input when calling StrictResolutionFromContext later.
-func (r *Resolver) ResolveInputStrict(input Input) (Input, Resolution) {
+// ResolveInput resolves client IP information from framework-agnostic input.
+func (r *Resolver) ResolveInput(input Input) Result {
 	if r == nil || r.extractor == nil {
-		return input, Resolution{Err: errNilResolverExtractor}
+		return Result{Err: errNilResolverExtractor}
 	}
-
-	input, state := inputWithResolverState(input)
-	resolution := state.ResolveStrict(func() Resolution { return r.resolveStrictInput(input) })
-	return input, resolution
+	result := r.resolveStrictInput(input)
+	r.observe(requestInputContext(input), result)
+	return result
 }
 
-// ResolveInputPreferred resolves client IP information from framework-agnostic
-// input using the configured preferred fallback policy after strict extraction
-// fails.
-//
-// Context cancellation and deadline errors remain terminal and do not use
-// fallback. The returned Input.Context contains both the strict result and the
-// preferred result.
-func (r *Resolver) ResolveInputPreferred(input Input) (Input, Resolution) {
+// ResolveInputOperational resolves framework-agnostic input with per-call
+// best-effort fallback.
+func (r *Resolver) ResolveInputOperational(input Input, fallback Fallback) Result {
 	if r == nil || r.extractor == nil {
-		return input, Resolution{Err: errNilResolverExtractor}
+		return Result{Err: errNilResolverExtractor}
 	}
-
-	input, state := inputWithResolverState(input)
-	preferred := state.ResolvePreferred(
-		func() Resolution { return r.resolveStrictInput(input) },
-		func(strict Resolution) bool {
-			return strict.Err != nil && !isResolverTerminalContextError(strict.Err)
-		},
-		func(Resolution) (Resolution, bool) { return r.preferredFallback(input.RemoteAddr) },
-	)
-	return input, preferred
+	strict := r.resolveStrictInput(input)
+	result := strict
+	if strict.Err != nil && !isResolverTerminalContextError(strict.Err) {
+		if resolved, ok := r.applyFallback(input.RemoteAddr, fallback, strict.Err); ok {
+			result = resolved
+		}
+	}
+	r.observe(requestInputContext(input), result)
+	return result
 }
 
-// StrictResolutionFromContext returns the cached strict resolution, if present.
-//
-// Pass the context from the request or Input returned by a Resolver method.
-func StrictResolutionFromContext(ctx context.Context) (Resolution, bool) {
-	state, ok := resolverStateFromContext(ctx)
-	if !ok {
-		return Resolution{}, false
-	}
-
-	return state.StrictValue()
+// ResolveHeaders resolves from plain http.Header and RemoteAddr values.
+func (r *Resolver) ResolveHeaders(ctx context.Context, remoteAddr string, headers http.Header) Result {
+	return r.ResolveInput(Input{Context: ctx, RemoteAddr: remoteAddr, Headers: headers})
 }
 
-// PreferredResolutionFromContext returns the cached preferred resolution, if
-// present.
-//
-// Pass the context from the request or Input returned by ResolvePreferred or
-// ResolveInputPreferred.
-func PreferredResolutionFromContext(ctx context.Context) (Resolution, bool) {
-	state, ok := resolverStateFromContext(ctx)
-	if !ok {
-		return Resolution{}, false
+// Middleware returns pass-through net/http middleware that stores Result in the
+// request context. It never rejects; downstream handlers decide policy.
+func (r *Resolver) Middleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			result := r.Resolve(req)
+			ctx := context.WithValue(req.Context(), resultContextKey{}, result)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
 	}
-
-	return state.PreferredValue()
 }
 
-func (r *Resolver) resolveStrictRequest(req *http.Request) Resolution {
+// FromContext returns the Result attached by Middleware.
+func FromContext(ctx context.Context) (Result, bool) {
+	if ctx == nil {
+		return Result{}, false
+	}
+	result, ok := ctx.Value(resultContextKey{}).(Result)
+	return result, ok
+}
+
+func (r *Resolver) resolveStrictRequest(req *http.Request) Result {
 	extraction, err := r.extractor.Extract(req)
-	return Resolution{Extraction: extraction, Err: err}
+	return Result{Extraction: extraction, Err: err}
 }
 
-func (r *Resolver) resolveStrictInput(input Input) Resolution {
+func (r *Resolver) resolveStrictInput(input Input) Result {
 	extraction, err := r.extractor.ExtractInput(input)
-	return Resolution{Extraction: extraction, Err: err}
+	return Result{Extraction: extraction, Err: err}
 }
 
-func (r *Resolver) preferredFallback(remoteAddr string) (Resolution, bool) {
-	switch r.config.PreferredFallback {
-	case PreferredFallbackRemoteAddr:
+func (r *Resolver) observe(ctx context.Context, result Result) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.extractor.config.observer.OnResolved(ctx, result)
+}
+
+func (r *Resolver) applyFallback(remoteAddr string, fallback Fallback, strictErr error) (Result, bool) {
+	reason := fallbackReasonFromError(strictErr)
+	switch fallback.mode {
+	case fallbackRemoteAddr:
 		ip, err := ParseRemoteAddr(remoteAddr)
 		if err == nil {
-			return Resolution{
-				Extraction:   Extraction{IP: ip, Source: SourceRemoteAddr},
-				FallbackUsed: true,
+			return Result{
+				Extraction:     Extraction{IP: ip, Source: SourceRemoteAddr},
+				FallbackUsed:   true,
+				FallbackReason: reason,
 			}, true
 		}
-	case PreferredFallbackStaticIP:
-		return Resolution{
-			Extraction:   Extraction{IP: r.config.StaticFallbackIP, Source: SourceStaticFallback},
-			FallbackUsed: true,
-		}, true
+	case fallbackStaticIP:
+		ip := normalizeIP(fallback.staticIP)
+		if ip.IsValid() {
+			return Result{
+				Extraction:     Extraction{IP: ip, Source: SourceStaticFallback},
+				FallbackUsed:   true,
+				FallbackReason: reason,
+			}, true
+		}
 	}
-
-	return Resolution{}, false
+	return Result{}, false
 }
 
-func resolverStateFromContext(ctx context.Context) (*resolverState, bool) {
-	if ctx == nil {
-		return nil, false
+func fallbackReasonFromError(err error) FallbackReason {
+	switch ClassifyError(err) {
+	case ResultUntrusted:
+		return FallbackReasonUntrustedProxy
+	case ResultMalformed:
+		return FallbackReasonMalformedHeader
+	case ResultUnavailable:
+		return FallbackReasonSourceUnavailable
+	case ResultInvalid:
+		return FallbackReasonInvalidIP
+	default:
+		return FallbackReasonNone
 	}
-
-	state, ok := ctx.Value(resolverStateContextKey{}).(*resolverState)
-	if !ok || state == nil {
-		return nil, false
-	}
-
-	return state, true
-}
-
-func requestWithResolverState(req *http.Request) (*http.Request, *resolverState) {
-	if state, ok := resolverStateFromContext(req.Context()); ok {
-		return req, state
-	}
-
-	state := &resolverState{}
-	return req.WithContext(context.WithValue(req.Context(), resolverStateContextKey{}, state)), state
-}
-
-func inputWithResolverState(input Input) (Input, *resolverState) {
-	ctx := requestInputContext(input)
-	if state, ok := resolverStateFromContext(ctx); ok {
-		input.Context = ctx
-		return input, state
-	}
-
-	state := &resolverState{}
-	input.Context = context.WithValue(ctx, resolverStateContextKey{}, state)
-	return input, state
 }
 
 func isResolverTerminalContextError(err error) bool {

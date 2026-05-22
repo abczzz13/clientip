@@ -10,13 +10,13 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-type testTypedNilMetrics struct{}
+type testTypedNilMetricSink struct{}
 
-func (*testTypedNilMetrics) RecordExtractionSuccess(string) {}
+func (*testTypedNilMetricSink) RecordExtractionSuccess(string) {}
 
-func (*testTypedNilMetrics) RecordExtractionFailure(string) {}
+func (*testTypedNilMetricSink) RecordExtractionFailure(string) {}
 
-func (*testTypedNilMetrics) RecordSecurityEvent(string) {}
+func (*testTypedNilMetricSink) RecordSecurityEvent(string) {}
 
 type configSnapshot struct {
 	TrustedProxyCIDRs     []string
@@ -68,14 +68,14 @@ func sourceNames(sources []Source) []string {
 func TestNew_ConfigScenarios(t *testing.T) {
 	tests := []struct {
 		name        string
-		buildConfig func() Config
+		buildConfig func() options
 		want        configSnapshot
 		wantErrText string
 	}{
 		{
 			name: "default",
-			buildConfig: func() Config {
-				return DefaultConfig()
+			buildConfig: func() options {
+				return defaultOptions()
 			},
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{},
@@ -91,8 +91,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "configured config",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = []netip.Prefix{
 					netip.MustParsePrefix("10.0.0.0/8"),
 					netip.MustParsePrefix("172.16.0.0/12"),
@@ -121,8 +121,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "merge option fragments",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 				cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 				return cfg
@@ -141,8 +141,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "merge trusted proxy prefixes",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = []netip.Prefix{
 					netip.MustParsePrefix("10.0.0.0/8"),
 					netip.MustParsePrefix("10.0.0.0/8"),
@@ -164,8 +164,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "merge reserved client prefixes",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.AllowedReservedClientPrefixes = []netip.Prefix{
 					netip.MustParsePrefix("198.51.100.0/24"),
 					netip.MustParsePrefix("198.51.100.0/24"),
@@ -187,8 +187,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "invalid trusted prefix helper",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = []netip.Prefix{{}}
 				return cfg
 			},
@@ -196,8 +196,8 @@ func TestNew_ConfigScenarios(t *testing.T) {
 		},
 		{
 			name: "invalid allow reserved prefix helper",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.AllowedReservedClientPrefixes = []netip.Prefix{{}}
 				return cfg
 			},
@@ -207,7 +207,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extractor, err := New(tt.buildConfig())
+			resolver, err := New(tt.buildConfig())
 			if tt.wantErrText != "" {
 				if err == nil {
 					t.Fatalf("New() error = nil, want containing %q", tt.wantErrText)
@@ -222,7 +222,7 @@ func TestNew_ConfigScenarios(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			if diff := cmp.Diff(tt.want, snapshotConfig(extractor.config)); diff != "" {
+			if diff := cmp.Diff(tt.want, snapshotConfig(resolver.extractor.config)); diff != "" {
 				t.Fatalf("config mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -234,13 +234,13 @@ func TestNew_InvalidConfig(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		buildConfig func() Config
+		buildConfig func() options
 		wantErrText string
 	}{
 		{
 			name: "min exceeds max",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 				cfg.MinTrustedProxies = 5
 				cfg.MaxTrustedProxies = 2
@@ -250,8 +250,8 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "header source without trusted proxies",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Sources = []Source{SourceXForwardedFor}
 				return cfg
 			},
@@ -259,8 +259,8 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "invalid chain selection",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.ChainSelection = ChainSelection(999)
 				return cfg
 			},
@@ -268,8 +268,8 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "empty explicit source priority",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Sources = []Source{}
 				return cfg
 			},
@@ -277,8 +277,8 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "typed nil logger",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Logger = (*slog.Logger)(nil)
 				return cfg
 			},
@@ -286,17 +286,17 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "typed nil metrics",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
-				cfg.Metrics = (*testTypedNilMetrics)(nil)
+			buildConfig: func() options {
+				cfg := defaultOptions()
+				cfg.metrics = (*testTypedNilMetricSink)(nil)
 				return cfg
 			},
 			wantErrText: "metrics cannot be nil",
 		},
 		{
 			name: "leftmost without trusted proxies",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Sources = []Source{SourceXForwardedFor}
 				cfg.ChainSelection = LeftmostUntrustedIP
 				return cfg
@@ -305,8 +305,8 @@ func TestNew_InvalidConfig(t *testing.T) {
 		},
 		{
 			name: "multiple chain sources",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
 				cfg.Sources = []Source{SourceForwarded, SourceXForwardedFor}
 				cfg.Logger = logger
@@ -332,14 +332,14 @@ func TestNew_InvalidConfig(t *testing.T) {
 func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 	tests := []struct {
 		name        string
-		buildConfig func() Config
+		buildConfig func() options
 		wantSources []Source
 		wantErrText string
 	}{
 		{
 			name: "negative min trusted proxies",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.MinTrustedProxies = -1
 				return cfg
 			},
@@ -347,8 +347,8 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name: "negative max trusted proxies",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.MaxTrustedProxies = -1
 				return cfg
 			},
@@ -356,8 +356,8 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name: "negative max chain length",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.MaxChainLength = -1
 				return cfg
 			},
@@ -365,8 +365,8 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name: "duplicate source in priority",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Sources = []Source{SourceRemoteAddr, SourceRemoteAddr}
 				return cfg
 			},
@@ -374,8 +374,8 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name: "duplicate source after canonicalization",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 				cfg.Sources = []Source{SourceXForwardedFor, HeaderSource("X-Forwarded-For")}
 				return cfg
@@ -384,17 +384,17 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 		},
 		{
 			name: "resolver-only static fallback source",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.Sources = []Source{SourceStaticFallback}
 				return cfg
 			},
-			wantErrText: "resolver-only and cannot be used in Config.Sources",
+			wantErrText: "resolver-only and cannot be configured with WithSources",
 		},
 		{
 			name: "distinct custom headers with different runtime keys",
-			buildConfig: func() Config {
-				cfg := DefaultConfig()
+			buildConfig: func() options {
+				cfg := defaultOptions()
 				cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 				cfg.Sources = []Source{HeaderSource("Foo-Bar"), HeaderSource("Foo_Bar")}
 				return cfg
@@ -405,13 +405,13 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extractor, err := New(tt.buildConfig())
+			resolver, err := New(tt.buildConfig())
 			if tt.wantErrText == "" && tt.wantSources != nil {
 				if err != nil {
 					t.Fatalf("New() error = %v", err)
 				}
 
-				if diff := cmp.Diff(tt.wantSources, extractor.config.sourcePriority); diff != "" {
+				if diff := cmp.Diff(tt.wantSources, resolver.extractor.config.sourcePriority); diff != "" {
 					t.Fatalf("source priority mismatch (-want +got):\n%s", diff)
 				}
 				return
@@ -427,15 +427,15 @@ func TestNew_InvalidBoundsAndDuplicatePriority(t *testing.T) {
 }
 
 func TestWithTrustedPrivateProxyRanges_AddsExpectedCIDRs(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = PrivateProxyPrefixes()
 
-	extractor, err := New(cfg)
+	resolver, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got := snapshotConfig(extractor.config).TrustedProxyCIDRs
+	got := snapshotConfig(resolver.extractor.config).TrustedProxyCIDRs
 	want := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
 
 	if diff := cmp.Diff(want, got); diff != "" {

@@ -3,7 +3,7 @@ package clientip
 import "context"
 
 // SecurityEvent... constants are stable public labels for extractor security
-// events. Metrics adapters and log consumers can depend on these names.
+// events. Log consumers can depend on these names.
 const (
 	SecurityEventMultipleHeaders       = "multiple_headers"
 	SecurityEventChainTooLong          = "chain_too_long"
@@ -17,16 +17,16 @@ const (
 	SecurityEventMalformedForwarded    = "malformed_forwarded"
 )
 
-// Logger records security-significant events emitted by Extractor.
+// Logger records security-significant events emitted by extractor.
 //
-// Implementations should be safe for concurrent use, as a single Extractor
+// Implementations should be safe for concurrent use, as a single extractor
 // instance is typically shared across many goroutines.
 //
 // The provided context comes from the inbound HTTP request and can carry
 // tracing metadata (for example, trace or span IDs).
 //
-// Resolver preferred fallback does not emit separate log events in this phase.
-// Inspect Resolution.FallbackUsed when that distinction matters.
+// Operational fallback does not emit separate log events. Inspect
+// Result.FallbackUsed when that distinction matters.
 //
 // The interface intentionally mirrors slog's WarnContext signature, so
 // *slog.Logger can be used directly without an adapter.
@@ -40,16 +40,15 @@ type noopLogger struct{}
 
 func (noopLogger) WarnContext(context.Context, string, ...any) {}
 
-// Metrics records extraction outcomes and security events emitted by
-// Extractor.
+// metricsSink records extraction outcomes and security events emitted by the
+// internal extractor. It is kept unexported; Observer is the public integration
+// point.
 //
-// Implementations should be safe for concurrent use, as a single Extractor
+// Implementations should be safe for concurrent use, as a single extractor
 // instance is typically shared across many goroutines.
 //
 // Security event labels are the exported SecurityEvent... constants.
-// Resolver preferred fallback does not emit separate metrics in this phase;
-// inspect Resolution.FallbackUsed when that distinction matters.
-type Metrics interface {
+type metricsSink interface {
 	// RecordExtractionSuccess is called when a source successfully returns a
 	// client IP.
 	RecordExtractionSuccess(source string)
@@ -61,12 +60,24 @@ type Metrics interface {
 	RecordSecurityEvent(event string)
 }
 
-// noopMetrics is the default Metrics implementation when metrics are not
+// noopMetricSink is the default metricsSink implementation when metrics are not
 // explicitly configured.
-type noopMetrics struct{}
+type noopMetricSink struct{}
 
-func (noopMetrics) RecordExtractionSuccess(string) {}
+func (noopMetricSink) RecordExtractionSuccess(string) {}
 
-func (noopMetrics) RecordExtractionFailure(string) {}
+func (noopMetricSink) RecordExtractionFailure(string) {}
 
-func (noopMetrics) RecordSecurityEvent(string) {}
+func (noopMetricSink) RecordSecurityEvent(string) {}
+
+// Observer receives one event per resolver call on a valid Resolver.
+//
+// Implementations should be safe for concurrent use. Observer is result-level,
+// so it can see strict successes, strict failures, and operational fallbacks.
+type Observer interface {
+	OnResolved(ctx context.Context, result Result)
+}
+
+type noopObserver struct{}
+
+func (noopObserver) OnResolved(context.Context, Result) {}

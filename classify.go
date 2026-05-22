@@ -28,6 +28,8 @@ const (
 	ResultMalformed
 	// ResultCanceled indicates context cancellation or deadline expiry.
 	ResultCanceled
+	// ResultFallback indicates operational resolution succeeded via fallback.
+	ResultFallback
 )
 
 // ClassifyError maps the package's detailed error surface into a smaller set of
@@ -56,5 +58,27 @@ func ClassifyError(err error) ResultKind {
 		return ResultInvalid
 	default:
 		return ResultUnknown
+	}
+}
+
+// String returns the stable label for k.
+func (k ResultKind) String() string {
+	switch k {
+	case ResultSuccess:
+		return "success"
+	case ResultUnavailable:
+		return "unavailable"
+	case ResultInvalid:
+		return "invalid"
+	case ResultUntrusted:
+		return "untrusted"
+	case ResultMalformed:
+		return "malformed"
+	case ResultCanceled:
+		return "canceled"
+	case ResultFallback:
+		return "fallback"
+	default:
+		return "unknown"
 	}
 }

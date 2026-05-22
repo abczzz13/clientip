@@ -77,7 +77,6 @@ func requestViewFromInput(input Input) requestView {
 	view := requestView{
 		ctx:             requestInputContext(input),
 		remoteAddrValue: input.RemoteAddr,
-		pathValue:       input.Path,
 	}
 	if input.Headers == nil {
 		return view
