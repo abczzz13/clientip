@@ -21,9 +21,9 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-            prometheus/go.mod
-            prometheus/go.sum
+            observe/prometheus/go.mod
+            observe/prometheus/go.sum
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       - run: GOWORK=off govulncheck ./...
       - run: GOWORK=off govulncheck ./...
-        working-directory: prometheus
+        working-directory: observe/prometheus

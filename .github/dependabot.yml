@@ -6,7 +6,7 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
   - package-ecosystem: "gomod"
-    directory: "/prometheus"
+    directory: "/observe/prometheus"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10

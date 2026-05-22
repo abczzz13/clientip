@@ -61,18 +61,10 @@ func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedInd
 		trustedIndices = make([]int, 0, len(parts))
 	}
 
-	hasCIDRs := len(policy.TrustedProxyCIDRs) > 0
-
 	for i := len(parts) - 1; i >= 0; i-- {
-		if !hasCIDRs && policy.MaxTrustedProxies > 0 && trustedCount >= policy.MaxTrustedProxies {
-			clientIndex = i
-			clientIP = parseClientIP(parts[i])
-			break
-		}
-
 		ip := parseClientIP(parts[i])
 
-		if hasCIDRs && !isTrustedProxy(ip, policy.TrustedProxyMatch, policy.TrustedProxyCIDRs) {
+		if !isTrustedProxy(ip, policy.TrustedProxyMatch, policy.TrustedProxyCIDRs) {
 			clientIndex = i
 			clientIP = ip
 			break

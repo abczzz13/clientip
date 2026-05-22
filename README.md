@@ -15,7 +15,7 @@ go get github.com/abczzz13/clientip
 Optional Prometheus adapter:
 
 ```bash
-go get github.com/abczzz13/clientip/prometheus
+go get github.com/abczzz13/clientip/observe/prometheus
 ```
 
 ## Quick Start
@@ -74,6 +74,8 @@ Operational fallback success clears `Err` and sets `FallbackUsed` plus `Fallback
 ## Middleware
 
 `Middleware` is pass-through. It stores the strict `Result` in request context and never rejects by itself.
+Rejection responses are intentionally application-owned so services can control
+status codes, response bodies, headers, logging, and tracing.
 
 ```go
 handler := resolver.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +90,7 @@ handler := resolver.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r 
 
 ## Framework-Agnostic Input
 
-Use `Input` when a framework does not expose `*http.Request` directly. Header providers must preserve repeated header lines as separate values.
+Use `Input` when a framework does not expose `*http.Request` directly. It exists to preserve repeated header-line semantics: duplicate single-IP headers must be detectable, and chain headers must preserve the order in which repeated header lines arrived. Header providers must therefore return repeated header lines as separate values.
 
 ```go
 result := resolver.ResolveInput(clientip.Input{
@@ -112,7 +114,7 @@ Generic option presets are available:
 - `PresetLoopbackReverseProxy()` trusts loopback proxies and uses `X-Forwarded-For`, then `RemoteAddr`.
 - `PresetVMReverseProxy()` trusts loopback/private proxy ranges and uses `X-Forwarded-For`, then `RemoteAddr`.
 
-Vendor-specific examples should explicitly pair the header with trusted peer ranges. For example, Cloudflare-style configuration should trust `CF-Connecting-IP` only when the immediate peer is in Cloudflare’s published CIDRs:
+Vendor-specific contrib packages are intentionally not included for now because vendor IP ranges become stale and dynamic range fetchers add operational policy. Vendor-specific configurations should explicitly pair the header with caller-supplied trusted peer ranges. For example, Cloudflare-style configuration should trust `CF-Connecting-IP` only when the immediate peer is in Cloudflare’s published CIDRs:
 
 ```go
 resolver, err := clientip.New(
@@ -143,6 +145,8 @@ if err != nil {
 resolver, err := clientip.New(clientip.WithObserver(metrics))
 ```
 
+Prometheus support lives in the optional `github.com/abczzz13/clientip/observe/prometheus` adapter module. OpenTelemetry and other adapters can use the same `Observer` interface without adding dependencies to the core package.
+
 `Result.Classify()` returns a low-cardinality outcome suitable for metrics labels.
 
 ## Security Rules
@@ -151,4 +155,4 @@ resolver, err := clientip.New(clientip.WithObserver(metrics))
 - Forwarding headers are trusted only when the immediate peer is in `WithTrustedProxies`.
 - The default chain algorithm is rightmost-untrusted before the trusted proxy suffix.
 - Do not use operational fallback for security decisions.
-- Count-style proxy trust is brittle; prefer explicit CIDR-based trusted proxies.
+- Count-only proxy trust is intentionally unsupported: `WithMinTrustedProxies` / `WithMaxTrustedProxies` validate CIDR-trusted hop counts and do not by themselves make a header source trusted.

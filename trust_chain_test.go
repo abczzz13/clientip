@@ -55,10 +55,10 @@ func TestAnalyzeChainRightmostNoCIDRs(t *testing.T) {
 		wantClientIndex   int
 		wantTrustedCount  int
 	}{
-		{name: "no max proxies", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 0, wantClientIndex: 0, wantTrustedCount: 3},
-		{name: "max 1 proxy", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 1, wantClientIndex: 1, wantTrustedCount: 1},
-		{name: "max 2 proxies", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 2, wantClientIndex: 0, wantTrustedCount: 2},
-		{name: "single IP", parts: []string{"1.1.1.1"}, maxTrustedProxies: 1, wantClientIndex: 0, wantTrustedCount: 1},
+		{name: "no max proxies", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 0, wantClientIndex: 2, wantTrustedCount: 0},
+		{name: "max 1 proxy is validation only", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 1, wantClientIndex: 2, wantTrustedCount: 0},
+		{name: "max 2 proxies is validation only", parts: []string{"1.1.1.1", "8.8.8.8", "10.0.0.1"}, maxTrustedProxies: 2, wantClientIndex: 2, wantTrustedCount: 0},
+		{name: "single IP", parts: []string{"1.1.1.1"}, maxTrustedProxies: 1, wantClientIndex: 0, wantTrustedCount: 0},
 	}
 
 	for _, tt := range tests {
