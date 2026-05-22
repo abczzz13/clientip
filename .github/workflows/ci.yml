@@ -30,8 +30,8 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-            prometheus/go.mod
-            prometheus/go.sum
+            observe/prometheus/go.mod
+            observe/prometheus/go.sum
       - run: go test -v -p 1 -count=1 -shuffle=on ./...
       - run: go test -race ./...
       - run: go test -coverprofile=coverage.out ./...
@@ -61,17 +61,17 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-            prometheus/go.mod
-            prometheus/go.sum
-      - run: GOWORK=off go -C prometheus test -v -p 1 -count=1 -shuffle=on ./...
-      - run: GOWORK=off go -C prometheus test -race ./...
-      - run: GOWORK=off go -C prometheus test -coverprofile=../coverage-prometheus.out ./...
-      - run: GOWORK=off go -C prometheus tool cover -func=../coverage-prometheus.out
+            observe/prometheus/go.mod
+            observe/prometheus/go.sum
+      - run: GOWORK=off go -C observe/prometheus test -v -p 1 -count=1 -shuffle=on ./...
+      - run: GOWORK=off go -C observe/prometheus test -race ./...
+      - run: GOWORK=off go -C observe/prometheus test -coverprofile=../../coverage-prometheus.out ./...
+      - run: GOWORK=off go -C observe/prometheus tool cover -func=../../coverage-prometheus.out
       - uses: actions/upload-artifact@v7
         with:
           name: coverage-prometheus-${{ matrix.go-label }}
           path: coverage-prometheus.out
-      - run: before="$(git status --porcelain -- prometheus/go.mod prometheus/go.sum)"; GOWORK=off go -C prometheus mod tidy; after="$(git status --porcelain -- prometheus/go.mod prometheus/go.sum)"; test "$before" = "$after"
+      - run: before="$(git status --porcelain -- observe/prometheus/go.mod observe/prometheus/go.sum)"; GOWORK=off go -C observe/prometheus mod tidy; after="$(git status --porcelain -- observe/prometheus/go.mod observe/prometheus/go.sum)"; test "$before" = "$after"
 
   lint:
     runs-on: ubuntu-latest
@@ -84,8 +84,8 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-            prometheus/go.mod
-            prometheus/go.sum
+            observe/prometheus/go.mod
+            observe/prometheus/go.sum
       - uses: extractions/setup-just@v4
       - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
       - run: just lint
@@ -101,8 +101,8 @@ jobs:
           cache-dependency-path: |
             go.mod
             go.sum
-            prometheus/go.mod
-            prometheus/go.sum
+            observe/prometheus/go.mod
+            observe/prometheus/go.sum
       - uses: extractions/setup-just@v4
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
       - run: just actionlint

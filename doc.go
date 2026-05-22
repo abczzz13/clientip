@@ -14,7 +14,11 @@
 //   - choose between strict and operational semantics
 //   - keep fallback behavior explicit at the call site
 //
-// Input is the framework-agnostic carrier for non-net/http integrations.
+// Input is the framework-agnostic carrier for non-net/http integrations. It
+// exists for frameworks that do not expose *http.Request directly while still
+// preserving repeated header-line semantics. This matters because duplicate
+// single-IP headers must be detected and chain headers must preserve the order
+// in which repeated header lines arrived.
 //
 // ParseRemoteAddr and ClassifyError are small helpers for explicit fallback and
 // policy code. ClassifyError keeps typed errors intact while providing a
@@ -67,6 +71,9 @@
 // Header-based sources require trusted upstream proxy ranges. Configure them
 // with WithTrustedProxies, optionally using LoopbackProxyPrefixes,
 // PrivateProxyPrefixes, LocalProxyPrefixes, or ProxyPrefixesFromAddrs.
+// Count-only proxy trust is intentionally unsupported; WithMinTrustedProxies
+// and WithMaxTrustedProxies validate the number of CIDR-trusted hops observed,
+// but do not make a header source trusted on their own.
 //
 // ChainSelection applies to SourceForwarded and SourceXForwardedFor. The
 // default RightmostUntrustedIP selects the nearest untrusted hop before the
@@ -88,6 +95,10 @@
 //
 // Security event labels are exported as SecurityEvent... constants so adapters
 // can depend on stable names.
+//
+// Optional observer adapters live under clientip/observe/... so Prometheus,
+// OpenTelemetry, and other integrations can evolve outside the dependency-free
+// core package.
 //
 // Operational fallback is visible through Result.FallbackUsed,
 // Result.FallbackReason, and Result.Classify().

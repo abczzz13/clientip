@@ -381,9 +381,9 @@ func TestChainExtractor_MultipleHeaderValues(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("unexpected failure: %+v", failure)
 	}
-	// With no trusted CIDRs and no MaxTrustedProxies, every entry is walked
-	// as trusted. The leftmost entry (index 0) becomes the client IP.
-	wantIP := netip.MustParseAddr("8.8.8.8")
+	// With no trusted CIDRs, MaxTrustedProxies is not used as a count-based
+	// trust setting. The rightmost entry is the nearest untrusted candidate.
+	wantIP := netip.MustParseAddr("9.9.9.9")
 	if result.IP != wantIP {
 		t.Errorf("IP = %v, want %v", result.IP, wantIP)
 	}

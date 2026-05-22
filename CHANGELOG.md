@@ -17,7 +17,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Added pass-through `Resolver.Middleware()` and `FromContext` for net/http integrations.
 - Added `Result`, fallback metadata, `Result.Classify()`, and result-level `Observer` wiring.
 - **BREAKING:** Prometheus adapter now implements `Observer` and records only `ip_resolution_total{source,result}`.
+- **BREAKING:** Prometheus adapter import path moved to `github.com/abczzz13/clientip/observe/prometheus`.
 - **BREAKING:** Prometheus adapter type renamed from `PrometheusMetrics` to `Observer` to avoid package-name stutter at call sites.
+- **BREAKING:** Count-only proxy trust is no longer honored; with no `WithTrustedProxies` configured, `WithMaxTrustedProxies` no longer acts as a skip count on `X-Forwarded-For`/`Forwarded` chains. `WithMinTrustedProxies` and `WithMaxTrustedProxies` validate CIDR-trusted hop counts only.
 - Clarified README guidance and Go documentation for config defaults, resolver fallback, framework header handling, source semantics, and Prometheus metrics wiring.
 
 Older API names appearing below are historical release notes for already-published versions.
