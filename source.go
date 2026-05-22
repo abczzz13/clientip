@@ -42,7 +42,7 @@ var (
 	// SourceRemoteAddr resolves from Request.RemoteAddr.
 	SourceRemoteAddr = Source{kind: sourceRemoteAddr}
 	// SourceStaticFallback identifies resolver-only static fallback output. It
-	// cannot be used in Config.Sources.
+	// cannot be configured with WithSources.
 	SourceStaticFallback = Source{kind: sourceStaticFallback}
 )
 
@@ -65,7 +65,7 @@ func builtinSource(kind sourceKind) Source {
 // The name is trimmed and canonicalized as a MIME header key. Built-in header
 // names and aliases resolve to their built-in Source values. An empty or
 // whitespace-only name produces an invalid Source that New rejects when used in
-// Config.Sources.
+// WithSources.
 func HeaderSource(name string) Source {
 	return sourceFromString(name)
 }
@@ -219,7 +219,7 @@ func (s Source) MarshalText() ([]byte, error) {
 // UnmarshalText parses a source from a built-in alias or header name.
 //
 // Empty input produces an invalid Source; New rejects invalid sources in
-// Config.Sources.
+// WithSources.
 func (s *Source) UnmarshalText(text []byte) error {
 	if s == nil {
 		return errors.New("clientip.Source: UnmarshalText on nil pointer")

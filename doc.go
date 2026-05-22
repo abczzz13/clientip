@@ -1,22 +1,18 @@
-// Package clientip provides secure client IP extraction from HTTP requests and
-// framework-agnostic inputs with trusted proxy validation, explicit source
-// modeling, and request-scoped resolver caching.
+// Package clientip provides secure client IP resolution from HTTP requests and
+// framework-agnostic inputs with trusted proxy validation and explicit source
+// modeling.
 //
 // # Choose The API
 //
-// Resolver is the primary integration-facing API.
+// Resolver is the primary integration-facing API. Construct one with New and
+// functional options.
 //
 // Use Resolver when you want to:
 //
 //   - resolve once per request or Input
 //   - reuse the result later from context
-//   - choose between strict and preferred semantics
-//   - keep explicit fallback behavior on a separate layer from extraction
-//
-// Extractor remains the low-level strict primitive.
-//
-// Use Extractor when you want one direct extraction call without request-scoped
-// caching or preferred fallback.
+//   - choose between strict and operational semantics
+//   - keep fallback behavior explicit at the call site
 //
 // Input is the framework-agnostic carrier for non-net/http integrations.
 //
@@ -26,12 +22,7 @@
 //
 // # Basic Usage
 //
-//	extractor, err := clientip.New(clientip.PresetLoopbackReverseProxy())
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	resolver, err := clientip.NewResolver(extractor, clientip.ResolverConfig{})
+//	resolver, err := clientip.New(clientip.PresetLoopbackReverseProxy())
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -39,48 +30,41 @@
 //	req := &http.Request{RemoteAddr: "127.0.0.1:12345", Header: make(http.Header)}
 //	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 //
-//	req, resolution := resolver.ResolveStrict(req)
-//	if resolution.Err != nil {
-//	    log.Printf("resolve failed: %v", resolution.Err)
+//	result := resolver.Resolve(req)
+//	if result.Err != nil {
+//	    log.Printf("resolve failed: %v", result.Err)
 //	    return
 //	}
 //
-//	fmt.Printf("Client IP: %s from %s\n", resolution.IP, resolution.Source)
+//	fmt.Printf("Client IP: %s from %s\n", result.IP, result.Source)
 //
-//	if cached, ok := clientip.StrictResolutionFromContext(req.Context()); ok {
-//	    fmt.Printf("Cached client IP: %s\n", cached.IP)
-//	}
+// For net/http middleware, use Middleware and retrieve the Result with
+// FromContext. Middleware is pass-through: downstream code decides whether to
+// reject a request when Result.Err is non-nil.
 //
-// Framework-agnostic input is available through ExtractInput and Resolver's
-// input methods. Resolver methods return the updated request or Input so cached
-// resolution state can flow through the call path:
+// Framework-agnostic input is available through Resolver's input methods:
 //
-//	input, resolution := resolver.ResolveInputStrict(clientip.Input{
+//	result := resolver.ResolveInput(clientip.Input{
 //	    Context:    ctx,
 //	    RemoteAddr: remoteAddr,
-//	    Path:       path,
 //	    Headers:    headerProvider,
 //	})
-//	_ = input
 //
-// # Config, Sources, And Security
+// # Options, Sources, And Security
 //
-// Config stays flat in the current public API. Presets return Config values and
-// can be tweaked before construction. Zero values generally select safe
-// defaults: nil Sources means RemoteAddr only, zero MaxChainLength means
-// DefaultMaxChainLength, nil Logger disables logging, and nil Metrics disables
-// metrics.
+// New uses functional options. Zero options select safe defaults: RemoteAddr
+// only, DefaultMaxChainLength, no-op logging, and no-op observation.
 //
 // Source values stay public and opaque. Use the built-in extractor sources for
 // request-derived extraction, SourceStaticFallback for resolver static fallback
 // results, and HeaderSource for custom headers.
 //
-// Extractor walks Config.Sources in order. Source-unavailable errors allow the
-// next source to run, while malformed headers, proxy-trust failures, chain
+// Resolver walks configured sources in order. Source-unavailable errors allow
+// the next source to run, while malformed headers, proxy-trust failures, chain
 // limits, and implausible client IPs remain terminal.
 //
-// Header-based sources require trusted upstream proxy ranges. Configure
-// TrustedProxyPrefixes directly, optionally using LoopbackProxyPrefixes,
+// Header-based sources require trusted upstream proxy ranges. Configure them
+// with WithTrustedProxies, optionally using LoopbackProxyPrefixes,
 // PrivateProxyPrefixes, LocalProxyPrefixes, or ProxyPrefixesFromAddrs.
 //
 // ChainSelection applies to SourceForwarded and SourceXForwardedFor. The
@@ -89,19 +73,21 @@
 // untrusted entry and should only be used when trusted proxies are configured
 // and the forwarded chain is produced or sanitized by those proxies.
 //
-// Preferred resolver fallback is explicit and operationally useful, but it is
-// not suitable for authorization or trust-boundary enforcement. Context
-// cancellation and deadline errors remain terminal and do not use preferred
-// fallback.
+// Operational fallback is explicit per call and useful for analytics/logging,
+// but it is not suitable for authorization or trust-boundary enforcement.
+// Context cancellation and deadline errors remain terminal. StaticFallback
+// normalizes the supplied address but does not apply client-IP plausibility
+// checks; callers should validate static fallback values when that matters.
 //
 // # Observability
 //
-// Logger and Metrics remain separate public interfaces.
+// Logger records security warnings. Observer receives one event per resolver
+// call on a valid Resolver and is the preferred metrics/tracing integration
+// point.
 //
 // Security event labels are exported as SecurityEvent... constants so adapters
 // can depend on stable names.
 //
-// Preferred resolver fallback remains result-only in this phase. Inspect
-// Resolution.FallbackUsed rather than expecting separate fallback log or metric
-// signals.
+// Operational fallback is visible through Result.FallbackUsed,
+// Result.FallbackReason, and Result.Classify().
 package clientip

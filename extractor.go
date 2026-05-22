@@ -4,15 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"net/textproto"
 )
 
-// Extractor resolves client IP information from HTTP requests and
+// extractor resolves client IP information from HTTP requests and
 // framework-agnostic request inputs.
 //
-// Extractor instances are safe for concurrent reuse.
-type Extractor struct {
+// extractor instances are safe for concurrent reuse.
+type extractor struct {
 	config          *config
 	sources         []configuredSource
 	clientIP        clientIPPolicy
@@ -29,17 +28,18 @@ type configuredSource struct {
 	remote         remoteAddrExtractor
 }
 
-// New creates an Extractor from a Config.
+// newExtractor creates an extractor from a options.
 //
-// New applies default values, normalizes prefixes and sources, validates the
-// resulting configuration, and returns an Extractor safe for concurrent reuse.
-func New(public Config) (*Extractor, error) {
+// newExtractor applies default values, normalizes prefixes and sources,
+// validates the resulting configuration, and returns an extractor safe for
+// concurrent reuse.
+func newExtractor(public options) (*extractor, error) {
 	cfg, err := configFromPublic(public)
 	if err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	extractor := &Extractor{
+	extractor := &extractor{
 		config: cfg,
 		clientIP: clientIPPolicy{
 			AllowPrivateIPs:             cfg.allowPrivateIPs,
@@ -62,7 +62,7 @@ func New(public Config) (*Extractor, error) {
 // Configured sources are attempted in order. ErrSourceUnavailable allows the
 // next source to run; malformed headers, proxy-trust failures, chain limits,
 // invalid client IPs, and context errors are terminal.
-func (e *Extractor) Extract(r *http.Request) (Extraction, error) {
+func (e *extractor) Extract(r *http.Request) (Extraction, error) {
 	if r == nil {
 		return Extraction{}, ErrNilRequest
 	}
@@ -77,21 +77,11 @@ func (e *Extractor) Extract(r *http.Request) (Extraction, error) {
 	return e.extractRequestView(requestViewFromRequest(r))
 }
 
-// ExtractAddr resolves only the client IP address.
-func (e *Extractor) ExtractAddr(r *http.Request) (netip.Addr, error) {
-	extraction, err := e.Extract(r)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	return extraction.IP, nil
-}
-
 // ExtractInput resolves client IP and metadata from framework-agnostic request
 // input.
 //
 // It follows the same source ordering and terminal-error rules as Extract.
-func (e *Extractor) ExtractInput(input Input) (Extraction, error) {
+func (e *extractor) ExtractInput(input Input) (Extraction, error) {
 	ctx := requestInputContext(input)
 	if err := ctx.Err(); err != nil {
 		return Extraction{}, err
@@ -103,19 +93,7 @@ func (e *Extractor) ExtractInput(input Input) (Extraction, error) {
 
 	return e.extractRequestView(requestViewFromInput(input))
 }
-
-// ExtractInputAddr resolves only the client IP address from framework-agnostic
-// request input.
-func (e *Extractor) ExtractInputAddr(input Input) (netip.Addr, error) {
-	extraction, err := e.ExtractInput(input)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	return extraction.IP, nil
-}
-
-func (e *Extractor) extractRequestView(r requestView) (Extraction, error) {
+func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 	if err := r.context().Err(); err != nil {
 		return Extraction{}, err
 	}
@@ -191,7 +169,7 @@ func (e *Extractor) extractRequestView(r requestView) (Extraction, error) {
 	return Extraction{}, ErrSourceUnavailable
 }
 
-func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
+func (e *extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error) {
 	source := builtinSource(sourceRemoteAddr)
 	result, failure := remoteAddrExtractor{clientIPPolicy: e.clientIP}.extract(remoteAddr, source)
 	if failure != nil {
@@ -208,7 +186,7 @@ func (e *Extractor) extractFromRemoteAddr(remoteAddr string) (Extraction, error)
 	return result, nil
 }
 
-func (e *Extractor) buildConfiguredSources(sources []Source) []configuredSource {
+func (e *extractor) buildConfiguredSources(sources []Source) []configuredSource {
 	configured := make([]configuredSource, len(sources))
 	for i, source := range sources {
 		source := source

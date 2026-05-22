@@ -10,13 +10,13 @@ import (
 func TestPresets_Config(t *testing.T) {
 	tests := []struct {
 		name        string
-		cfg         Config
+		opt         Option
 		want        configSnapshot
 		wantErrText string
 	}{
 		{
 			name: "direct connection",
-			cfg:  PresetDirectConnection(),
+			opt:  PresetDirectConnection(),
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{},
 				MinTrustedProxies:     0,
@@ -31,7 +31,7 @@ func TestPresets_Config(t *testing.T) {
 		},
 		{
 			name: "loopback reverse proxy",
-			cfg:  PresetLoopbackReverseProxy(),
+			opt:  PresetLoopbackReverseProxy(),
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128"},
 				MinTrustedProxies:     0,
@@ -46,7 +46,7 @@ func TestPresets_Config(t *testing.T) {
 		},
 		{
 			name: "vm reverse proxy",
-			cfg:  PresetVMReverseProxy(),
+			opt:  PresetVMReverseProxy(),
 			want: configSnapshot{
 				TrustedProxyCIDRs:     []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"},
 				MinTrustedProxies:     0,
@@ -63,7 +63,7 @@ func TestPresets_Config(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extractor, err := New(tt.cfg)
+			resolver, err := New(tt.opt)
 			if tt.wantErrText != "" {
 				if err == nil {
 					t.Fatalf("New() error = nil, want containing %q", tt.wantErrText)
@@ -78,7 +78,7 @@ func TestPresets_Config(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 
-			if diff := cmp.Diff(tt.want, snapshotConfig(extractor.config)); diff != "" {
+			if diff := cmp.Diff(tt.want, snapshotConfig(resolver.extractor.config)); diff != "" {
 				t.Fatalf("preset config mismatch (-want +got):\n%s", diff)
 			}
 		})

@@ -31,19 +31,16 @@ func (f HeaderValuesFunc) Values(name string) []string {
 
 // Input provides framework-agnostic request data for extraction.
 //
-// Context defaults to context.Background() when nil. Resolver methods return an
-// updated Input so request-scoped cached resolution state can flow through the
-// call path.
+// Context defaults to context.Background() when nil.
 //
 // For Headers, preserve repeated header lines as separate values for each
 // header name (for example two X-Forwarded-For lines should yield a slice with
 // length 2, and two X-Real-IP lines should also yield length 2). A nil Headers
 // provider makes header-based sources unavailable; SourceRemoteAddr can still
-// run if it is included in Config.Sources.
+// run if it is included with WithSources.
 type Input struct {
 	Context    context.Context
 	RemoteAddr string
-	Path       string
 	Headers    HeaderValues
 }
 

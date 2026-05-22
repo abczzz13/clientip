@@ -15,7 +15,7 @@ var (
 	// request.
 	ErrSourceUnavailable = errors.New("source unavailable")
 
-	// ErrNilRequest indicates a nil *http.Request was passed to Extract/ExtractAddr.
+	// ErrNilRequest indicates a nil *http.Request was passed to Resolve.
 	ErrNilRequest = errors.New("request cannot be nil")
 
 	// ErrMultipleSingleIPHeaders indicates multiple values were provided for a
@@ -196,15 +196,15 @@ type Extraction struct {
 	// source.
 	TrustedProxyCount int
 
-	// DebugInfo contains optional parsed chain details when Config.DebugInfo is
+	// DebugInfo contains optional parsed chain details when WithDebugInfo is
 	// enabled and a chain source succeeds.
 	DebugInfo *ChainDebugInfo
 }
 
 // ParseCIDRs parses one or more CIDR strings.
 //
-// The returned prefixes are suitable for Config.TrustedProxyPrefixes or
-// Config.AllowedReservedClientPrefixes.
+// The returned prefixes are suitable for WithTrustedProxies or
+// WithAllowedReservedClientPrefixes.
 func ParseCIDRs(cidrs ...string) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(cidrs))
 	for _, cidr := range cidrs {

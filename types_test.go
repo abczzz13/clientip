@@ -311,12 +311,12 @@ func TestSource_BuiltinsIgnoreExportedValueMutation(t *testing.T) {
 		t.Fatalf("HeaderSource(Remote-Addr) = %q, want %q", got, want)
 	}
 
-	extractor := mustNewExtractor(t, DefaultConfig())
+	extractor := mustNewExtractor(t, defaultOptions())
 	if diff := cmp.Diff([]Source{builtinSource(sourceRemoteAddr)}, extractor.config.sourcePriority); diff != "" {
 		t.Fatalf("default source priority mismatch (-want +got):\n%s", diff)
 	}
 
-	forwardedConfig := DefaultConfig()
+	forwardedConfig := defaultOptions()
 	forwardedConfig.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	forwardedConfig.Sources = []Source{HeaderSource("Forwarded")}
 	forwardedExtractor := mustNewExtractor(t, forwardedConfig)

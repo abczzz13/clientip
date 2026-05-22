@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func (e *Extractor) extractChainSource(
+func (e *extractor) extractChainSource(
 	r requestView,
 	source *configuredSource,
 	chainTooLongMessage string,
@@ -29,7 +29,7 @@ func (e *Extractor) extractChainSource(
 	return result, nil
 }
 
-func (e *Extractor) extractSingleHeaderSource(r requestView, source *configuredSource) (Extraction, error) {
+func (e *extractor) extractSingleHeaderSource(r requestView, source *configuredSource) (Extraction, error) {
 	result, failure := source.single.extract(r, source.source)
 	if failure != nil {
 		if failure.kind == failureSourceUnavailable {
@@ -42,7 +42,7 @@ func (e *Extractor) extractSingleHeaderSource(r requestView, source *configuredS
 	return result, nil
 }
 
-func (e *Extractor) extractRemoteAddrSource(r requestView, source *configuredSource) (Extraction, error) {
+func (e *extractor) extractRemoteAddrSource(r requestView, source *configuredSource) (Extraction, error) {
 	result, failure := source.remote.extract(r.remoteAddr(), source.source)
 	if failure != nil {
 		if failure.kind == failureSourceUnavailable {
@@ -76,7 +76,7 @@ func sourceIsTerminalError(err error) bool {
 		errors.Is(err, ErrInvalidForwardedHeader)
 }
 
-func (e *Extractor) logSecurityWarning(r requestView, source Source, event, msg string, attrs ...any) {
+func (e *extractor) logSecurityWarning(r requestView, source Source, event, msg string, attrs ...any) {
 	baseAttrs := []any{
 		"event", event,
 		"source", source.String(),
@@ -101,7 +101,7 @@ func proxyValidationWarningDetails(err error) (event, msg string, ok bool) {
 	}
 }
 
-func (e *Extractor) logProxyValidationWarning(r requestView, source Source, err error) {
+func (e *extractor) logProxyValidationWarning(r requestView, source Source, err error) {
 	event, msg, ok := proxyValidationWarningDetails(err)
 	if !ok {
 		return
@@ -120,7 +120,7 @@ func (e *Extractor) logProxyValidationWarning(r requestView, source Source, err 
 	e.logSecurityWarning(r, source, event, msg)
 }
 
-func (e *Extractor) handleChainError(
+func (e *extractor) handleChainError(
 	r requestView,
 	source Source,
 	err error,
@@ -146,7 +146,7 @@ func (e *Extractor) handleChainError(
 	e.config.metrics.RecordExtractionFailure(source.String())
 }
 
-func (e *Extractor) adaptChainFailure(r requestView, source Source, failure *extractionFailure, untrustedProxyMessage string) error {
+func (e *extractor) adaptChainFailure(r requestView, source Source, failure *extractionFailure, untrustedProxyMessage string) error {
 	if failure == nil {
 		return &ExtractionError{Err: ErrInvalidIP, Source: source}
 	}
@@ -198,7 +198,7 @@ func (e *Extractor) adaptChainFailure(r requestView, source Source, failure *ext
 	}
 }
 
-func (e *Extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, failure *extractionFailure) error {
+func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, failure *extractionFailure) error {
 	if failure == nil {
 		return &ExtractionError{Err: ErrInvalidIP, Source: sourceName}
 	}
@@ -262,7 +262,7 @@ func adaptRemoteAddrFailure(failure *extractionFailure, sourceName Source) error
 	}
 }
 
-func adaptForwardedParseError(err error, source Source, extractor *Extractor) error {
+func adaptForwardedParseError(err error, source Source, extractor *extractor) error {
 	if chainErr := adaptChainLengthError(err, source, extractor); chainErr != nil {
 		return chainErr
 	}
@@ -273,7 +273,7 @@ func adaptForwardedParseError(err error, source Source, extractor *Extractor) er
 	}
 }
 
-func adaptXFFParseError(err error, source Source, extractor *Extractor) error {
+func adaptXFFParseError(err error, source Source, extractor *extractor) error {
 	if chainErr := adaptChainLengthError(err, source, extractor); chainErr != nil {
 		return chainErr
 	}
@@ -281,7 +281,7 @@ func adaptXFFParseError(err error, source Source, extractor *Extractor) error {
 	return err
 }
 
-func adaptChainLengthError(err error, source Source, extractor *Extractor) error {
+func adaptChainLengthError(err error, source Source, extractor *extractor) error {
 	var chainErr *chainTooLongParseError
 	if !errors.As(err, &chainErr) {
 		return nil
@@ -296,7 +296,7 @@ func adaptChainLengthError(err error, source Source, extractor *Extractor) error
 	}
 }
 
-func (e *Extractor) validateProxyCount(trustedCount int) error {
+func (e *extractor) validateProxyCount(trustedCount int) error {
 	err := validateProxyCountPolicy(trustedCount, e.proxy)
 	if err == nil {
 		return nil
@@ -317,7 +317,7 @@ func (e *Extractor) validateProxyCount(trustedCount int) error {
 	}
 }
 
-func (e *Extractor) recordInvalidClientIPDisposition(disposition clientIPDisposition) {
+func (e *extractor) recordInvalidClientIPDisposition(disposition clientIPDisposition) {
 	switch disposition {
 	case clientIPInvalid:
 		e.config.metrics.RecordSecurityEvent(SecurityEventInvalidIP)

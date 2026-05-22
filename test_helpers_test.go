@@ -82,12 +82,12 @@ func errorTextStateOf(err error, contains string) errorTextState {
 	}
 }
 
-func mustNewExtractor(t *testing.T, cfg Config) *Extractor {
+func mustNewExtractor(t *testing.T, cfg options) *extractor {
 	t.Helper()
 
-	extractor, err := New(cfg)
+	extractor, err := newExtractor(cfg)
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	return extractor

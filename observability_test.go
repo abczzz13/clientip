@@ -80,52 +80,52 @@ func assertCommonSecurityWarningAttrs(t *testing.T, attrs map[string]any, event 
 	assertAttr(t, attrs, "remote_addr", remoteAddr)
 }
 
-type mockMetrics struct {
+type mockMetricSink struct {
 	mu             sync.Mutex
 	successCount   map[string]int
 	failureCount   map[string]int
 	securityEvents map[string]int
 }
 
-func newMockMetrics() *mockMetrics {
-	return &mockMetrics{
+func newMockMetricSink() *mockMetricSink {
+	return &mockMetricSink{
 		successCount:   make(map[string]int),
 		failureCount:   make(map[string]int),
 		securityEvents: make(map[string]int),
 	}
 }
 
-func (m *mockMetrics) RecordExtractionSuccess(source string) {
+func (m *mockMetricSink) RecordExtractionSuccess(source string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.successCount[source]++
 }
 
-func (m *mockMetrics) RecordExtractionFailure(source string) {
+func (m *mockMetricSink) RecordExtractionFailure(source string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.failureCount[source]++
 }
 
-func (m *mockMetrics) RecordSecurityEvent(event string) {
+func (m *mockMetricSink) RecordSecurityEvent(event string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.securityEvents[event]++
 }
 
-func (m *mockMetrics) getSuccessCount(source Source) int {
+func (m *mockMetricSink) getSuccessCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.successCount[source.String()]
 }
 
-func (m *mockMetrics) getFailureCount(source Source) int {
+func (m *mockMetricSink) getFailureCount(source Source) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.failureCount[source.String()]
 }
 
-func (m *mockMetrics) getSecurityEventCount(event string) int {
+func (m *mockMetricSink) getSecurityEventCount(event string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.securityEvents[event]
@@ -134,7 +134,7 @@ func (m *mockMetrics) getSecurityEventCount(event string) int {
 func TestLogging_MultipleXFFHeaders_DoNotWarn(t *testing.T) {
 	logger := &capturedLogger{}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor}
@@ -164,7 +164,7 @@ func TestLogging_MultipleXFFHeaders_DoNotWarn(t *testing.T) {
 func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXRealIP}
@@ -196,7 +196,7 @@ func TestLogging_MultipleSingleIPHeaders_EmitsWarning(t *testing.T) {
 func TestLogging_ChainTooLong_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor}
@@ -229,7 +229,7 @@ func TestLogging_TooFewTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 2
@@ -264,7 +264,7 @@ func TestLogging_NoTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
@@ -299,7 +299,7 @@ func TestLogging_TooManyTrustedProxies_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
@@ -334,7 +334,7 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
@@ -365,7 +365,7 @@ func TestLogging_UntrustedProxy_EmitsWarning(t *testing.T) {
 func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 	logger := &capturedLogger{}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
@@ -410,10 +410,10 @@ func TestLogging_MalformedForwarded_EmitsWarning(t *testing.T) {
 	}
 }
 
-func TestExtractInput_UsesInputContextAndPathInLogs(t *testing.T) {
+func TestExtractInput_UsesInputContextInLogs(t *testing.T) {
 	logger := &capturedLogger{}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.Logger = logger
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor}
@@ -431,7 +431,6 @@ func TestExtractInput_UsesInputContextAndPathInLogs(t *testing.T) {
 	result, err := extractor.ExtractInput(Input{
 		Context:    ctx,
 		RemoteAddr: "1.1.1.1:8080",
-		Path:       "/from-input",
 		Headers:    headers,
 	})
 	if err == nil && result.IP.IsValid() {
@@ -451,13 +450,13 @@ func TestExtractInput_UsesInputContextAndPathInLogs(t *testing.T) {
 		t.Fatalf("trace context value = %v, want %q", got, "trace-from-input")
 	}
 
-	assertCommonSecurityWarningAttrs(t, entry.attrs, SecurityEventChainTooLong, SourceXForwardedFor, "/from-input", "1.1.1.1:8080")
+	assertCommonSecurityWarningAttrs(t, entry.attrs, SecurityEventChainTooLong, SourceXForwardedFor, "", "1.1.1.1:8080")
 }
 
-func TestMetrics_ExtractionSuccess(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_ExtractionSuccess(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	req := newTestRequest("1.1.1.1:12345", "")
@@ -471,10 +470,10 @@ func TestMetrics_ExtractionSuccess(t *testing.T) {
 	}
 }
 
-func TestMetrics_ExtractionFailure(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_ExtractionFailure(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	req := newTestRequest("127.0.0.1:8080", "")
@@ -488,10 +487,10 @@ func TestMetrics_ExtractionFailure(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_SecurityEvent_InvalidIP(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	_, _ = extractor.Extract(newTestRequest("127.0.0.1:8080", ""))
@@ -501,11 +500,11 @@ func TestMetrics_SecurityEvent_InvalidIP(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
+func TestMetricSink_SecurityEvent_PrivateIP(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
 	cfg.AllowPrivateIPs = false
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	_, _ = extractor.Extract(newTestRequest("192.168.1.1:8080", ""))
@@ -515,10 +514,10 @@ func TestMetrics_SecurityEvent_PrivateIP(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_ReservedIP(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_SecurityEvent_ReservedIP(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	_, _ = extractor.Extract(newTestRequest("198.51.100.1:8080", ""))
@@ -528,11 +527,11 @@ func TestMetrics_SecurityEvent_ReservedIP(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
+func TestMetricSink_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
 	cfg.AllowedReservedClientPrefixes = []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	if _, err := extractor.Extract(newTestRequest("198.51.100.1:8080", "")); err != nil {
@@ -547,10 +546,10 @@ func TestMetrics_SecurityEvent_ReservedIP_Allowlisted(t *testing.T) {
 	}
 }
 
-func TestMetrics_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
@@ -575,10 +574,10 @@ func TestMetrics_MultipleXFFHeaders_DoNotEmitSecurityEvent(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXRealIP}
 	extractor := mustNewExtractor(t, cfg)
@@ -600,14 +599,14 @@ func TestMetrics_SecurityEvent_MultipleSingleIPHeaders(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
-	metrics := newMockMetrics()
+func TestMetricSink_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
+	metrics := newMockMetricSink()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 2
 	cfg.MaxTrustedProxies = 3
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
 
@@ -620,14 +619,14 @@ func TestMetrics_SecurityEvent_TooFewTrustedProxies(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
-	metrics := newMockMetrics()
+func TestMetricSink_SecurityEvent_NoTrustedProxies(t *testing.T) {
+	metrics := newMockMetricSink()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 3
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
 
@@ -640,14 +639,14 @@ func TestMetrics_SecurityEvent_NoTrustedProxies(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
-	metrics := newMockMetrics()
+func TestMetricSink_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
+	metrics := newMockMetricSink()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 1
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
 
@@ -660,14 +659,14 @@ func TestMetrics_SecurityEvent_TooManyTrustedProxies(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
-	metrics := newMockMetrics()
+func TestMetricSink_SecurityEvent_UntrustedProxy(t *testing.T) {
+	metrics := newMockMetricSink()
 	cidrs := mustParseCIDRs(t, "10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 3
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
 
@@ -680,11 +679,11 @@ func TestMetrics_SecurityEvent_UntrustedProxy(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
+func TestMetricSink_SecurityEvent_ChainTooLong(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
 	cfg.MaxChainLength = 5
-	cfg.Metrics = metrics
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor}
 	extractor := mustNewExtractor(t, cfg)
@@ -698,10 +697,10 @@ func TestMetrics_SecurityEvent_ChainTooLong(t *testing.T) {
 	}
 }
 
-func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_SecurityEvent_MalformedForwarded(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -715,10 +714,10 @@ func TestMetrics_SecurityEvent_MalformedForwarded(t *testing.T) {
 	}
 }
 
-func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_ForwardedSourceSuccess(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceForwarded}
 	extractor := mustNewExtractor(t, cfg)
@@ -735,10 +734,10 @@ func TestMetrics_ForwardedSourceSuccess(t *testing.T) {
 	}
 }
 
-func TestMetrics_MultipleExtractions(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_MultipleExtractions(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -755,10 +754,10 @@ func TestMetrics_MultipleExtractions(t *testing.T) {
 	}
 }
 
-func TestMetrics_DifferentSources(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_DifferentSources(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -776,10 +775,10 @@ func TestMetrics_DifferentSources(t *testing.T) {
 	}
 }
 
-func TestMetrics_ConcurrentAccess(t *testing.T) {
-	metrics := newMockMetrics()
-	cfg := DefaultConfig()
-	cfg.Metrics = metrics
+func TestMetricSink_ConcurrentAccess(t *testing.T) {
+	metrics := newMockMetricSink()
+	cfg := defaultOptions()
+	cfg.metrics = metrics
 	extractor := mustNewExtractor(t, cfg)
 
 	const goroutines = 50
@@ -802,7 +801,7 @@ func TestMetrics_ConcurrentAccess(t *testing.T) {
 }
 
 func TestNoopMetrics(t *testing.T) {
-	noop := noopMetrics{}
+	noop := noopMetricSink{}
 	noop.RecordExtractionSuccess("test")
 	noop.RecordExtractionFailure("test")
 	noop.RecordSecurityEvent("test")

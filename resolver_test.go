@@ -4,571 +4,236 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
-	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
-
-	"github.com/google/go-cmp/cmp"
 )
 
-type countingResolverExtractor struct {
-	calls     int
-	result    Extraction
-	err       error
-	extractFn func(requestView) (Extraction, error)
+type resolvedEvent struct {
+	ctx    context.Context
+	result Result
 }
 
-func (s *countingResolverExtractor) extract(req requestView) (Extraction, error) {
-	s.calls++
-	if s.extractFn != nil {
-		return s.extractFn(req)
-	}
-
-	return s.result, s.err
+type recordingObserver struct {
+	events []resolvedEvent
 }
 
-func newResolverTestExtractor(source *countingResolverExtractor) *Extractor {
-	return &Extractor{
-		config: &config{
-			sourcePriority:   []Source{HeaderSource("X-Test-IP")},
-			sourceHeaderKeys: []string{"X-Test-IP"},
-		},
-		extractViewFunc: source.extract,
-	}
+func (o *recordingObserver) OnResolved(ctx context.Context, result Result) {
+	o.events = append(o.events, resolvedEvent{ctx: ctx, result: result})
 }
 
-func mustNewResolver(t *testing.T, extractor *Extractor, config ResolverConfig) *Resolver {
-	t.Helper()
-
-	resolver, err := NewResolver(extractor, config)
+func TestResolve_NilInputs(t *testing.T) {
+	resolver, err := New()
 	if err != nil {
-		t.Fatalf("NewResolver() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
-	return resolver
+	if result := resolver.Resolve(nil); !errors.Is(result.Err, ErrNilRequest) {
+		t.Fatalf("Resolve(nil) error = %v, want ErrNilRequest", result.Err)
+	}
+
+	var nilResolver *Resolver
+	if result := nilResolver.Resolve(&http.Request{}); !errors.Is(result.Err, errNilResolverExtractor) {
+		t.Fatalf("nil resolver error = %v, want errNilResolverExtractor", result.Err)
+	}
 }
 
-func TestNewResolver_InvalidConfig(t *testing.T) {
-	extractor := newResolverTestExtractor(&countingResolverExtractor{})
+func TestResolve_NilRequestObserved(t *testing.T) {
+	observer := &recordingObserver{}
+	resolver, err := New(WithObserver(observer))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
+	result := resolver.Resolve(nil)
+	if !errors.Is(result.Err, ErrNilRequest) {
+		t.Fatalf("Resolve(nil) error = %v, want ErrNilRequest", result.Err)
+	}
+	if len(observer.events) != 1 {
+		t.Fatalf("observer events = %d, want 1", len(observer.events))
+	}
+	event := observer.events[0]
+	if event.ctx == nil {
+		t.Fatal("observer context = nil, want non-nil")
+	}
+	if !errors.Is(event.result.Err, ErrNilRequest) {
+		t.Fatalf("observer result error = %v, want ErrNilRequest", event.result.Err)
+	}
+}
+
+func TestResolveOperational_NilRequestObservedWithoutFallback(t *testing.T) {
+	observer := &recordingObserver{}
+	resolver, err := New(WithObserver(observer))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result := resolver.ResolveOperational(nil, StaticFallback(netip.MustParseAddr("0.0.0.0")))
+	if !errors.Is(result.Err, ErrNilRequest) {
+		t.Fatalf("ResolveOperational(nil) error = %v, want ErrNilRequest", result.Err)
+	}
+	if result.FallbackUsed {
+		t.Fatal("ResolveOperational(nil) used fallback")
+	}
+	if len(observer.events) != 1 {
+		t.Fatalf("observer events = %d, want 1", len(observer.events))
+	}
+	event := observer.events[0]
+	if event.ctx == nil {
+		t.Fatal("observer context = nil, want non-nil")
+	}
+	if !errors.Is(event.result.Err, ErrNilRequest) {
+		t.Fatalf("observer result error = %v, want ErrNilRequest", event.result.Err)
+	}
+	if event.result.FallbackUsed {
+		t.Fatal("observer result used fallback")
+	}
+}
+
+func TestResolve_RemoteAddrDefault(t *testing.T) {
+	resolver, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result := resolver.Resolve(&http.Request{RemoteAddr: "8.8.8.8:443", Header: make(http.Header)})
+	if result.Err != nil {
+		t.Fatalf("Resolve() error = %v", result.Err)
+	}
+	if result.IP != netip.MustParseAddr("8.8.8.8") {
+		t.Fatalf("Resolve() IP = %v, want 8.8.8.8", result.IP)
+	}
+	if result.Source != SourceRemoteAddr {
+		t.Fatalf("Resolve() Source = %v, want %v", result.Source, SourceRemoteAddr)
+	}
+}
+
+func TestFallbackReasonString(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      ResolverConfig
-		wantErrText string
+		reason FallbackReason
+		want   string
 	}{
-		{
-			name:        "unsupported preferred fallback",
-			config:      ResolverConfig{PreferredFallback: PreferredFallback(99)},
-			wantErrText: "unsupported preferred fallback",
-		},
-		{
-			name:        "static fallback requires static IP",
-			config:      ResolverConfig{PreferredFallback: PreferredFallbackStaticIP},
-			wantErrText: "PreferredFallbackStaticIP requires StaticFallbackIP",
-		},
-		{
-			name: "remote addr fallback rejects static IP",
-			config: ResolverConfig{
-				PreferredFallback: PreferredFallbackRemoteAddr,
-				StaticFallbackIP:  netip.MustParseAddr("0.0.0.0"),
-			},
-			wantErrText: "StaticFallbackIP requires PreferredFallbackStaticIP",
-		},
-		{
-			name: "no fallback rejects static IP",
-			config: ResolverConfig{
-				StaticFallbackIP: netip.MustParseAddr("0.0.0.0"),
-			},
-			wantErrText: "StaticFallbackIP requires PreferredFallbackStaticIP",
-		},
+		{reason: FallbackReasonNone, want: "none"},
+		{reason: FallbackReasonUntrustedProxy, want: "untrusted_proxy"},
+		{reason: FallbackReasonMalformedHeader, want: "malformed_header"},
+		{reason: FallbackReasonSourceUnavailable, want: "source_unavailable"},
+		{reason: FallbackReasonInvalidIP, want: "invalid_ip"},
+		{reason: FallbackReason(255), want: "unknown"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewResolver(extractor, tt.config)
-			if err == nil {
-				t.Fatalf("NewResolver() error = nil, want containing %q", tt.wantErrText)
-			}
-			if !strings.Contains(err.Error(), tt.wantErrText) {
-				t.Fatalf("NewResolver() error = %q, want containing %q", err.Error(), tt.wantErrText)
-			}
-		})
+		if got := tt.reason.String(); got != tt.want {
+			t.Fatalf("FallbackReason(%d).String() = %q, want %q", tt.reason, got, tt.want)
+		}
 	}
 }
 
-func TestResolver_ResolveStrict_CachesSuccess(t *testing.T) {
-	source := &countingResolverExtractor{
-		result: Extraction{IP: netip.MustParseAddr("8.8.8.8"), Source: SourceXRealIP},
+func TestResolveOperational_ContextErrorsRemainTerminal(t *testing.T) {
+	resolver, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
 	}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext() error = %v", err)
+	}
+	req.RemoteAddr = "8.8.8.8:443"
+
+	result := resolver.ResolveOperational(req, StaticFallback(netip.MustParseAddr("0.0.0.0")))
+	if !errors.Is(result.Err, context.Canceled) {
+		t.Fatalf("ResolveOperational() error = %v, want context.Canceled", result.Err)
+	}
+	if result.FallbackUsed {
+		t.Fatal("ResolveOperational() used fallback for context cancellation")
+	}
+}
+
+func TestNewOptionsResolveAndOperationalFallback(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8")),
+		WithSources(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
 	req := &http.Request{RemoteAddr: "203.0.113.10:443", Header: make(http.Header)}
-	req, first := resolver.ResolveStrict(req)
-	req, second := resolver.ResolveStrict(req)
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
 
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if first.Err != nil {
-		t.Fatalf("first error = %v, want nil", first.Err)
-	}
-	if second.Err != nil {
-		t.Fatalf("second error = %v, want nil", second.Err)
-	}
-	if got, want := second.IP, netip.MustParseAddr("8.8.8.8"); got != want {
-		t.Fatalf("IP = %s, want %s", got, want)
-	}
-	if got, want := second.Source, SourceXRealIP; got != want {
-		t.Fatalf("Source = %q, want %q", got, want)
-	}
-	if second.FallbackUsed {
-		t.Fatal("FallbackUsed = true, want false")
+	strict := resolver.Resolve(req)
+	if strict.Err == nil {
+		t.Fatal("Resolve() error = nil, want untrusted proxy error")
 	}
 
-	cached, ok := StrictResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("StrictResolutionFromContext() found no cached resolution")
+	operational := resolver.ResolveOperational(req, StaticFallback(netip.MustParseAddr("0.0.0.0")))
+	if operational.Err != nil {
+		t.Fatalf("ResolveOperational() error = %v, want nil", operational.Err)
 	}
-	if cached != second {
-		t.Fatalf("cached resolution = %#v, want %#v", cached, second)
+	if !operational.FallbackUsed {
+		t.Fatal("ResolveOperational() FallbackUsed = false, want true")
 	}
-	if _, ok := PreferredResolutionFromContext(req.Context()); ok {
-		t.Fatal("PreferredResolutionFromContext() = true, want false")
+	if operational.FallbackReason != FallbackReasonUntrustedProxy {
+		t.Fatalf("FallbackReason = %v, want %v", operational.FallbackReason, FallbackReasonUntrustedProxy)
+	}
+	if operational.Classify() != ResultFallback {
+		t.Fatalf("Classify() = %v, want %v", operational.Classify(), ResultFallback)
 	}
 }
 
-func TestResolver_ResolveStrict_CachesFailure(t *testing.T) {
-	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverExtractor{err: strictErr}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})
-
-	req := &http.Request{RemoteAddr: "203.0.113.10:443", Header: make(http.Header)}
-	req, first := resolver.ResolveStrict(req)
-	req, second := resolver.ResolveStrict(req)
-
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if !errors.Is(first.Err, ErrInvalidIP) {
-		t.Fatalf("first error = %v, want ErrInvalidIP", first.Err)
-	}
-	if !errors.Is(second.Err, ErrInvalidIP) {
-		t.Fatalf("second error = %v, want ErrInvalidIP", second.Err)
-	}
-	if second.OK() {
-		t.Fatal("OK() = true, want false")
-	}
-	if got, want := second.Source, SourceXRealIP; got != want {
-		t.Fatalf("Source = %q, want %q", got, want)
+func TestMiddlewareStoresResultAndPassesThroughOnError(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8")),
+		WithSources(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
 	}
 
-	cached, ok := StrictResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("StrictResolutionFromContext() found no cached resolution")
+	called := false
+	handler := resolver.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		called = true
+		result, ok := FromContext(req.Context())
+		if !ok {
+			t.Fatal("FromContext() ok = false, want true")
+		}
+		if result.Err == nil {
+			t.Fatal("middleware result error = nil, want strict error")
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "203.0.113.10:443"
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+	if !called {
+		t.Fatal("next handler was not called")
 	}
-	if !errors.Is(cached.Err, ErrInvalidIP) {
-		t.Fatalf("cached error = %v, want ErrInvalidIP", cached.Err)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
 	}
 }
 
-func TestResolver_ResolvePreferred_ReusesStrictCachedResult(t *testing.T) {
-	source := &countingResolverExtractor{
-		result: Extraction{IP: netip.MustParseAddr("8.8.8.8"), Source: SourceXRealIP},
-	}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{PreferredFallback: PreferredFallbackRemoteAddr})
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}
-	req, strict := resolver.ResolveStrict(req)
-	req, preferred := resolver.ResolvePreferred(req)
-
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if strict != preferred {
-		t.Fatalf("preferred resolution = %#v, want %#v", preferred, strict)
-	}
-	if preferred.FallbackUsed {
-		t.Fatal("FallbackUsed = true, want false")
+func TestResolveInputAndHeaders(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8")),
+		WithSources(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
 	}
 
-	cached, ok := PreferredResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("PreferredResolutionFromContext() found no cached resolution")
+	headers := http.Header{"X-Forwarded-For": {"8.8.8.8"}}
+	result := resolver.ResolveHeaders(context.Background(), "127.0.0.1:12345", headers)
+	if result.Err != nil {
+		t.Fatalf("ResolveHeaders() error = %v", result.Err)
 	}
-	if cached != preferred {
-		t.Fatalf("cached preferred resolution = %#v, want %#v", cached, preferred)
+	if result.IP != netip.MustParseAddr("8.8.8.8") {
+		t.Fatalf("ResolveHeaders() IP = %v, want 8.8.8.8", result.IP)
 	}
-}
-
-func TestResolver_ResolvePreferred_ParseRemoteAddrFallback(t *testing.T) {
-	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverExtractor{err: strictErr}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{PreferredFallback: PreferredFallbackRemoteAddr})
-
-	req := &http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}
-	req, resolution := resolver.ResolvePreferred(req)
-
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if !resolution.OK() {
-		t.Fatalf("ResolvePreferred() error = %v", resolution.Err)
-	}
-	if !resolution.FallbackUsed {
-		t.Fatal("FallbackUsed = false, want true")
-	}
-	if got, want := resolution.IP, netip.MustParseAddr("127.0.0.1"); got != want {
-		t.Fatalf("IP = %s, want %s", got, want)
-	}
-	if got, want := resolution.Source, SourceRemoteAddr; got != want {
-		t.Fatalf("Source = %q, want %q", got, want)
-	}
-
-	strict, ok := StrictResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("StrictResolutionFromContext() found no cached strict resolution")
-	}
-	if !errors.Is(strict.Err, ErrInvalidIP) {
-		t.Fatalf("strict error = %v, want ErrInvalidIP", strict.Err)
-	}
-
-	preferred, ok := PreferredResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("PreferredResolutionFromContext() found no cached preferred resolution")
-	}
-	if preferred != resolution {
-		t.Fatalf("cached preferred resolution = %#v, want %#v", preferred, resolution)
-	}
-}
-
-func TestResolver_ResolvePreferred_StaticFallback(t *testing.T) {
-	strictErr := &ExtractionError{Err: ErrInvalidIP, Source: SourceXRealIP}
-	source := &countingResolverExtractor{err: strictErr}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{
-		PreferredFallback: PreferredFallbackStaticIP,
-		StaticFallbackIP:  netip.MustParseAddr("0.0.0.0"),
-	})
-
-	req := &http.Request{RemoteAddr: "bad-remote-addr", Header: make(http.Header)}
-	req, resolution := resolver.ResolvePreferred(req)
-
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if !resolution.OK() {
-		t.Fatalf("ResolvePreferred() error = %v", resolution.Err)
-	}
-	if !resolution.FallbackUsed {
-		t.Fatal("FallbackUsed = false, want true")
-	}
-	if got, want := resolution.IP, netip.MustParseAddr("0.0.0.0"); got != want {
-		t.Fatalf("IP = %s, want %s", got, want)
-	}
-	if got, want := resolution.Source, SourceStaticFallback; got != want {
-		t.Fatalf("Source = %q, want %q", got, want)
-	}
-
-	strict, ok := StrictResolutionFromContext(req.Context())
-	if !ok {
-		t.Fatal("StrictResolutionFromContext() found no cached strict resolution")
-	}
-	if !errors.Is(strict.Err, ErrInvalidIP) {
-		t.Fatalf("strict error = %v, want ErrInvalidIP", strict.Err)
-	}
-}
-
-func TestResolver_ResolvePreferred_DoesNotFallbackOnCanceledOrDeadline(t *testing.T) {
-	resolver := mustNewResolver(t, newResolverTestExtractor(&countingResolverExtractor{
-		extractFn: func(req requestView) (Extraction, error) {
-			return Extraction{}, req.context().Err()
-		},
-	}), ResolverConfig{PreferredFallback: PreferredFallbackRemoteAddr})
-
-	tests := []struct {
-		name       string
-		newRequest func() *http.Request
-		newInput   func() Input
-		wantErr    error
-	}{
-		{
-			name: "request canceled",
-			newRequest: func() *http.Request {
-				ctx, cancel := context.WithCancel(context.Background())
-				cancel()
-				return (&http.Request{RemoteAddr: "127.0.0.1:8080", Header: make(http.Header)}).WithContext(ctx)
-			},
-			wantErr: context.Canceled,
-		},
-		{
-			name: "input deadline exceeded",
-			newInput: func() Input {
-				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-				defer cancel()
-				return Input{Context: ctx, RemoteAddr: "127.0.0.1:8080"}
-			},
-			wantErr: context.DeadlineExceeded,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.newRequest != nil {
-				req, resolution := resolver.ResolvePreferred(tt.newRequest())
-				if !errors.Is(resolution.Err, tt.wantErr) {
-					t.Fatalf("error = %v, want %v", resolution.Err, tt.wantErr)
-				}
-				if resolution.FallbackUsed {
-					t.Fatal("FallbackUsed = true, want false")
-				}
-				if preferred, ok := PreferredResolutionFromContext(req.Context()); !ok || !errors.Is(preferred.Err, tt.wantErr) {
-					t.Fatalf("cached preferred = %#v, ok=%t, want error %v", preferred, ok, tt.wantErr)
-				}
-				return
-			}
-
-			input, resolution := resolver.ResolveInputPreferred(tt.newInput())
-			if !errors.Is(resolution.Err, tt.wantErr) {
-				t.Fatalf("error = %v, want %v", resolution.Err, tt.wantErr)
-			}
-			if resolution.FallbackUsed {
-				t.Fatal("FallbackUsed = true, want false")
-			}
-			if preferred, ok := PreferredResolutionFromContext(input.Context); !ok || !errors.Is(preferred.Err, tt.wantErr) {
-				t.Fatalf("cached preferred = %#v, ok=%t, want error %v", preferred, ok, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestResolver_ResolveInputStrict_CachesSuccess(t *testing.T) {
-	source := &countingResolverExtractor{
-		result: Extraction{IP: netip.MustParseAddr("2001:db8::1"), Source: SourceXRealIP},
-	}
-	resolver := mustNewResolver(t, newResolverTestExtractor(source), ResolverConfig{})
-
-	input := Input{Context: context.Background(), RemoteAddr: "203.0.113.10:443"}
-	input, first := resolver.ResolveInputStrict(input)
-	input, second := resolver.ResolveInputStrict(input)
-
-	if source.calls != 1 {
-		t.Fatalf("extract calls = %d, want 1", source.calls)
-	}
-	if first != second {
-		t.Fatalf("second resolution = %#v, want %#v", second, first)
-	}
-	if cached, ok := StrictResolutionFromContext(input.Context); !ok || cached != second {
-		t.Fatalf("cached strict = %#v, ok=%t, want %#v", cached, ok, second)
-	}
-}
-
-type resolutionView struct {
-	IP           string
-	Source       Source
-	ErrInvalidIP bool
-	FallbackUsed bool
-}
-
-func viewResolution(r Resolution) resolutionView {
-	view := resolutionView{Source: r.Source, FallbackUsed: r.FallbackUsed}
-	if r.IP.IsValid() {
-		view.IP = r.IP.String()
-	}
-	view.ErrInvalidIP = errors.Is(r.Err, ErrInvalidIP)
-	return view
-}
-
-func TestResolverState_ResolveStrict_CachesComputedValue(t *testing.T) {
-	var state resolverState
-	computeCalls := 0
-	first := state.ResolveStrict(func() Resolution {
-		computeCalls++
-		return Resolution{Extraction: Extraction{Source: SourceXRealIP}}
-	})
-	second := state.ResolveStrict(func() Resolution {
-		computeCalls++
-		return Resolution{Extraction: Extraction{Source: SourceRemoteAddr}}
-	})
-
-	if got, want := first.Source, SourceXRealIP; got != want {
-		t.Fatalf("first strict source = %q, want %q", got, want)
-	}
-	if got, want := second.Source, SourceXRealIP; got != want {
-		t.Fatalf("second strict source = %q, want %q", got, want)
-	}
-	if got, want := computeCalls, 1; got != want {
-		t.Fatalf("strict compute calls = %d, want %d", got, want)
-	}
-
-	if got, ok := state.StrictValue(); !ok || got.Source != SourceXRealIP {
-		t.Fatalf("StrictValue() = (%#v, %t), want source %q", got, ok, SourceXRealIP)
-	}
-	if _, ok := state.PreferredValue(); ok {
-		t.Fatal("PreferredValue() ok = true, want false")
-	}
-}
-
-func TestResolverState_ResolvePreferred(t *testing.T) {
-	tests := []struct {
-		name              string
-		strict            Resolution
-		shouldFallback    func(Resolution) bool
-		fallback          func(Resolution) (Resolution, bool)
-		wantPreferred     Resolution
-		wantStrict        Resolution
-		wantStrictCalls   int
-		wantFallbackCalls int
-	}{
-		{
-			name:           "reuses strict result when fallback does not apply",
-			strict:         Resolution{Extraction: Extraction{Source: SourceXRealIP}},
-			shouldFallback: func(r Resolution) bool { return r.Err != nil },
-			fallback: func(Resolution) (Resolution, bool) {
-				return Resolution{Extraction: Extraction{Source: SourceRemoteAddr}, FallbackUsed: true}, true
-			},
-			wantPreferred:     Resolution{Extraction: Extraction{Source: SourceXRealIP}},
-			wantStrict:        Resolution{Extraction: Extraction{Source: SourceXRealIP}},
-			wantStrictCalls:   1,
-			wantFallbackCalls: 0,
-		},
-		{
-			name:           "uses fallback when allowed",
-			strict:         Resolution{Err: ErrInvalidIP},
-			shouldFallback: func(r Resolution) bool { return r.Err != nil },
-			fallback: func(Resolution) (Resolution, bool) {
-				return Resolution{Extraction: Extraction{Source: SourceRemoteAddr}, FallbackUsed: true}, true
-			},
-			wantPreferred:     Resolution{Extraction: Extraction{Source: SourceRemoteAddr}, FallbackUsed: true},
-			wantStrict:        Resolution{Err: ErrInvalidIP},
-			wantStrictCalls:   1,
-			wantFallbackCalls: 1,
-		},
-		{
-			name:           "keeps strict value when fallback declines",
-			strict:         Resolution{Err: ErrInvalidIP},
-			shouldFallback: func(r Resolution) bool { return r.Err != nil },
-			fallback: func(Resolution) (Resolution, bool) {
-				return Resolution{Extraction: Extraction{Source: SourceRemoteAddr}, FallbackUsed: true}, false
-			},
-			wantPreferred:     Resolution{Err: ErrInvalidIP},
-			wantStrict:        Resolution{Err: ErrInvalidIP},
-			wantStrictCalls:   1,
-			wantFallbackCalls: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var state resolverState
-			strictCalls := 0
-			fallbackCalls := 0
-
-			first := state.ResolvePreferred(
-				func() Resolution {
-					strictCalls++
-					return tt.strict
-				},
-				tt.shouldFallback,
-				func(r Resolution) (Resolution, bool) {
-					fallbackCalls++
-					return tt.fallback(r)
-				},
-			)
-			second := state.ResolvePreferred(
-				func() Resolution {
-					strictCalls++
-					return Resolution{Extraction: Extraction{Source: SourceStaticFallback}}
-				},
-				tt.shouldFallback,
-				func(r Resolution) (Resolution, bool) {
-					fallbackCalls++
-					return tt.fallback(r)
-				},
-			)
-
-			if diff := cmp.Diff(viewResolution(tt.wantPreferred), viewResolution(first)); diff != "" {
-				t.Fatalf("first preferred mismatch (-want +got):\n%s", diff)
-			}
-			if diff := cmp.Diff(viewResolution(tt.wantPreferred), viewResolution(second)); diff != "" {
-				t.Fatalf("second preferred mismatch (-want +got):\n%s", diff)
-			}
-			if got, want := strictCalls, tt.wantStrictCalls; got != want {
-				t.Fatalf("strict compute calls = %d, want %d", got, want)
-			}
-			if got, want := fallbackCalls, tt.wantFallbackCalls; got != want {
-				t.Fatalf("fallback calls = %d, want %d", got, want)
-			}
-
-			if diff := cmp.Diff(viewResolution(tt.wantStrict), viewResolution(mustStrictValue(t, &state))); diff != "" {
-				t.Fatalf("strict cache mismatch (-want +got):\n%s", diff)
-			}
-			if diff := cmp.Diff(viewResolution(tt.wantPreferred), viewResolution(mustPreferredValue(t, &state))); diff != "" {
-				t.Fatalf("preferred cache mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestResolverState_ResolveStrict_ConcurrentAccessComputesOnce(t *testing.T) {
-	var state resolverState
-	var computeCalls atomic.Int32
-
-	const goroutines = 16
-	start := make(chan struct{})
-	values := make(chan Source, goroutines)
-
-	var wg sync.WaitGroup
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			values <- state.ResolveStrict(func() Resolution {
-				computeCalls.Add(1)
-				time.Sleep(5 * time.Millisecond)
-				return Resolution{Extraction: Extraction{Source: SourceXRealIP}}
-			}).Source
-		}()
-	}
-
-	close(start)
-	wg.Wait()
-	close(values)
-
-	got := make([]Source, 0, goroutines)
-	for value := range values {
-		got = append(got, value)
-	}
-
-	want := make([]Source, goroutines)
-	for i := range want {
-		want[i] = SourceXRealIP
-	}
-
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Fatalf("concurrent strict values mismatch (-want +got):\n%s", diff)
-	}
-	if got, want := int(computeCalls.Load()), 1; got != want {
-		t.Fatalf("strict compute calls = %d, want %d", got, want)
-	}
-}
-
-func mustStrictValue(t *testing.T, state *resolverState) Resolution {
-	t.Helper()
-	value, ok := state.StrictValue()
-	if !ok {
-		t.Fatal("StrictValue() ok = false, want true")
-	}
-	return value
-}
-
-func mustPreferredValue(t *testing.T, state *resolverState) Resolution {
-	t.Helper()
-	value, ok := state.PreferredValue()
-	if !ok {
-		t.Fatal("PreferredValue() ok = false, want true")
-	}
-	return value
 }

@@ -13,9 +13,9 @@ import (
 )
 
 func TestExtract_RemoteAddr(t *testing.T) {
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	tests := []struct {
@@ -127,7 +127,7 @@ func TestExtract_RemoteAddr(t *testing.T) {
 
 func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	t.Run("Forwarded alias uses Forwarded parser", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{HeaderSource("Forwarded"), SourceRemoteAddr}
 		extractor := mustNewExtractor(t, cfg)
@@ -152,7 +152,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	})
 
 	t.Run("X-Forwarded-For alias combines multiple header lines", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{HeaderSource("X-Forwarded-For"), SourceRemoteAddr}
 		extractor := mustNewExtractor(t, cfg)
@@ -177,7 +177,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	})
 
 	t.Run("Remote-Addr alias maps to RemoteAddr source", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.Sources = []Source{HeaderSource("Remote-Addr")}
 		extractor := mustNewExtractor(t, cfg)
 
@@ -199,7 +199,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 	})
 
 	t.Run("X_Real_IP alias maps to X-Real-IP source", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{HeaderSource("X_Real_IP"), SourceRemoteAddr}
 		extractor := mustNewExtractor(t, cfg)
@@ -224,7 +224,7 @@ func TestExtract_WithSourcePriorityAlias_CanonicalizesBuiltIns(t *testing.T) {
 }
 
 func TestExtract_XForwardedFor(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mergeUniquePrefixes(LoopbackProxyPrefixes(), mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))...)
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -314,7 +314,7 @@ func TestExtract_XForwardedFor(t *testing.T) {
 }
 
 func TestExtract_Forwarded(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -410,7 +410,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 		t.Fatalf("ParseCIDRs() error = %v", err)
 	}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 2
@@ -495,7 +495,7 @@ func TestExtract_Forwarded_WithTrustedProxies(t *testing.T) {
 }
 
 func TestExtract_ParsesMultipleXFFHeaders(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -517,7 +517,7 @@ func TestExtract_ParsesMultipleXFFHeaders(t *testing.T) {
 }
 
 func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceForwarded, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -556,7 +556,7 @@ func TestExtract_StrictMode_MalformedForwarded_IsTerminal(t *testing.T) {
 }
 
 func TestExtract_ChainTooLong_IsTerminalByDefault(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	cfg.MaxChainLength = 2
@@ -586,7 +586,7 @@ func TestExtract_StrictMode_UntrustedProxy_IsTerminal(t *testing.T) {
 		t.Fatalf("ParseCIDRs() error = %v", err)
 	}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 3
@@ -612,7 +612,7 @@ func TestExtract_StrictMode_UntrustedProxy_IsTerminal(t *testing.T) {
 }
 
 func TestExtract_XRealIP(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mergeUniquePrefixes(LoopbackProxyPrefixes(), mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))...)
 	cfg.Sources = []Source{SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -688,7 +688,7 @@ func TestExtract_XRealIP(t *testing.T) {
 }
 
 func TestExtract_StrictMode_DuplicatePreferredSingleHeader_IsTerminal(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXRealIP, SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -719,7 +719,7 @@ func TestExtract_WithTrustedProxies(t *testing.T) {
 		t.Fatalf("ParseCIDRs() error = %v", err)
 	}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 2
@@ -813,7 +813,7 @@ func TestExtract_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
 		t.Fatalf("ParseCIDRs() error = %v", err)
 	}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 0
 	cfg.MaxTrustedProxies = 2
@@ -842,7 +842,7 @@ func TestExtract_WithTrustedProxies_MinZero_AllowsClientOnlyXFF(t *testing.T) {
 }
 
 func TestExtract_WithAllowPrivateIPs(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.AllowPrivateIPs = true
 	extractor := mustNewExtractor(t, cfg)
 
@@ -902,7 +902,7 @@ func TestExtract_WithAllowPrivateIPs(t *testing.T) {
 
 func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 	t.Run("remote reserved allowed", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.AllowedReservedClientPrefixes = []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")}
 		extractor := mustNewExtractor(t, cfg)
 
@@ -921,7 +921,7 @@ func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 	})
 
 	t.Run("remote reserved not allowlisted", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.AllowedReservedClientPrefixes = []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}
 		extractor := mustNewExtractor(t, cfg)
 
@@ -933,7 +933,7 @@ func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 	})
 
 	t.Run("xff reserved allowed", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{SourceXForwardedFor}
 		cfg.AllowedReservedClientPrefixes = []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10")}
@@ -956,7 +956,7 @@ func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 	})
 
 	t.Run("private still rejected", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.AllowedReservedClientPrefixes = []netip.Prefix{netip.MustParsePrefix("192.168.0.0/16")}
 		extractor := mustNewExtractor(t, cfg)
 
@@ -970,7 +970,7 @@ func TestExtract_WithAllowedReservedClientPrefixes(t *testing.T) {
 
 func TestExtract_WithDebugInfo(t *testing.T) {
 	cidrs, _ := ParseCIDRs("10.0.0.0/8")
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = cidrs
 	cfg.MinTrustedProxies = 1
 	cfg.MaxTrustedProxies = 2
@@ -1009,7 +1009,7 @@ func TestExtract_WithDebugInfo(t *testing.T) {
 
 func TestExtract_ErrorTypes(t *testing.T) {
 	t.Run("InvalidForwardedHeader", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{SourceForwarded}
 		extractor := mustNewExtractor(t, cfg)
@@ -1036,7 +1036,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 	})
 
 	t.Run("MultipleXFFHeaders_AreCombined", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{SourceXForwardedFor}
 		extractor := mustNewExtractor(t, cfg)
@@ -1063,7 +1063,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 	})
 
 	t.Run("MultipleSingleIPHeadersError", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{SourceXRealIP}
 		extractor := mustNewExtractor(t, cfg)
@@ -1099,7 +1099,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 
 	t.Run("ProxyValidationError", func(t *testing.T) {
 		cidrs, _ := ParseCIDRs("10.0.0.0/8")
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = cidrs
 		cfg.MinTrustedProxies = 2
 		cfg.MaxTrustedProxies = 3
@@ -1131,7 +1131,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 	})
 
 	t.Run("InvalidIPError", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 		cfg.Sources = []Source{SourceXForwardedFor}
 		extractor := mustNewExtractor(t, cfg)
@@ -1151,7 +1151,7 @@ func TestExtract_ErrorTypes(t *testing.T) {
 }
 
 func TestExtract_IPv4MappedIPv6(t *testing.T) {
-	extractor := mustNewExtractor(t, DefaultConfig())
+	extractor := mustNewExtractor(t, defaultOptions())
 
 	req := &http.Request{
 		RemoteAddr: "[::ffff:1.1.1.1]:8080",
@@ -1175,9 +1175,9 @@ func TestExtract_IPv4MappedIPv6(t *testing.T) {
 }
 
 func TestExtract_Concurrent(t *testing.T) {
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	req := &http.Request{
@@ -1217,7 +1217,7 @@ func TestExtract_Concurrent(t *testing.T) {
 type contextKey string
 
 func TestExtract_ContextPropagation(t *testing.T) {
-	extractor := mustNewExtractor(t, DefaultConfig())
+	extractor := mustNewExtractor(t, defaultOptions())
 
 	ctx := context.WithValue(context.Background(), contextKey("test-key"), "test-value")
 	req := &http.Request{
@@ -1234,9 +1234,9 @@ func TestExtract_ContextPropagation(t *testing.T) {
 }
 
 func TestExtract_NewAPI_Methods(t *testing.T) {
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	req := &http.Request{RemoteAddr: "1.1.1.1:8080", Header: make(http.Header)}
@@ -1257,52 +1257,21 @@ func TestExtract_NewAPI_Methods(t *testing.T) {
 		}
 	}
 
-	tests := []struct {
-		name           string
-		callExtraction bool
-		wantExtraction extractionView
-		wantAddr       string
-	}{
-		{
-			name:           "Extract",
-			callExtraction: true,
-			wantExtraction: extractionView{IP: "1.1.1.1", Source: SourceRemoteAddr, TrustedProxyCount: 0, HasDebugInfo: false},
-		},
-		{
-			name:     "ExtractAddr",
-			wantAddr: "1.1.1.1",
-		},
+	got, err := extractor.Extract(req)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.callExtraction {
-				got, err := extractor.Extract(req)
-				if err != nil {
-					t.Fatalf("Extract() error = %v", err)
-				}
-
-				if diff := cmp.Diff(tt.wantExtraction, toView(got)); diff != "" {
-					t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
-				}
-				return
-			}
-
-			gotAddr, err := extractor.ExtractAddr(req)
-			if err != nil {
-				t.Fatalf("ExtractAddr() error = %v", err)
-			}
-			if diff := cmp.Diff(tt.wantAddr, gotAddr.String()); diff != "" {
-				t.Fatalf("addr mismatch (-want +got):\n%s", diff)
-			}
-		})
+	want := extractionView{IP: "1.1.1.1", Source: SourceRemoteAddr, TrustedProxyCount: 0, HasDebugInfo: false}
+	if diff := cmp.Diff(want, toView(got)); diff != "" {
+		t.Fatalf("extraction mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestExtract_NilRequest(t *testing.T) {
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	_, extractErr := extractor.Extract(nil)
@@ -1310,19 +1279,11 @@ func TestExtract_NilRequest(t *testing.T) {
 		t.Fatalf("error = %v, want ErrNilRequest", extractErr)
 	}
 
-	gotAddr, extractErr := extractor.ExtractAddr(nil)
-	if !errors.Is(extractErr, ErrNilRequest) {
-		t.Fatalf("error = %v, want ErrNilRequest", extractErr)
-	}
-
-	if diff := cmp.Diff(false, gotAddr.IsValid()); diff != "" {
-		t.Fatalf("address validity mismatch (-want +got):\n%s", diff)
-	}
 }
 
 func TestExtract_ErrorSourceReporting(t *testing.T) {
 	t.Run("source-aware error keeps source", func(t *testing.T) {
-		cfg := DefaultConfig()
+		cfg := defaultOptions()
 		cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 		cfg.Sources = []Source{SourceXRealIP}
 		extractor := mustNewExtractor(t, cfg)
@@ -1348,7 +1309,7 @@ func TestExtract_ErrorSourceReporting(t *testing.T) {
 	})
 
 	t.Run("non source-aware error leaves source empty", func(t *testing.T) {
-		extractor := mustNewExtractor(t, DefaultConfig())
+		extractor := mustNewExtractor(t, defaultOptions())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -1383,7 +1344,7 @@ func (p *panicOnNilHeaderProvider) Values(string) []string {
 }
 
 func TestExtractInput_ParityWithExtract(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -1415,7 +1376,6 @@ func TestExtractInput_ParityWithExtract(t *testing.T) {
 			inputExtraction, inputErr := extractor.ExtractInput(Input{
 				Context:    req.Context(),
 				RemoteAddr: req.RemoteAddr,
-				Path:       req.URL.Path,
 				Headers:    req.Header,
 			})
 
@@ -1434,7 +1394,7 @@ func TestExtractInput_ParityWithExtract(t *testing.T) {
 }
 
 func TestExtractInput_HeaderValuesFunc(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{HeaderSource("CF-Connecting-IP"), SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -1466,9 +1426,9 @@ func TestExtractInput_HeaderValuesFunc(t *testing.T) {
 }
 
 func TestExtractInput_RemoteAddrOnlyDoesNotRequestHeaders(t *testing.T) {
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	requested := 0
@@ -1493,7 +1453,7 @@ func TestExtractInput_RemoteAddrOnlyDoesNotRequestHeaders(t *testing.T) {
 }
 
 func TestExtractInput_TypedNilHeaderProviderTreatedAsAbsent(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("8.8.8.8"))
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -1529,9 +1489,9 @@ func TestExtractInput_RemoteAddrOnly_RespectsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	_, extractErr := extractor.ExtractInput(Input{Context: ctx, RemoteAddr: "8.8.8.8:8080"})
@@ -1544,7 +1504,7 @@ func TestExtractInput_CanceledContext_DoesNotRequestHeaders(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = mustProxyPrefixesFromAddrs(t, netip.MustParseAddr("1.1.1.1"))
 	cfg.Sources = []Source{SourceXForwardedFor, SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
@@ -1568,9 +1528,9 @@ func TestExtractInput_CanceledContext_DoesNotRequestHeaders(t *testing.T) {
 
 func TestExtractInput_NilContextDefaultsBackground(t *testing.T) {
 	input := Input{RemoteAddr: "8.8.8.8:8080"}
-	extractor, err := New(DefaultConfig())
+	extractor, err := newExtractor(defaultOptions())
 	if err != nil {
-		t.Fatalf("New() error = %v", err)
+		t.Fatalf("newExtractor() error = %v", err)
 	}
 
 	extraction, err := extractor.ExtractInput(input)
@@ -1584,20 +1544,13 @@ func TestExtractInput_NilContextDefaultsBackground(t *testing.T) {
 		t.Fatalf("Source = %q, want %q", got, want)
 	}
 
-	addr, err := extractor.ExtractInputAddr(input)
-	if err != nil {
-		t.Fatalf("ExtractInputAddr() error = %v", err)
-	}
-	if got, want := addr.String(), "8.8.8.8"; got != want {
-		t.Fatalf("IP = %q, want %q", got, want)
-	}
 }
 
 func TestNew_ConfigInputImmutability(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}
 	priority := []Source{SourceXForwardedFor, SourceRemoteAddr}
 
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = clonePrefixes(trusted)
 	cfg.MinTrustedProxies = 0
 	cfg.MaxTrustedProxies = 0

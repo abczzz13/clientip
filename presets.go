@@ -4,10 +4,10 @@ package clientip
 // traffic.
 //
 // This preset extracts from RemoteAddr only.
-func PresetDirectConnection() Config {
-	cfg := DefaultConfig()
-	cfg.Sources = []Source{builtinSource(sourceRemoteAddr)}
-	return cfg
+func PresetDirectConnection() Option {
+	return optionFunc(func(c *options) {
+		c.Sources = []Source{builtinSource(sourceRemoteAddr)}
+	})
 }
 
 // PresetLoopbackReverseProxy configures extraction for apps behind a reverse
@@ -15,11 +15,11 @@ func PresetDirectConnection() Config {
 //
 // It trusts loopback proxy CIDRs and prioritizes X-Forwarded-For before
 // RemoteAddr within the extractor's strict source order.
-func PresetLoopbackReverseProxy() Config {
-	cfg := DefaultConfig()
-	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
-	cfg.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
-	return cfg
+func PresetLoopbackReverseProxy() Option {
+	return optionFunc(func(c *options) {
+		c.TrustedProxyPrefixes = LoopbackProxyPrefixes()
+		c.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
+	})
 }
 
 // PresetVMReverseProxy configures extraction for apps behind a reverse proxy
@@ -27,9 +27,9 @@ func PresetLoopbackReverseProxy() Config {
 //
 // It trusts loopback and private proxy CIDRs and prioritizes X-Forwarded-For
 // before RemoteAddr within the extractor's strict source order.
-func PresetVMReverseProxy() Config {
-	cfg := DefaultConfig()
-	cfg.TrustedProxyPrefixes = LocalProxyPrefixes()
-	cfg.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
-	return cfg
+func PresetVMReverseProxy() Option {
+	return optionFunc(func(c *options) {
+		c.TrustedProxyPrefixes = LocalProxyPrefixes()
+		c.Sources = []Source{builtinSource(sourceXForwardedFor), builtinSource(sourceRemoteAddr)}
+	})
 }

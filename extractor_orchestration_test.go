@@ -9,7 +9,7 @@ import (
 )
 
 func TestExtract_AllSourcesUnavailableReturnsLastSource(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{SourceXRealIP, HeaderSource("CF-Connecting-IP")}
 	extractor := mustNewExtractor(t, cfg)
@@ -26,7 +26,7 @@ func TestExtract_AllSourcesUnavailableReturnsLastSource(t *testing.T) {
 }
 
 func TestExtractInput_ContextCanceledBeforeFallbackSource(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()
 	cfg.Sources = []Source{HeaderSource("CF-Connecting-IP"), SourceRemoteAddr}
 	extractor := mustNewExtractor(t, cfg)
