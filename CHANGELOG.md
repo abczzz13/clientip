@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-05-22
+
 ### Changed
 
 - **BREAKING:** `New(opts ...Option)` now constructs the primary `*Resolver` directly using functional options.
