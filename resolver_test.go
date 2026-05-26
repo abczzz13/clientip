@@ -61,6 +61,34 @@ func TestResolve_NilRequestObserved(t *testing.T) {
 	}
 }
 
+func TestResolve_WithMaxChainLengthEnforced(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(LoopbackProxyPrefixes()...),
+		WithSources(SourceXForwardedFor),
+		WithMaxChainLength(2),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	req := &http.Request{
+		RemoteAddr: "127.0.0.1:12345",
+		Header:     make(http.Header),
+	}
+	req.Header.Set("X-Forwarded-For", "8.8.8.8, 9.9.9.9, 4.4.4.4")
+
+	result := resolver.Resolve(req)
+	if result.OK() {
+		t.Fatalf("Resolve() unexpectedly succeeded with IP %s", result.IP)
+	}
+	if !errors.Is(result.Err, ErrChainTooLong) {
+		t.Fatalf("Resolve() error = %v, want ErrChainTooLong", result.Err)
+	}
+	if result.Source != SourceXForwardedFor {
+		t.Fatalf("Resolve() source = %q, want %q", result.Source, SourceXForwardedFor)
+	}
+}
+
 func TestResolveOperational_NilRequestObservedWithoutFallback(t *testing.T) {
 	observer := &recordingObserver{}
 	resolver, err := New(WithObserver(observer))
