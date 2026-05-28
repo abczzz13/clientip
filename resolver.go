@@ -139,6 +139,10 @@ func New(opts ...Option) (*Resolver, error) {
 }
 
 // Resolve resolves client IP information without fallback.
+//
+// Use Resolve for security-sensitive decisions. A nil request returns a Result
+// with ErrNilRequest. Request context cancellation and deadline errors are
+// terminal. Valid resolvers notify Observer once per call.
 func (r *Resolver) Resolve(req *http.Request) Result {
 	if r == nil || r.extractor == nil {
 		return Result{Err: errNilResolverExtractor}
@@ -156,6 +160,10 @@ func (r *Resolver) Resolve(req *http.Request) Result {
 
 // ResolveOperational resolves client IP information with per-call best-effort
 // fallback. When fallback succeeds, Err is nil and fallback metadata is set.
+//
+// Use ResolveOperational only for analytics, logging, and other paths where a
+// best-effort answer is acceptable. Context cancellation and deadline errors do
+// not fall back. Valid resolvers notify Observer once with the final Result.
 func (r *Resolver) ResolveOperational(req *http.Request, fallback Fallback) Result {
 	if r == nil || r.extractor == nil {
 		return Result{Err: errNilResolverExtractor}
@@ -178,6 +186,10 @@ func (r *Resolver) ResolveOperational(req *http.Request, fallback Fallback) Resu
 }
 
 // ResolveInput resolves client IP information from framework-agnostic input.
+//
+// It has the same strict semantics as Resolve. Input.Context defaults to
+// context.Background when nil, and a nil header provider makes header-based
+// sources unavailable.
 func (r *Resolver) ResolveInput(input Input) Result {
 	if r == nil || r.extractor == nil {
 		return Result{Err: errNilResolverExtractor}
@@ -189,6 +201,9 @@ func (r *Resolver) ResolveInput(input Input) Result {
 
 // ResolveInputOperational resolves framework-agnostic input with per-call
 // best-effort fallback.
+//
+// It has the same operational semantics as ResolveOperational but reads from
+// Input instead of *http.Request.
 func (r *Resolver) ResolveInputOperational(input Input, fallback Fallback) Result {
 	if r == nil || r.extractor == nil {
 		return Result{Err: errNilResolverExtractor}
@@ -205,6 +220,9 @@ func (r *Resolver) ResolveInputOperational(input Input, fallback Fallback) Resul
 }
 
 // ResolveHeaders resolves from plain http.Header and RemoteAddr values.
+//
+// This is a convenience wrapper around ResolveInput for frameworks and adapters
+// that already expose net/http-style headers.
 func (r *Resolver) ResolveHeaders(ctx context.Context, remoteAddr string, headers http.Header) Result {
 	return r.ResolveInput(Input{Context: ctx, RemoteAddr: remoteAddr, Headers: headers})
 }

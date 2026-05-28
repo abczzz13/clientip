@@ -1,13 +1,19 @@
 ## Summary
-- 
+-
+
+## Security/trust-boundary impact
+-
 
 ## Testing
-- [ ] `go test ./...` and `GOWORK=off go -C observe/prometheus test ./...`
-- [ ] `go vet ./...`
-- [ ] `golangci-lint run`
-- [ ] `govulncheck ./...`
+- [ ] `just test`
+- [ ] `just race`
+- [ ] `just lint`
+- [ ] `just security`
+- [ ] `just ci` or explained why full local CI was not run
 
 ## Checklist
 - [ ] Added or updated tests where appropriate
-- [ ] Updated docs or examples if needed
+- [ ] Updated README, godocs, or examples if needed
+- [ ] Updated `CHANGELOG.md` if public behavior changed
 - [ ] Considered backward compatibility
+- [ ] Considered parser, proxy trust, and fallback security implications

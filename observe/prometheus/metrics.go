@@ -12,7 +12,9 @@ import (
 
 // Observer is a Prometheus-backed implementation of clientip.Observer.
 //
-// It exports ip_resolution_total{source,result} counters.
+// It exports ip_resolution_total{source,result} counters. The source label uses
+// clientip.Source.String() and the result label uses clientip.ResultKind.String()
+// via Result.Classify(), keeping labels low-cardinality.
 type Observer struct {
 	resolutionTotal *prom.CounterVec
 }

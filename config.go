@@ -122,56 +122,102 @@ type options struct {
 
 // WithTrustedProxies declares upstream proxy ranges allowed to supply
 // header-based client IPs.
+//
+// Header sources are accepted only when the immediate RemoteAddr peer is in one
+// of these prefixes. Chain sources such as SourceForwarded and
+// SourceXForwardedFor also use these prefixes to identify the trusted suffix of
+// proxy hops before selecting the client candidate. Only include ranges that can
+// actually connect to this service.
 func WithTrustedProxies(prefixes ...netip.Prefix) Option {
 	return optionFunc(func(c *options) { c.TrustedProxyPrefixes = clonePrefixes(prefixes) })
 }
 
 // WithMinTrustedProxies rejects chains with fewer than n trusted proxies.
+//
+// This validates the number of CIDR-trusted hops found in a parsed chain. It
+// does not make a header source trustworthy on its own; header sources still
+// require WithTrustedProxies and a trusted immediate peer.
 func WithMinTrustedProxies(n int) Option {
 	return optionFunc(func(c *options) { c.MinTrustedProxies = n })
 }
 
 // WithMaxTrustedProxies rejects chains with more than n trusted proxies.
+//
+// This validates the number of CIDR-trusted hops found in a parsed chain. It
+// does not make a header source trustworthy on its own; header sources still
+// require WithTrustedProxies and a trusted immediate peer.
 func WithMaxTrustedProxies(n int) Option {
 	return optionFunc(func(c *options) { c.MaxTrustedProxies = n })
 }
 
 // WithAllowPrivateIPs allows RFC1918 and unique-local client addresses.
+//
+// Use this only when private clients are valid users in your deployment, such as
+// internal services or private-network applications. Loopback, link-local,
+// multicast, unspecified, and disallowed reserved addresses are still rejected.
 func WithAllowPrivateIPs() Option {
 	return optionFunc(func(c *options) { c.AllowPrivateIPs = true })
 }
 
 // WithAllowedReservedClientPrefixes allows selected special-use client ranges.
+//
+// This is mainly useful for tests, documentation examples, and deployments that
+// intentionally use a specific special-use range. It does not allow invalid
+// addresses generally; only client IPs contained in the supplied prefixes bypass
+// reserved-range rejection.
 func WithAllowedReservedClientPrefixes(prefixes ...netip.Prefix) Option {
 	return optionFunc(func(c *options) { c.AllowedReservedClientPrefixes = clonePrefixes(prefixes) })
 }
 
 // WithMaxChainLength caps Forwarded and X-Forwarded-For chain length.
+//
+// A zero value uses DefaultMaxChainLength. Negative values are rejected by New.
 func WithMaxChainLength(n int) Option {
 	return optionFunc(func(c *options) { c.MaxChainLength = n })
 }
 
 // WithChainSelection sets the chain client-candidate selection algorithm.
+//
+// RightmostUntrustedIP is the default and selects the nearest untrusted hop
+// before the trailing trusted proxy suffix. LeftmostUntrustedIP selects the
+// earliest untrusted hop and should be used only when trusted proxies fully
+// produce or sanitize the forwarded chain.
 func WithChainSelection(selection ChainSelection) Option {
 	return optionFunc(func(c *options) { c.ChainSelection = selection })
 }
 
 // WithDebugInfo includes parsed chain diagnostics on successful chain results.
+//
+// Debug information is intended for diagnostics and tests. Prefer Logger or
+// Observer for routine operational visibility.
 func WithDebugInfo() Option {
 	return optionFunc(func(c *options) { c.DebugInfo = true })
 }
 
 // WithSources sets the strict extraction source order.
+//
+// Sources are attempted in order. ErrSourceUnavailable allows the next source to
+// run, while malformed headers, proxy-trust failures, chain limits, invalid
+// client IPs, and context errors are terminal. Header-based sources require
+// WithTrustedProxies. SourceStaticFallback is result-only and is rejected here.
 func WithSources(sources ...Source) Option {
 	return optionFunc(func(c *options) { c.Sources = cloneSources(sources) })
 }
 
 // WithLogger configures security-significant warning logs.
+//
+// Logger implementations should be safe for concurrent use. Logging receives
+// extractor security events such as malformed headers, untrusted proxies, and
+// rejected client IPs; operational fallback itself is represented on Result.
 func WithLogger(logger Logger) Option {
 	return optionFunc(func(c *options) { c.Logger = logger })
 }
 
 // WithObserver configures result-level observation.
+//
+// Observer implementations should be safe for concurrent use. Observation is
+// result-level: it sees strict successes, strict failures, and successful
+// operational fallbacks after each resolver call.
 func WithObserver(observer Observer) Option {
 	return optionFunc(func(c *options) { c.Observer = observer })
 }

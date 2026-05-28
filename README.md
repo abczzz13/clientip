@@ -1,6 +1,27 @@
 # clientip
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/abczzz13/clientip.svg)](https://pkg.go.dev/github.com/abczzz13/clientip)
+[![CI](https://github.com/abczzz13/clientip/actions/workflows/ci.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/ci.yml)
+[![Security](https://github.com/abczzz13/clientip/actions/workflows/security.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/security.yml)
+[![License](https://img.shields.io/github/license/abczzz13/clientip)](LICENSE)
+
 Secure client IP resolution for `net/http` and framework-agnostic request inputs with trusted proxy validation, explicit source modeling, and operational fallback.
+
+## Contents
+
+- [Stability](#stability)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Which API Should I Use?](#which-api-should-i-use)
+- [Strict And Operational Resolution](#strict-and-operational-resolution)
+- [Middleware](#middleware)
+- [Framework-Agnostic Input](#framework-agnostic-input)
+- [Common Deployments](#common-deployments)
+- [Error Handling](#error-handling)
+- [Presets](#presets)
+- [Observability](#observability)
+- [Security Rules](#security-rules)
+- [Contributing](#contributing)
 
 ## Stability
 
@@ -54,6 +75,14 @@ resolver, err := clientip.New(
 
 Header-based sources require trusted proxy prefixes. `clientip.New(clientip.WithSources(clientip.SourceXForwardedFor))` returns an error.
 
+## Which API Should I Use?
+
+- `Resolve(req)` is the strict API for authorization, ACLs, rate limits, abuse protection, and audit decisions.
+- `ResolveOperational(req, fallback)` is for best-effort analytics and logging when a fallback value is acceptable.
+- `Middleware()` stores the strict `Result` in request context and lets your handler decide whether to reject.
+- `ResolveInput(input)` is for frameworks that do not expose `*http.Request` but can preserve repeated header-line values.
+- `ResolveHeaders(ctx, remoteAddr, headers)` is the simplest non-`net/http` bridge when you already have `http.Header`.
+
 ## Strict And Operational Resolution
 
 Use `Resolve` for security-sensitive decisions. It returns a `Result` with `Err` set when the request cannot be safely attributed.
@@ -104,6 +133,75 @@ For plain `http.Header` values:
 
 ```go
 result := resolver.ResolveHeaders(ctx, remoteAddr, headers)
+```
+
+## Common Deployments
+
+Direct app traffic should use the default resolver. It trusts only the connecting peer in `RemoteAddr`:
+
+```go
+resolver, err := clientip.New()
+```
+
+An app behind a same-host reverse proxy can use the loopback preset:
+
+```go
+resolver, err := clientip.New(clientip.PresetLoopbackReverseProxy())
+```
+
+An app behind an internal VM or private-network proxy can use the VM preset when those private ranges are the actual ingress boundary:
+
+```go
+resolver, err := clientip.New(clientip.PresetVMReverseProxy())
+```
+
+A CDN-origin service using a single-IP header must trust only the CDN peers that can connect to the origin:
+
+```go
+resolver, err := clientip.New(
+    clientip.WithTrustedProxies(trustedCDNPrefixes...),
+    clientip.WithSources(clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr),
+)
+```
+
+An ALB or reverse proxy that appends `X-Forwarded-For` should use a trusted-proxy range for the actual proxy-to-app path:
+
+```go
+resolver, err := clientip.New(
+    clientip.WithTrustedProxies(trustedIngressPrefixes...),
+    clientip.WithSources(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
+)
+```
+
+## Error Handling
+
+For simple strict handling, check `Result.OK()` or `Result.Err`:
+
+```go
+result := resolver.Resolve(req)
+if !result.OK() {
+    switch result.Classify() {
+    case clientip.ResultUntrusted, clientip.ResultMalformed:
+        http.Error(w, "bad client IP", http.StatusBadRequest)
+    default:
+        http.Error(w, "client IP unavailable", http.StatusServiceUnavailable)
+    }
+    return
+}
+```
+
+Use `errors.Is` for sentinel categories and `errors.As` for source-specific diagnostics:
+
+```go
+result := resolver.Resolve(req)
+if errors.Is(result.Err, clientip.ErrUntrustedProxy) {
+    // The peer was not in WithTrustedProxies while a header source was present.
+}
+
+var proxyErr *clientip.ProxyValidationError
+if errors.As(result.Err, &proxyErr) {
+    log.Printf("source=%s trusted=%d chain=%s", proxyErr.SourceName(), proxyErr.TrustedProxyCount, proxyErr.Chain)
+}
 ```
 
 ## Presets
@@ -200,3 +298,7 @@ Prometheus support lives in the optional `github.com/abczzz13/clientip/observe/p
 - The default chain algorithm is rightmost-untrusted before the trusted proxy suffix.
 - Do not use operational fallback for security decisions.
 - Count-only proxy trust is intentionally unsupported: `WithMinTrustedProxies` / `WithMaxTrustedProxies` validate CIDR-trusted hop counts and do not by themselves make a header source trusted.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, test commands, documentation expectations, and pull request guidance.

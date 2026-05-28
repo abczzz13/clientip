@@ -2,6 +2,7 @@ package clientip_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/textproto"
@@ -109,6 +110,37 @@ func ExampleResolver_ResolveInput() {
 
 	fmt.Println(result.IP, result.Source, result.FallbackUsed)
 	// Output: 8.8.8.8 cf_connecting_ip false
+}
+
+func ExampleResolver_ResolveHeaders() {
+	resolver, err := clientip.New()
+	if err != nil {
+		panic(err)
+	}
+
+	result := resolver.ResolveHeaders(context.Background(), "8.8.4.4:12345", nil)
+	if result.Err != nil {
+		panic(result.Err)
+	}
+
+	fmt.Println(result.IP, result.Source)
+	// Output: 8.8.4.4 remote_addr
+}
+
+func ExampleClassifyError() {
+	resolver, err := clientip.New()
+	if err != nil {
+		panic(err)
+	}
+
+	result := resolver.ResolveHeaders(context.Background(), "not-an-ip", nil)
+	fmt.Println(result.Classify())
+
+	var remoteErr *clientip.RemoteAddrError
+	fmt.Println(errors.As(result.Err, &remoteErr), errors.Is(result.Err, clientip.ErrInvalidIP))
+	// Output:
+	// invalid
+	// true true
 }
 
 type noopResponseWriter struct{}
