@@ -45,10 +45,15 @@ func StaticFallback(ip netip.Addr) Fallback {
 type FallbackReason uint8
 
 const (
+	// FallbackReasonNone indicates no fallback was used.
 	FallbackReasonNone FallbackReason = iota
+	// FallbackReasonUntrustedProxy indicates fallback was used because proxy validation failed.
 	FallbackReasonUntrustedProxy
+	// FallbackReasonMalformedHeader indicates fallback was used because a header could not be parsed.
 	FallbackReasonMalformedHeader
+	// FallbackReasonSourceUnavailable indicates fallback was used because no configured source yielded an IP.
 	FallbackReasonSourceUnavailable
+	// FallbackReasonInvalidIP indicates fallback was used because the extracted IP failed client-IP policy.
 	FallbackReasonInvalidIP
 )
 

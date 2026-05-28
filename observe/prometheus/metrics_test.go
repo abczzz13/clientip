@@ -191,14 +191,14 @@ func TestNewWithRegisterer_IncompatibleCollectorType(t *testing.T) {
 	}
 }
 
-func mustCounterValue(t testing.TB, registry *prom.Registry, metricName string, labels map[string]string) float64 {
-	t.Helper()
+func mustCounterValue(tb testing.TB, registry *prom.Registry, metricName string, labels map[string]string) float64 {
+	tb.Helper()
 	value, found, err := lookupCounterValue(registry, metricName, labels)
 	if err != nil {
-		t.Fatalf("lookupCounterValue(%q, %v) error = %v", metricName, labels, err)
+		tb.Fatalf("lookupCounterValue(%q, %v) error = %v", metricName, labels, err)
 	}
 	if !found {
-		t.Fatalf("counter %q with labels %v not found", metricName, labels)
+		tb.Fatalf("counter %q with labels %v not found", metricName, labels)
 	}
 	return value
 }

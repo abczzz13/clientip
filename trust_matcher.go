@@ -125,7 +125,7 @@ func trieContains(root *prefixTrieNode, addr []byte) bool {
 
 func addrBit(addr []byte, bitIndex int) int {
 	byteIndex := bitIndex / 8
-	shift := uint(7 - (bitIndex % 8))
+	shift := 7 - (bitIndex % 8)
 	if ((addr[byteIndex] >> shift) & 1) == 1 {
 		return 1
 	}

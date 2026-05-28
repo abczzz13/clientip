@@ -180,7 +180,7 @@ func TestChainExtractor_ForwardedRejectsBracketedTrailingJunk(t *testing.T) {
 func TestChainExtractor_EmptyChainAfterParse(t *testing.T) {
 	ext := chainExtractor{policy: chainPolicy{
 		headerName: "X-Forwarded-For",
-		parseValues: func(values []string) ([]string, error) {
+		parseValues: func([]string) ([]string, error) {
 			return nil, nil // empty result
 		},
 		selection: RightmostUntrustedIP,
@@ -335,7 +335,7 @@ func TestChainExtractor_ParseValuesError(t *testing.T) {
 	parseErr := &chainTooLongParseError{ChainLength: 100, MaxLength: 50}
 	ext := chainExtractor{policy: chainPolicy{
 		headerName: "X-Forwarded-For",
-		parseValues: func(values []string) ([]string, error) {
+		parseValues: func([]string) ([]string, error) {
 			return nil, parseErr
 		},
 		selection: RightmostUntrustedIP,

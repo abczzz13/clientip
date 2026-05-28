@@ -20,7 +20,7 @@ type capturedLogger struct {
 	entries []capturedLogEntry
 }
 
-func (l *capturedLogger) WarnContext(ctx context.Context, msg string, args ...any) {
+func (l *capturedLogger) WarnContext(ctx context.Context, _ string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 

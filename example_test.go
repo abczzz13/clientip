@@ -53,7 +53,7 @@ func ExampleResolver_Middleware() {
 		panic(err)
 	}
 
-	handler := resolver.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := resolver.Middleware()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		result, ok := clientip.FromContext(r.Context())
 		fmt.Println(ok, result.IP, result.Source)
 	}))

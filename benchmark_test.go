@@ -296,7 +296,7 @@ func BenchmarkExtract_CustomHeader(b *testing.B) {
 		RemoteAddr: "127.0.0.1:12345",
 		Header:     make(http.Header),
 	}
-	req.Header.Set("CF-Connecting-IP", "1.1.1.1")
+	req.Header.Set("Cf-Connecting-Ip", "1.1.1.1")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

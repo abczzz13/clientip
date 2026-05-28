@@ -155,7 +155,7 @@ func TestRequestViewFromInput_HeaderProviderPaths(t *testing.T) {
 		{
 			name:       "view only calls provider when Values is used",
 			headerName: "X-Forwarded-For",
-			newInput: func(t *testing.T) (Input, func() []string) {
+			newInput: func(*testing.T) (Input, func() []string) {
 				calls := make([]string, 0, 1)
 				headers := HeaderValuesFunc(func(name string) []string {
 					calls = append(calls, name)

@@ -32,12 +32,10 @@ const (
 type ChainSelection int
 
 const (
-	// Start at 1 to avoid zero-value confusion and make invalid selections
-	// explicit.
-	//
 	// RightmostUntrustedIP selects the rightmost untrusted address before the
 	// trailing trusted proxy suffix. This is the default and recommended mode
-	// for most deployments.
+	// for most deployments. It starts at 1 to avoid zero-value confusion and
+	// make invalid selections explicit.
 	RightmostUntrustedIP ChainSelection = iota + 1
 	// LeftmostUntrustedIP selects the leftmost untrusted address before the
 	// trailing trusted proxy suffix. Use it only when trusted proxies are
@@ -149,8 +147,8 @@ func WithAllowedReservedClientPrefixes(prefixes ...netip.Prefix) Option {
 }
 
 // WithMaxChainLength caps Forwarded and X-Forwarded-For chain length.
-func WithMaxChainLength(max int) Option {
-	return optionFunc(func(c *options) { c.MaxChainLength = max })
+func WithMaxChainLength(n int) Option {
+	return optionFunc(func(c *options) { c.MaxChainLength = n })
 }
 
 // WithChainSelection sets the chain client-candidate selection algorithm.
