@@ -7,6 +7,10 @@ import (
 
 type headerValuesFunc func(name string) []string
 
+// requestView is the internal request adapter shared by *http.Request and
+// framework-agnostic Input resolution. It lets source extractors read
+// canonical headers, context, path, and RemoteAddr without knowing the
+// caller's shape.
 type requestView struct {
 	ctx             context.Context
 	remoteAddrValue string
@@ -44,6 +48,9 @@ func (r requestView) valuesCanonical(name string) []string {
 	return nil
 }
 
+// requestViewFromRequest uses http.Header directly. Configured source header
+// keys are canonicalized at construction time, so lookups avoid repeated
+// canonicalization on hot paths.
 func requestViewFromRequest(r *http.Request) requestView {
 	if r == nil {
 		return requestView{}
@@ -61,6 +68,9 @@ func requestViewFromRequest(r *http.Request) requestView {
 	return view
 }
 
+// requestViewFromInput keeps header access as a provider call so frameworks
+// can preserve repeated header-line semantics without materializing
+// http.Header.
 func requestViewFromInput(input Input) requestView {
 	view := requestView{
 		ctx:             requestInputContext(input),

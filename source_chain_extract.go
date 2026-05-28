@@ -20,6 +20,9 @@ type chainExtractor struct {
 	policy chainPolicy
 }
 
+// extract resolves a chain header source. It returns parser errors from the
+// configured policy parser unchanged, and returns extractionFailure for policy
+// failures that need source-specific public errors.
 func (e chainExtractor) extract(req requestView, source Source) (Extraction, *extractionFailure, error) {
 	headerValues := req.valuesCanonical(e.policy.headerName)
 	if len(headerValues) == 0 {
@@ -27,6 +30,8 @@ func (e chainExtractor) extract(req requestView, source Source) (Extraction, *ex
 	}
 
 	if len(e.policy.trustedProxy.TrustedProxyCIDRs) > 0 {
+		// Do not inspect spoofable header content until the immediate peer is
+		// a configured trusted proxy.
 		remoteIP := parseRemoteAddr(req.remoteAddr())
 		if !isTrustedProxy(remoteIP, e.policy.trustedProxy.TrustedProxyMatch, e.policy.trustedProxy.TrustedProxyCIDRs) {
 			return Extraction{}, &extractionFailure{
@@ -80,6 +85,8 @@ func (e chainExtractor) extract(req requestView, source Source) (Extraction, *ex
 		Source:            source,
 	}
 	if e.policy.collectDebugInfo {
+		// DebugInfo is success-only so failed requests do not carry extra
+		// parsed attacker-controlled chain details through Result by default.
 		result.DebugInfo = &ChainDebugInfo{
 			FullChain:      parts,
 			ClientIndex:    analysis.ClientIndex,

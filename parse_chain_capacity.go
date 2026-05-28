@@ -4,6 +4,10 @@ import "strings"
 
 const typicalChainCapacity = 8
 
+// chainPartsCapacity returns an allocation hint for parsed chain parts.
+//
+// It intentionally samples common short chain shapes instead of fully counting
+// delimiters; validation and max-length enforcement happen in the parsers.
 func chainPartsCapacity(values []string, maxLength int) int {
 	if maxLength <= 0 {
 		maxLength = 1
@@ -46,6 +50,7 @@ func chainPartsCapacity(values []string, maxLength int) int {
 	return typicalChainCapacity
 }
 
+// trimHTTPWhitespace trims HTTP optional whitespace: SP and HTAB only.
 func trimHTTPWhitespace(value string) string {
 	start := 0
 	for start < len(value) {

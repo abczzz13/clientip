@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// parseForwardedValues extracts RFC 7239 for= values from repeated Forwarded
+// header lines in arrival order. Only for= parameters become chain entries;
+// malformed syntax fails closed because a sabotaged Forwarded header can hide
+// or reorder client attribution.
 func parseForwardedValues(values []string, maxChainLength int) ([]string, error) {
 	if len(values) == 0 {
 		return nil, nil
@@ -46,6 +50,8 @@ func parseForwardedValues(values []string, maxChainLength int) ([]string, error)
 	return parts, nil
 }
 
+// parseForwardedElement extracts at most one for= parameter from an element.
+// Duplicate for= parameters are rejected as ambiguous instead of choosing one.
 func parseForwardedElement(element string) (forwardedFor string, hasFor bool, err error) {
 	err = scanForwardedSegments(element, ';', "parameter", func(param string) error {
 		eq := strings.IndexByte(param, '=')
@@ -86,6 +92,9 @@ func parseForwardedElement(element string) (forwardedFor string, hasFor bool, er
 	return forwardedFor, hasFor, nil
 }
 
+// scanForwardedSegments splits on delimiter while respecting quoted strings
+// and quoted-pair escapes. This prevents commas or semicolons inside quoted
+// values from changing the element/parameter structure we validate.
 func scanForwardedSegments(value string, delimiter byte, segmentKind string, onSegment func(string) error) error {
 	start := 0
 	inQuotes := false
@@ -136,6 +145,8 @@ func scanForwardedSegments(value string, delimiter byte, segmentKind string, onS
 	return nil
 }
 
+// parseForwardedForValue normalizes the value side of for=. Quoted values must
+// be fully quoted and valid; partially quoted or empty values are malformed.
 func parseForwardedForValue(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -157,6 +168,8 @@ func parseForwardedForValue(value string) (string, error) {
 	return value, nil
 }
 
+// unquoteForwardedValue decodes a Forwarded quoted-string and rejects raw
+// quotes or dangling escapes so malformed header input remains terminal.
 func unquoteForwardedValue(value string) (string, error) {
 	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
 		return "", fmt.Errorf("invalid quoted string %q", value)

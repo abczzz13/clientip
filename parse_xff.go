@@ -2,13 +2,19 @@ package clientip
 
 import "strings"
 
+// parseXFFValues parses X-Forwarded-For header lines into a logical chain.
+//
+// XFF is intentionally simpler and more permissive than RFC 7239 Forwarded:
+// empty comma-created elements are ignored, while non-empty elements still
+// count toward maxChainLength. Repeated header lines are processed in provider
+// order.
 func parseXFFValues(values []string, maxChainLength int) ([]string, error) {
 	if len(values) == 0 {
 		return nil, nil
 	}
 
-	// Fast path: single header value with no commas and no surrounding whitespace.
-	// Return the input slice directly to avoid allocation.
+	// Fast path: single header value with no commas and no surrounding
+	// whitespace. Return the input slice directly to avoid allocation.
 	if len(values) == 1 {
 		v := values[0]
 		if strings.IndexByte(v, ',') == -1 {

@@ -6,6 +6,10 @@ import (
 	"fmt"
 )
 
+// extractChainSource adapts chain extractor output into orchestration-level
+// errors. Source-specific parser adapters have already wrapped syntax and
+// length errors; policy failures become public typed errors through
+// adaptChainFailure.
 func (e *extractor) extractChainSource(
 	r requestView,
 	source *configuredSource,
@@ -52,6 +56,10 @@ func (e *extractor) extractRemoteAddrSource(r requestView, source *configuredSou
 	return result, nil
 }
 
+// sourceIsTerminalError defines when extractor orchestration may continue to
+// the next configured source. Only source-unavailable is a normal miss; trust,
+// syntax, policy, chain-length, invalid-IP, and context failures stop
+// resolution.
 func sourceIsTerminalError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
@@ -71,6 +79,8 @@ func sourceIsTerminalError(err error) bool {
 		errors.Is(err, ErrInvalidForwardedHeader)
 }
 
+// logSecurityWarning emits stable base attributes with the request context so
+// caller-provided loggers can attach trace/span metadata.
 func (e *extractor) logSecurityWarning(r requestView, source Source, event, msg string, attrs ...any) {
 	if e.config.loggerNoop {
 		return
@@ -149,6 +159,8 @@ func (e *extractor) handleChainError(
 	}
 }
 
+// adaptChainFailure converts chain-source policy failures into public errors.
+// Keep new chain failure kinds here so logging and typed errors stay centralized.
 func (e *extractor) adaptChainFailure(r requestView, source Source, failure *extractionFailure, untrustedProxyMessage string) error {
 	if failure == nil {
 		return &ExtractionError{Err: ErrInvalidIP, Source: source}
@@ -194,6 +206,8 @@ func (e *extractor) adaptChainFailure(r requestView, source Source, failure *ext
 	}
 }
 
+// adaptSingleHeaderFailure converts single-header policy failures into public
+// errors and emits the spoofing-related warnings for duplicate/untrusted input.
 func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, failure *extractionFailure) error {
 	if failure == nil {
 		return &ExtractionError{Err: ErrInvalidIP, Source: sourceName}
@@ -236,6 +250,8 @@ func (e *extractor) adaptSingleHeaderFailure(r requestView, sourceName Source, f
 	}
 }
 
+// adaptRemoteAddrFailure converts RemoteAddr parsing/policy failures into the
+// public RemoteAddrError shape.
 func adaptRemoteAddrFailure(failure *extractionFailure, sourceName Source) error {
 	if failure == nil {
 		return &ExtractionError{Err: ErrInvalidIP, Source: sourceName}
@@ -254,6 +270,8 @@ func adaptRemoteAddrFailure(failure *extractionFailure, sourceName Source) error
 	}
 }
 
+// adaptForwardedParseError marks malformed RFC 7239 input with the Forwarded
+// sentinel while preserving chain-length errors as their own category.
 func adaptForwardedParseError(err error, source Source, extractor *extractor) error {
 	if chainErr := adaptChainLengthError(err, source, extractor); chainErr != nil {
 		return chainErr
@@ -265,6 +283,8 @@ func adaptForwardedParseError(err error, source Source, extractor *extractor) er
 	}
 }
 
+// adaptXFFParseError currently only maps XFF parser errors that are chain-limit
+// failures; other XFF parsing is intentionally permissive.
 func adaptXFFParseError(err error, source Source, extractor *extractor) error {
 	if chainErr := adaptChainLengthError(err, source, extractor); chainErr != nil {
 		return chainErr
@@ -286,6 +306,8 @@ func adaptChainLengthError(err error, source Source, _ *extractor) error {
 	}
 }
 
+// proxyCountError re-runs count validation to map policy failures onto stable
+// public sentinel errors used by errors.Is and Result.Classify.
 func proxyCountError(trustedCount int, proxy proxyPolicy) error {
 	err := validateProxyCountPolicy(trustedCount, proxy)
 	if err == nil {

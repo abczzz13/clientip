@@ -123,11 +123,11 @@ type options struct {
 // WithTrustedProxies declares upstream proxy ranges allowed to supply
 // header-based client IPs.
 //
-// Header sources are accepted only when the immediate RemoteAddr peer is in one
-// of these prefixes. Chain sources such as SourceForwarded and
-// SourceXForwardedFor also use these prefixes to identify the trusted suffix of
-// proxy hops before selecting the client candidate. Only include ranges that can
-// actually connect to this service.
+// Header sources are accepted only when the immediate RemoteAddr peer is in
+// one of these prefixes. Chain sources such as SourceForwarded and
+// SourceXForwardedFor also use these prefixes to identify the trusted suffix
+// of proxy hops before selecting the client candidate. Only include ranges
+// that can actually connect to this service.
 func WithTrustedProxies(prefixes ...netip.Prefix) Option {
 	return optionFunc(func(c *options) { c.TrustedProxyPrefixes = clonePrefixes(prefixes) })
 }
@@ -152,26 +152,28 @@ func WithMaxTrustedProxies(n int) Option {
 
 // WithAllowPrivateIPs allows RFC1918 and unique-local client addresses.
 //
-// Use this only when private clients are valid users in your deployment, such as
-// internal services or private-network applications. Loopback, link-local,
-// multicast, unspecified, and disallowed reserved addresses are still rejected.
+// Use this only when private clients are valid users in your deployment, such
+// as internal services or private-network applications. Loopback, link-local,
+// multicast, unspecified, and disallowed reserved addresses are still
+// rejected.
 func WithAllowPrivateIPs() Option {
 	return optionFunc(func(c *options) { c.AllowPrivateIPs = true })
 }
 
 // WithAllowedReservedClientPrefixes allows selected special-use client ranges.
 //
-// This is mainly useful for tests, documentation examples, and deployments that
-// intentionally use a specific special-use range. It does not allow invalid
-// addresses generally; only client IPs contained in the supplied prefixes bypass
-// reserved-range rejection.
+// This is mainly useful for tests, documentation examples, and deployments
+// that intentionally use a specific special-use range. It does not allow
+// invalid addresses generally; only client IPs contained in the supplied
+// prefixes bypass reserved-range rejection.
 func WithAllowedReservedClientPrefixes(prefixes ...netip.Prefix) Option {
 	return optionFunc(func(c *options) { c.AllowedReservedClientPrefixes = clonePrefixes(prefixes) })
 }
 
 // WithMaxChainLength caps Forwarded and X-Forwarded-For chain length.
 //
-// A zero value uses DefaultMaxChainLength. Negative values are rejected by New.
+// A zero value uses DefaultMaxChainLength. Negative values are rejected by
+// New.
 func WithMaxChainLength(n int) Option {
 	return optionFunc(func(c *options) { c.MaxChainLength = n })
 }
@@ -196,10 +198,11 @@ func WithDebugInfo() Option {
 
 // WithSources sets the strict extraction source order.
 //
-// Sources are attempted in order. ErrSourceUnavailable allows the next source to
-// run, while malformed headers, proxy-trust failures, chain limits, invalid
+// Sources are attempted in order. ErrSourceUnavailable allows the next source
+// to run, while malformed headers, proxy-trust failures, chain limits, invalid
 // client IPs, and context errors are terminal. Header-based sources require
-// WithTrustedProxies. SourceStaticFallback is result-only and is rejected here.
+// WithTrustedProxies. SourceStaticFallback is result-only and is rejected
+// here.
 func WithSources(sources ...Source) Option {
 	return optionFunc(func(c *options) { c.Sources = cloneSources(sources) })
 }
@@ -299,6 +302,8 @@ type config struct {
 	observer   Observer
 }
 
+// validate checks normalized runtime configuration after defaults and public
+// option overrides have been applied.
 func (c *config) validate() error {
 	if c.minTrustedProxies < 0 {
 		return fmt.Errorf("minTrustedProxies must be >= 0, got %d", c.minTrustedProxies)
@@ -344,6 +349,9 @@ func (c *config) validate() error {
 	return nil
 }
 
+// validateSourcePriority rejects invalid or duplicate canonical sources and
+// enforces the one-chain-header rule. Mixing Forwarded and XFF would create two
+// independent proxy chains with unclear trust semantics.
 func (c *config) validateSourcePriority() (hasHeaderSource, hasChainSource bool, err error) {
 	seen := make(map[Source]struct{}, len(c.sourcePriority))
 	seenForwarded := false
@@ -417,6 +425,8 @@ func cloneSources(values []Source) []Source {
 	return slices.Clone(values)
 }
 
+// isNilValue catches typed nil interface values, such as (*myLogger)(nil),
+// that compare non-nil as an interface but would panic when called.
 func isNilValue(v any) bool {
 	if v == nil {
 		return true
@@ -431,6 +441,8 @@ func isNilValue(v any) bool {
 	}
 }
 
+// normalizePrefixes validates and masks prefixes so equivalent inputs dedupe
+// and match deterministically.
 func normalizePrefixes(prefixes []netip.Prefix, kind string) ([]netip.Prefix, error) {
 	normalized := make([]netip.Prefix, 0, len(prefixes))
 	for _, prefix := range prefixes {
@@ -493,6 +505,9 @@ func defaultConfig() *config {
 	}
 }
 
+// configFromPublic builds immutable runtime config in stages: start with safe
+// defaults, apply public option overrides, normalize/canonicalize values,
+// derive hot-path policies, then validate the finished configuration.
 func configFromPublic(public options) (*config, error) {
 	cfg := defaultConfig()
 

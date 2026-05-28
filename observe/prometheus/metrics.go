@@ -12,9 +12,10 @@ import (
 
 // Observer is a Prometheus-backed implementation of clientip.Observer.
 //
-// It exports ip_resolution_total{source,result} counters. The source label uses
-// clientip.Source.String() and the result label uses clientip.ResultKind.String()
-// via Result.Classify(), keeping labels low-cardinality.
+// It exports ip_resolution_total{source,result} counters. The source label
+// uses clientip.Source.String() and the result label uses
+// clientip.ResultKind.String() via Result.Classify(), keeping labels
+// low-cardinality.
 type Observer struct {
 	resolutionTotal *prom.CounterVec
 }
@@ -55,6 +56,8 @@ func NewWithRegisterer(registerer prom.Registerer) (*Observer, error) {
 	}, nil
 }
 
+// isNilRegisterer treats typed nil registerers the same as nil so callers can
+// pass optional interface values without causing a panic during registration.
 func isNilRegisterer(registerer prom.Registerer) bool {
 	if registerer == nil {
 		return true
@@ -69,6 +72,8 @@ func isNilRegisterer(registerer prom.Registerer) bool {
 	}
 }
 
+// registerCounterVec reuses compatible existing collectors so multiple adapter
+// instances can share a registry. Incompatible collectors still fail loudly.
 func registerCounterVec(registerer prom.Registerer, collector *prom.CounterVec, metricName string) (*prom.CounterVec, error) {
 	if err := registerer.Register(collector); err != nil {
 		var alreadyRegistered prom.AlreadyRegisteredError
@@ -88,9 +93,9 @@ func registerCounterVec(registerer prom.Registerer, collector *prom.CounterVec, 
 
 // OnResolved records one resolver result.
 //
-// The nil receiver guard allows callers to pass a typed-nil *Observer through
-// WithObserver without panicking; the resolver's interface-nil check does not
-// catch typed nils.
+// The nil receiver guard is defensive for direct method calls; resolver
+// construction rejects typed-nil observers before they can be used through
+// WithObserver.
 func (m *Observer) OnResolved(_ context.Context, result clientip.Result) {
 	if m == nil {
 		return

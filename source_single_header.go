@@ -10,6 +10,9 @@ type singleHeaderExtractor struct {
 	policy singleHeaderPolicy
 }
 
+// extract resolves a single-IP header source. Unlike chain headers, duplicate
+// header lines are terminal because there is no ordering rule that can safely
+// choose between multiple asserted client IPs.
 func (e singleHeaderExtractor) extract(req requestView, source Source) (Extraction, *extractionFailure) {
 	headerValues := req.valuesCanonical(e.policy.headerName)
 	if len(headerValues) == 0 {
@@ -32,6 +35,8 @@ func (e singleHeaderExtractor) extract(req requestView, source Source) (Extracti
 	}
 
 	if len(e.policy.trustedProxy.TrustedProxyCIDRs) > 0 {
+		// Single-IP headers are only meaningful when the immediate peer is
+		// trusted to set or sanitize them.
 		remoteIP := parseRemoteAddr(req.remoteAddr())
 		if !isTrustedProxy(remoteIP, e.policy.trustedProxy.TrustedProxyMatch, e.policy.trustedProxy.TrustedProxyCIDRs) {
 			return Extraction{}, &extractionFailure{

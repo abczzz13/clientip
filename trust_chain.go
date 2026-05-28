@@ -11,12 +11,17 @@ type proxyPolicy struct {
 	MaxTrustedProxies int
 }
 
+// chainAnalysis describes the selected client candidate and trusted suffix.
+// Indexes refer to parsed chain parts, not byte offsets or raw header lines.
 type chainAnalysis struct {
 	ClientIndex    int
 	TrustedCount   int
 	TrustedIndices []int
 }
 
+// isTrustedProxy checks whether ip is inside the configured trusted proxy set.
+// The precomputed matcher is the hot path; cidrs is retained as a linear
+// fallback for zero-value or manually assembled policy values in tests.
 func isTrustedProxy(ip netip.Addr, matcher prefixMatcher, cidrs []netip.Prefix) bool {
 	if !ip.IsValid() {
 		return false
@@ -35,6 +40,8 @@ func isTrustedProxy(ip netip.Addr, matcher prefixMatcher, cidrs []netip.Prefix) 
 	return false
 }
 
+// validateProxyCountPolicy validates counts of CIDR-trusted hops only. It does
+// not implement count-only trust and cannot make a header source trustworthy.
 func validateProxyCountPolicy(trustedCount int, policy proxyPolicy) error {
 	if len(policy.TrustedProxyCIDRs) > 0 && policy.MinTrustedProxies > 0 && trustedCount == 0 {
 		return ErrNoTrustedProxies
@@ -51,6 +58,10 @@ func validateProxyCountPolicy(trustedCount int, policy proxyPolicy) error {
 	return nil
 }
 
+// analyzeChainRightmost walks from the nearest hop to the oldest hop and
+// treats the trailing trusted suffix as proxy infrastructure. The first
+// non-trusted hop before that suffix is the client candidate; if every hop is
+// trusted, the oldest hop is selected and still validated as a client IP.
 func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedIndices bool, parseClientIP func(string) netip.Addr) (chainAnalysis, netip.Addr, error) {
 	trustedCount := 0
 	clientIndex := 0
@@ -90,6 +101,10 @@ func analyzeChainRightmost(parts []string, policy proxyPolicy, collectTrustedInd
 	return analysis, clientIP, nil
 }
 
+// analyzeChainLeftmost still validates the trailing trusted suffix, then
+// selects the earliest untrusted hop, or the oldest hop if every hop is
+// trusted. This mode assumes trusted proxies produced or sanitized the full
+// chain; otherwise leftmost values are client-controlled.
 func analyzeChainLeftmost(parts []string, policy proxyPolicy, collectTrustedIndices bool, parseClientIP func(string) netip.Addr) (chainAnalysis, netip.Addr, error) {
 	if len(policy.TrustedProxyCIDRs) == 0 {
 		analysis := chainAnalysis{ClientIndex: 0, TrustedCount: 0}

@@ -8,11 +8,16 @@ type prefixMatcher struct {
 	ipv6Root    *prefixTrieNode
 }
 
+// prefixTrieNode is a binary prefix trie node. A terminal node means every
+// address below that node matches a configured prefix; terminal on the root
+// represents /0.
 type prefixTrieNode struct {
 	children [2]*prefixTrieNode
 	terminal bool
 }
 
+// newPrefixMatcher builds separate IPv4 and IPv6 tries so hot-path trust checks
+// do not scan every configured CIDR.
 func newPrefixMatcher(prefixes []netip.Prefix) prefixMatcher {
 	matcher := prefixMatcher{}
 	if len(prefixes) == 0 {
@@ -78,6 +83,7 @@ func (m prefixMatcher) contains(ip netip.Addr) bool {
 	return trieContains(m.ipv6Root, bytes[:])
 }
 
+// insertPrefix records the first bits of addr as a trusted prefix.
 func insertPrefix(root *prefixTrieNode, addr []byte, bits int) {
 	node := root
 	if bits == 0 {
@@ -98,6 +104,7 @@ func insertPrefix(root *prefixTrieNode, addr []byte, bits int) {
 	node.terminal = true
 }
 
+// trieContains reports whether addr falls under any terminal prefix node.
 func trieContains(root *prefixTrieNode, addr []byte) bool {
 	node := root
 	if node == nil {
@@ -123,6 +130,7 @@ func trieContains(root *prefixTrieNode, addr []byte) bool {
 	return false
 }
 
+// addrBit reads address bits in network byte order, most significant bit first.
 func addrBit(addr []byte, bitIndex int) int {
 	byteIndex := bitIndex / 8
 	shift := 7 - (bitIndex % 8)
