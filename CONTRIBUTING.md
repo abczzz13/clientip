@@ -105,6 +105,10 @@ CLIENTIP_ADAPTER_GOWORK=auto just test
 - README changes should stay user-facing and concise; detailed contributor guidance belongs here.
 - Public behavior changes should update `CHANGELOG.md` under `[Unreleased]`.
 
+## Releases
+
+See [docs/release.md](docs/release.md) for release tagging conventions, including the nested Prometheus adapter module tag format.
+
 ## Pull Requests
 
 - Describe the trust-boundary impact of the change, even when it is "none".

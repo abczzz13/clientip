@@ -3,6 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/abczzz13/clientip.svg)](https://pkg.go.dev/github.com/abczzz13/clientip)
 [![CI](https://github.com/abczzz13/clientip/actions/workflows/ci.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/ci.yml)
 [![Security](https://github.com/abczzz13/clientip/actions/workflows/security.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/security.yml)
+[![Coverage](https://abczzz13.github.io/clientip/coverage.svg)](https://abczzz13.github.io/clientip/coverage/)
 [![License](https://img.shields.io/github/license/abczzz13/clientip)](LICENSE)
 
 Secure client IP resolution for `net/http` and framework-agnostic request inputs with trusted proxy validation, explicit source modeling, and operational fallback.
@@ -19,13 +20,17 @@ Secure client IP resolution for `net/http` and framework-agnostic request inputs
 - [Common Deployments](#common-deployments)
 - [Error Handling](#error-handling)
 - [Presets](#presets)
+- [Advanced Proxy Configuration](#advanced-proxy-configuration)
 - [Observability](#observability)
 - [Security Rules](#security-rules)
+- [Threat Model](#threat-model)
 - [Contributing](#contributing)
 
 ## Stability
 
-This project is pre-`v0.1.0`; public APIs may change before stabilization.
+Starting with `v0.1.0`, public APIs are intended to preserve compatibility according to Semantic Versioning.
+
+Before a `v1.0.0` release, minor-version releases may still add APIs or refine behavior where SemVer allows.
 
 ## Install
 
@@ -212,67 +217,9 @@ Generic option presets are available:
 - `PresetLoopbackReverseProxy()` trusts loopback proxies and uses `X-Forwarded-For`, then `RemoteAddr`.
 - `PresetVMReverseProxy()` trusts loopback/private proxy ranges and uses `X-Forwarded-For`, then `RemoteAddr`.
 
-### Vendor And Cloud Proxy Ranges
+## Advanced Proxy Configuration
 
-When your service is behind a load balancer, CDN, or reverse proxy, `RemoteAddr` is usually that proxy, not the original client. The proxy may add headers such as `X-Forwarded-For`, `CF-Connecting-IP`, or other vendor-specific client IP headers. Those headers are plain HTTP headers and are spoofable unless the immediate peer is a proxy you trust to set or append them.
-
-`WithTrustedProxies` is the allowlist for trusted ingress peers and, for chain headers, trusted forwarding hops. Single-IP headers such as `CF-Connecting-IP` are accepted only when the immediate `RemoteAddr` peer is trusted; chain headers such as `X-Forwarded-For` use the trusted suffix of proxy hops to select the client candidate. Only include ranges that can actually connect to your service. Provider IP ranges change over time, and dynamic range fetching introduces application-specific policy around refresh intervals, startup failure, caching, and regional filtering, so keep the trusted proxy ranges in your own configuration where they can follow your deployment process.
-
-Recommended workflow:
-
-- Fetch the ranges from the provider's official source.
-- Filter to the product, region, VPC, subnet, load balancer, or CDN edge that can actually connect to your service.
-- Parse the CIDRs with `clientip.ParseCIDRs`.
-- Pass those prefixes to `clientip.WithTrustedProxies`.
-- Refresh the ranges on your own deploy or configuration-management schedule.
-
-Common provider range sources, useful as starting points before product/service/region filtering:
-
-- AWS: `https://ip-ranges.amazonaws.com/ip-ranges.json`
-- Azure: `https://www.microsoft.com/download/details.aspx?id=56519`
-- Google Cloud: `https://www.gstatic.com/ipranges/cloud.json`
-- Google Cloud default domains: `https://www.gstatic.com/ipranges/goog.json`
-- Cloudflare: `https://www.cloudflare.com/ips-v4` and `https://www.cloudflare.com/ips-v6`
-- Fastly: `https://api.fastly.com/public-ip-list`
-
-Do not treat broad cloud-provider feeds as ready-to-use trusted proxy lists. Some feeds describe public service ranges and may not represent the immediate proxy peers that connect to your application.
-
-Example configuration shape:
-
-```go
-trustedProxyCIDRs := []string{
-    // Replace these documentation prefixes with your filtered proxy CIDRs.
-    "203.0.113.0/24",
-    "2001:db8:1234::/48",
-}
-
-trustedProxies, err := clientip.ParseCIDRs(trustedProxyCIDRs...)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-Store the CIDR strings in your own config after fetching and filtering the provider list. Avoid embedding every published provider range unless every one of those ranges is a valid ingress path to your service.
-
-Cloudflare-style configuration should trust `CF-Connecting-IP` only when the immediate peer is in Cloudflare's published CIDRs:
-
-```go
-resolver, err := clientip.New(
-    clientip.WithTrustedProxies(trustedProxies...),
-    clientip.WithSources(clientip.HeaderSource("CF-Connecting-IP"), clientip.SourceRemoteAddr),
-)
-```
-
-AWS ALB append mode typically uses `X-Forwarded-For`. Trust the narrowest ingress range that can reach your targets, such as explicit proxy addresses or ALB target subnets protected by security groups. Published AWS public service ranges are usually not the right trust boundary for private ALB-to-target traffic:
-
-```go
-resolver, err := clientip.New(
-    clientip.WithTrustedProxies(trustedProxies...),
-    clientip.WithSources(clientip.SourceXForwardedFor, clientip.SourceRemoteAddr),
-)
-```
-
-CloudFront and other CDN-origin configurations follow the same rule: a single-IP header is only trustworthy when the connecting peer is verified as that CDN. If the origin is reachable directly, a client can spoof headers such as `CF-Connecting-IP`, `True-Client-IP`, `Fastly-Client-IP`, or `X-Forwarded-For`; block direct origin access with firewall rules, security groups, or equivalent network policy.
+Provider and cloud proxy ranges need application-specific filtering before they are trusted. See [Trusted Proxy Configuration](docs/trusted-proxies.md) for provider range sources, CDN header examples, ALB/X-Forwarded-For guidance, and refresh workflow recommendations.
 
 ## Observability
 
@@ -298,6 +245,10 @@ Prometheus support lives in the optional `github.com/abczzz13/clientip/observe/p
 - The default chain algorithm is rightmost-untrusted before the trusted proxy suffix.
 - Do not use operational fallback for security decisions.
 - Count-only proxy trust is intentionally unsupported: `WithMinTrustedProxies` / `WithMaxTrustedProxies` validate CIDR-trusted hop counts and do not by themselves make a header source trusted.
+
+## Threat Model
+
+See [Threat Model](docs/threat-model.md) for security goals, trust assumptions, non-goals, failure behavior, and privacy notes.
 
 ## Contributing
 
