@@ -6,7 +6,7 @@ adapter_gowork := env_var_or_default("CLIENTIP_ADAPTER_GOWORK", "off")
 default:
   @just --list
 
-ci: test race coverage lint tidy-check actionlint
+ci: test race coverage lint tidy-check actionlint security
 
 fmt:
   gofumpt -extra -w .
