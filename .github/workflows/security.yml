@@ -23,7 +23,7 @@ jobs:
             go.sum
             observe/prometheus/go.mod
             observe/prometheus/go.sum
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: GOWORK=off govulncheck ./...
       - run: GOWORK=off govulncheck ./...
         working-directory: observe/prometheus

@@ -20,7 +20,8 @@ resolution, including:
 ## Reporting a Vulnerability
 
 If you believe you have found a security vulnerability, please report it using
-GitHub's private vulnerability reporting (Security tab).
+GitHub's private vulnerability reporting:
+https://github.com/abczzz13/clientip/security/advisories/new
 
 Please include the resolver options, proxy topology, relevant `RemoteAddr` and
 header values, expected result, actual result, and whether operational fallback
