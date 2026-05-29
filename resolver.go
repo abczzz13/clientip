@@ -55,6 +55,8 @@ const (
 	FallbackReasonSourceUnavailable
 	// FallbackReasonInvalidIP indicates fallback was used because the extracted IP failed client-IP policy.
 	FallbackReasonInvalidIP
+	// FallbackReasonUnknown indicates fallback was used because strict extraction returned an unclassified error.
+	FallbackReasonUnknown
 )
 
 // String returns the stable label for r.
@@ -70,6 +72,8 @@ func (r FallbackReason) String() string {
 		return "source_unavailable"
 	case FallbackReasonInvalidIP:
 		return "invalid_ip"
+	case FallbackReasonUnknown:
+		return "unknown"
 	default:
 		return "unknown"
 	}
@@ -291,6 +295,8 @@ func (r *Resolver) applyFallback(remoteAddr string, fallback Fallback, strictErr
 
 func fallbackReasonFromError(err error) FallbackReason {
 	switch ClassifyError(err) {
+	case ResultSuccess, ResultCanceled, ResultFallback:
+		return FallbackReasonNone
 	case ResultUntrusted:
 		return FallbackReasonUntrustedProxy
 	case ResultMalformed:
@@ -299,8 +305,10 @@ func fallbackReasonFromError(err error) FallbackReason {
 		return FallbackReasonSourceUnavailable
 	case ResultInvalid:
 		return FallbackReasonInvalidIP
+	case ResultUnknown:
+		return FallbackReasonUnknown
 	default:
-		return FallbackReasonNone
+		return FallbackReasonUnknown
 	}
 }
 

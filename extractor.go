@@ -134,7 +134,7 @@ func (e *extractor) extractRequestView(r requestView) (Extraction, error) {
 			return result, nil
 		}
 
-		if sourceIsTerminalError(err) {
+		if !errors.Is(err, ErrSourceUnavailable) {
 			if !result.Source.valid() {
 				result.Source = source.source
 			}

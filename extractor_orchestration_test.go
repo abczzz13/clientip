@@ -25,6 +25,41 @@ func TestExtract_AllSourcesUnavailableReturnsLastSource(t *testing.T) {
 	}
 }
 
+func TestExtract_UnknownSourceErrorIsTerminal(t *testing.T) {
+	unexpectedErr := errors.New("unexpected extractor failure")
+	extractor := &extractor{
+		config: &config{sourceHeaderKeys: []string{"X-Forwarded-For"}},
+		sources: []configuredSource{
+			{
+				source: SourceXForwardedFor,
+				chain: chainExtractor{policy: chainPolicy{
+					headerName: "X-Forwarded-For",
+					parseValues: func([]string) ([]string, error) {
+						return nil, unexpectedErr
+					},
+				}},
+			},
+			{
+				source: SourceRemoteAddr,
+				remote: remoteAddrExtractor{},
+			},
+		},
+	}
+
+	result, err := extractor.Extract(&http.Request{
+		RemoteAddr: "8.8.8.8:8080",
+		Header: http.Header{
+			"X-Forwarded-For": {"1.1.1.1"},
+		},
+	})
+	if !errors.Is(err, unexpectedErr) {
+		t.Fatalf("error = %v, want %v", err, unexpectedErr)
+	}
+	if got, want := result.Source, SourceXForwardedFor; got != want {
+		t.Fatalf("source = %q, want %q", got, want)
+	}
+}
+
 func TestExtractInput_ContextCanceledBeforeFallbackSource(t *testing.T) {
 	cfg := defaultOptions()
 	cfg.TrustedProxyPrefixes = LoopbackProxyPrefixes()

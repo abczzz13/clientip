@@ -3,6 +3,7 @@ package clientip
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -70,6 +71,50 @@ func TestChainExtractor_SingleValidValue(t *testing.T) {
 	}
 	if result.Source != SourceXForwardedFor {
 		t.Errorf("Source = %v, want %v", result.Source, SourceXForwardedFor)
+	}
+}
+
+func TestChainExtractor_DebugInfoClonesChainMetadata(t *testing.T) {
+	parsedValues := []string{"8.8.8.8", "10.0.0.1"}
+	trustedCIDR := netip.MustParsePrefix("10.0.0.0/8")
+	ext := chainExtractor{policy: chainPolicy{
+		headerName: "X-Forwarded-For",
+		parseValues: func([]string) ([]string, error) {
+			return parsedValues, nil
+		},
+		parseClientIP: parseIP,
+		trustedProxy: proxyPolicy{
+			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
+			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
+		},
+		selection:        RightmostUntrustedIP,
+		collectDebugInfo: true,
+	}}
+
+	req := requestView{
+		remoteAddrValue: "10.0.0.2:443",
+		headerMap: map[string][]string{
+			"X-Forwarded-For": {"8.8.8.8, 10.0.0.1"},
+		},
+	}
+
+	result, failure, err := ext.extract(req, SourceXForwardedFor)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if result.DebugInfo == nil {
+		t.Fatal("DebugInfo = nil")
+	}
+	if got, want := result.DebugInfo.TrustedIndices, []int{1}; !slices.Equal(got, want) {
+		t.Fatalf("DebugInfo.TrustedIndices = %v, want %v", got, want)
+	}
+
+	parsedValues[0] = "1.1.1.1"
+	if got, want := result.DebugInfo.FullChain[0], "8.8.8.8"; got != want {
+		t.Fatalf("DebugInfo.FullChain[0] = %q, want %q", got, want)
 	}
 }
 

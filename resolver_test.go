@@ -146,6 +146,7 @@ func TestFallbackReasonString(t *testing.T) {
 		{reason: FallbackReasonMalformedHeader, want: "malformed_header"},
 		{reason: FallbackReasonSourceUnavailable, want: "source_unavailable"},
 		{reason: FallbackReasonInvalidIP, want: "invalid_ip"},
+		{reason: FallbackReasonUnknown, want: "unknown"},
 		{reason: FallbackReason(255), want: "unknown"},
 	}
 
@@ -153,6 +154,72 @@ func TestFallbackReasonString(t *testing.T) {
 		if got := tt.reason.String(); got != tt.want {
 			t.Fatalf("FallbackReason(%d).String() = %q, want %q", tt.reason, got, tt.want)
 		}
+	}
+}
+
+func TestFallbackReasonFromError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want FallbackReason
+	}{
+		{name: "nil", want: FallbackReasonNone},
+		{name: "canceled", err: context.Canceled, want: FallbackReasonNone},
+		{name: "unknown", err: errors.New("unexpected extractor failure"), want: FallbackReasonUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := fallbackReasonFromError(tt.err); got != tt.want {
+				t.Fatalf("fallbackReasonFromError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveOperational_UnknownStrictErrorUsesUnknownFallbackReason(t *testing.T) {
+	unexpectedErr := errors.New("unexpected extractor failure")
+	resolver := &Resolver{extractor: &extractor{
+		config: &config{
+			sourceHeaderKeys: []string{"X-Forwarded-For"},
+			logger:           noopLogger{},
+			loggerNoop:       true,
+			observer:         noopObserver{},
+		},
+		sources: []configuredSource{
+			{
+				source: SourceXForwardedFor,
+				chain: chainExtractor{policy: chainPolicy{
+					headerName: "X-Forwarded-For",
+					parseValues: func([]string) ([]string, error) {
+						return nil, unexpectedErr
+					},
+				}},
+			},
+		},
+	}}
+
+	result := resolver.ResolveOperational(&http.Request{
+		RemoteAddr: "8.8.8.8:443",
+		Header: http.Header{
+			"X-Forwarded-For": {"1.1.1.1"},
+		},
+	}, RemoteAddrFallback())
+
+	if result.Err != nil {
+		t.Fatalf("ResolveOperational() error = %v, want nil", result.Err)
+	}
+	if !result.FallbackUsed {
+		t.Fatal("ResolveOperational() FallbackUsed = false, want true")
+	}
+	if got, want := result.FallbackReason, FallbackReasonUnknown; got != want {
+		t.Fatalf("FallbackReason = %v, want %v", got, want)
+	}
+	if got, want := result.Source, SourceRemoteAddr; got != want {
+		t.Fatalf("Source = %q, want %q", got, want)
+	}
+	if got, want := result.IP, netip.MustParseAddr("8.8.8.8"); got != want {
+		t.Fatalf("IP = %v, want %v", got, want)
 	}
 }
 
@@ -263,5 +330,39 @@ func TestResolveInputAndHeaders(t *testing.T) {
 	}
 	if result.IP != netip.MustParseAddr("8.8.8.8") {
 		t.Fatalf("ResolveHeaders() IP = %v, want 8.8.8.8", result.IP)
+	}
+}
+
+func TestResolveInputOperational_RemoteAddrFallback(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8")),
+		WithSources(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	input := Input{
+		RemoteAddr: "203.0.113.10:443",
+		Headers:    http.Header{"X-Forwarded-For": {"8.8.8.8"}},
+	}
+	result := resolver.ResolveInputOperational(input, RemoteAddrFallback())
+	if result.Err != nil {
+		t.Fatalf("ResolveInputOperational() error = %v, want nil", result.Err)
+	}
+	if !result.FallbackUsed {
+		t.Fatal("ResolveInputOperational() FallbackUsed = false, want true")
+	}
+	if got, want := result.FallbackReason, FallbackReasonUntrustedProxy; got != want {
+		t.Fatalf("FallbackReason = %v, want %v", got, want)
+	}
+	if got, want := result.Source, SourceRemoteAddr; got != want {
+		t.Fatalf("Source = %q, want %q", got, want)
+	}
+	if got, want := result.IP, netip.MustParseAddr("203.0.113.10"); got != want {
+		t.Fatalf("IP = %v, want %v", got, want)
+	}
+	if got, want := result.Classify(), ResultFallback; got != want {
+		t.Fatalf("Classify() = %v, want %v", got, want)
 	}
 }
