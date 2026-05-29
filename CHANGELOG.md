@@ -6,6 +6,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Added `FallbackReasonUnknown` for operational fallbacks triggered by unclassified strict errors.
+- Added threat-model, trusted-proxy configuration, and release checklist documentation.
+- Added CodeQL, OpenSSF Scorecard, fuzz smoke, and coverage publishing workflows with actions pinned by commit SHA.
+
+### Changed
+
+- README now documents the intended `v0.1.0` compatibility posture and links to generated coverage reports.
+- Unexpected extractor errors now fail closed instead of allowing source fallback.
+- Chain debug metadata now clones parsed chain slices before storing them on `Result`.
+- `just ci` now includes `govulncheck` through the `security` task.
+
 ## [0.0.8] - 2026-05-22
 
 ### Changed
