@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-29
+
 ### Added
 
 - Added `FallbackReasonUnknown` for operational fallbacks triggered by unclassified strict errors.
