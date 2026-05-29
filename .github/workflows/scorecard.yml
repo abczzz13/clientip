@@ -7,14 +7,16 @@ on:
   schedule:
     - cron: "45 3 * * 2"
 
-permissions:
-  contents: read
-  security-events: write
-  id-token: write
+permissions: read-all
 
 jobs:
   scorecard:
     runs-on: ubuntu-latest
+    permissions:
+      # Required for uploading Scorecard SARIF to code scanning.
+      security-events: write
+      # Required for publishing signed Scorecard results to api.scorecard.dev.
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
