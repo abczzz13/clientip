@@ -1,7 +1,6 @@
 package clientip
 
 import (
-	"context"
 	"errors"
 	"fmt"
 )
@@ -54,29 +53,6 @@ func (e *extractor) extractRemoteAddrSource(r requestView, source *configuredSou
 	}
 
 	return result, nil
-}
-
-// sourceIsTerminalError defines when extractor orchestration may continue to
-// the next configured source. Only source-unavailable is a normal miss; trust,
-// syntax, policy, chain-length, invalid-IP, and context failures stop
-// resolution.
-func sourceIsTerminalError(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-
-	if errors.Is(err, ErrSourceUnavailable) {
-		return false
-	}
-
-	return errors.Is(err, ErrInvalidIP) ||
-		errors.Is(err, ErrMultipleSingleIPHeaders) ||
-		errors.Is(err, ErrUntrustedProxy) ||
-		errors.Is(err, ErrNoTrustedProxies) ||
-		errors.Is(err, ErrTooFewTrustedProxies) ||
-		errors.Is(err, ErrTooManyTrustedProxies) ||
-		errors.Is(err, ErrChainTooLong) ||
-		errors.Is(err, ErrInvalidForwardedHeader)
 }
 
 // logSecurityWarning emits stable base attributes with the request context so

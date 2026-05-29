@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -88,9 +89,9 @@ func (e chainExtractor) extract(req requestView, source Source) (Extraction, *ex
 		// DebugInfo is success-only so failed requests do not carry extra
 		// parsed attacker-controlled chain details through Result by default.
 		result.DebugInfo = &ChainDebugInfo{
-			FullChain:      parts,
+			FullChain:      slices.Clone(parts),
 			ClientIndex:    analysis.ClientIndex,
-			TrustedIndices: analysis.TrustedIndices,
+			TrustedIndices: slices.Clone(analysis.TrustedIndices),
 		}
 	}
 
