@@ -2,8 +2,40 @@ package clientip
 
 import (
 	"errors"
+	"os"
+	"strconv"
 	"testing"
 )
+
+// defaultFuzzMaxHeaderValueLen keeps PR fuzz smoke near common proxy/request
+// header limits. Typical defaults range from about 8-16 KiB per field to around
+// 60-64 KiB total headers, while Go's net/http default total header cap is 1
+// MiB. Use 64 KiB by default so PR fuzzing still covers realistic high-end
+// proxy inputs without spending CI time on oversized strings. Deep fuzzing can
+// raise this with CLIENTIP_FUZZ_MAX_HEADER_VALUE_LEN.
+const defaultFuzzMaxHeaderValueLen = 64 * 1024
+
+var fuzzMaxHeaderValueLen = configuredFuzzMaxHeaderValueLen()
+
+func configuredFuzzMaxHeaderValueLen() int {
+	raw := os.Getenv("CLIENTIP_FUZZ_MAX_HEADER_VALUE_LEN")
+	if raw == "" {
+		return defaultFuzzMaxHeaderValueLen
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		panic("CLIENTIP_FUZZ_MAX_HEADER_VALUE_LEN must be a positive integer byte count")
+	}
+	return n
+}
+
+func skipOversizedFuzzInput(t *testing.T, raw string) {
+	t.Helper()
+	if len(raw) > fuzzMaxHeaderValueLen {
+		t.Skipf("skipping oversized fuzz input with %d bytes", len(raw))
+	}
+}
 
 func FuzzParseIP_RoundTripNormalization(f *testing.F) {
 	for _, seed := range []string{"1.1.1.1", "  1.1.1.1  ", "1.1.1.1:443", "[2606:4700:4700::1]:443", `"1.1.1.1"`, `'1.1.1.1'`, "not-an-ip", ""} {
@@ -11,6 +43,8 @@ func FuzzParseIP_RoundTripNormalization(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, raw string) {
+		skipOversizedFuzzInput(t, raw)
+
 		parsed := parseIP(raw)
 		if !parsed.IsValid() {
 			return
@@ -33,6 +67,8 @@ func FuzzParseRemoteAddr_RoundTripNormalization(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, raw string) {
+		skipOversizedFuzzInput(t, raw)
+
 		parsed := parseRemoteAddr(raw)
 		if !parsed.IsValid() {
 			return
@@ -55,6 +91,8 @@ func FuzzParseXFFValues_ErrorShapeAndOutput(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, raw string) {
+		skipOversizedFuzzInput(t, raw)
+
 		valueSets := [][]string{{raw}, {raw, raw}, {"1.1.1.1", raw}, {raw, "8.8.8.8"}}
 
 		for _, values := range valueSets {
@@ -90,6 +128,8 @@ func FuzzParseForwardedValues_ErrorShapeAndOutput(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, raw string) {
+		skipOversizedFuzzInput(t, raw)
+
 		valueSets := [][]string{{raw}, {raw, raw}, {"for=1.1.1.1", raw}, {raw, "for=8.8.8.8"}}
 
 		for _, values := range valueSets {
