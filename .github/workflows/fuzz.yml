@@ -5,6 +5,15 @@ on:
   schedule:
     - cron: "15 4 * * 1"
   workflow_dispatch:
+    inputs:
+      fuzz-depth:
+        description: "How long to run each fuzz target"
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - deep
 
 permissions:
   contents: read
@@ -14,7 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOWORK: off
-      FUZZTIME: 30s
+      PR_FUZZTIME: 30s
+      DEEP_FUZZTIME: 5m
+      DEEP_FUZZ_MAX_HEADER_VALUE_LEN: "1048576"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
@@ -27,7 +38,13 @@ jobs:
       - name: Fuzz parser targets
         run: |
           set -euo pipefail
-          go test -run '^$' -fuzz '^FuzzParseIP_RoundTripNormalization$' -fuzztime "$FUZZTIME" .
-          go test -run '^$' -fuzz '^FuzzParseRemoteAddr_RoundTripNormalization$' -fuzztime "$FUZZTIME" .
-          go test -run '^$' -fuzz '^FuzzParseXFFValues_ErrorShapeAndOutput$' -fuzztime "$FUZZTIME" .
-          go test -run '^$' -fuzz '^FuzzParseForwardedValues_ErrorShapeAndOutput$' -fuzztime "$FUZZTIME" .
+          fuzztime="$PR_FUZZTIME"
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.fuzz-depth || 'smoke' }}" = "deep" ]; then
+            fuzztime="$DEEP_FUZZTIME"
+            export CLIENTIP_FUZZ_MAX_HEADER_VALUE_LEN="$DEEP_FUZZ_MAX_HEADER_VALUE_LEN"
+          fi
+          echo "Running parser fuzz targets for $fuzztime each with max header value length ${CLIENTIP_FUZZ_MAX_HEADER_VALUE_LEN:-default}"
+          go test -run '^$' -fuzz '^FuzzParseIP_RoundTripNormalization$' -fuzztime "$fuzztime" .
+          go test -run '^$' -fuzz '^FuzzParseRemoteAddr_RoundTripNormalization$' -fuzztime "$fuzztime" .
+          go test -run '^$' -fuzz '^FuzzParseXFFValues_ErrorShapeAndOutput$' -fuzztime "$fuzztime" .
+          go test -run '^$' -fuzz '^FuzzParseForwardedValues_ErrorShapeAndOutput$' -fuzztime "$fuzztime" .
