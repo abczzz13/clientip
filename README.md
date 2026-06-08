@@ -4,7 +4,7 @@
 [![CI](https://github.com/abczzz13/clientip/actions/workflows/ci.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/ci.yml)
 [![Security](https://github.com/abczzz13/clientip/actions/workflows/security.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/security.yml)
 [![Fuzz](https://github.com/abczzz13/clientip/actions/workflows/fuzz.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/fuzz.yml)
-[![Coverage](https://abczzz13.github.io/clientip/coverage.svg)](https://abczzz13.github.io/clientip/coverage/)
+[![Coverage](https://github.com/abczzz13/clientip/actions/workflows/coverage.yml/badge.svg)](https://github.com/abczzz13/clientip/actions/workflows/coverage.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/abczzz13/clientip/badge)](https://scorecard.dev/viewer/?uri=github.com/abczzz13/clientip)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13032/badge)](https://www.bestpractices.dev/projects/13032)
 [![License](https://img.shields.io/github/license/abczzz13/clientip)](LICENSE)

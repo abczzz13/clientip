@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: coverage-pages-${{ github.ref }}
+  group: coverage-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,92 +35,30 @@ jobs:
           go test -coverprofile=coverage.out ./...
           GOWORK=off go -C observe/prometheus test -coverprofile=../../coverage-prometheus.out ./...
 
-      - name: Build coverage site
+      - name: Build coverage reports
         run: |
           set -euo pipefail
-          mkdir -p public/coverage
+          mkdir -p coverage
 
-          go tool cover -func=coverage.out | tee public/coverage/root.txt
-          go tool cover -html=coverage.out -o public/coverage/root.html
-          GOWORK=off go -C observe/prometheus tool cover -func=../../coverage-prometheus.out | tee public/coverage/prometheus.txt
-          GOWORK=off go -C observe/prometheus tool cover -html=../../coverage-prometheus.out -o ../../public/coverage/prometheus.html
+          go tool cover -func=coverage.out | tee coverage/root.txt
+          go tool cover -html=coverage.out -o coverage/root.html
+          GOWORK=off go -C observe/prometheus tool cover -func=../../coverage-prometheus.out | tee coverage/prometheus.txt
+          GOWORK=off go -C observe/prometheus tool cover -html=../../coverage-prometheus.out -o ../../coverage/prometheus.html
 
-          root_pct=$(awk '/^total:/ {print $3}' public/coverage/root.txt)
-          prometheus_pct=$(awk '/^total:/ {print $3}' public/coverage/prometheus.txt)
-          root_num=${root_pct%%%}
-          root_int=${root_num%.*}
+          root_pct=$(awk '/^total:/ {print $3}' coverage/root.txt)
+          prometheus_pct=$(awk '/^total:/ {print $3}' coverage/prometheus.txt)
 
-          color="#e05d44"
-          if [ "$root_int" -ge 90 ]; then
-            color="#4c1"
-          elif [ "$root_int" -ge 75 ]; then
-            color="#dfb317"
-          fi
-
-          cat > public/coverage.svg <<EOF
-          <svg xmlns="http://www.w3.org/2000/svg" width="108" height="20" role="img" aria-label="coverage: $root_pct">
-            <linearGradient id="s" x2="0" y2="100%">
-              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
-              <stop offset="1" stop-opacity=".1"/>
-            </linearGradient>
-            <clipPath id="r"><rect width="108" height="20" rx="3" fill="#fff"/></clipPath>
-            <g clip-path="url(#r)">
-              <rect width="63" height="20" fill="#555"/>
-              <rect x="63" width="45" height="20" fill="$color"/>
-              <rect width="108" height="20" fill="url(#s)"/>
-            </g>
-            <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
-              <text aria-hidden="true" x="325" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="530">coverage</text>
-              <text x="325" y="140" transform="scale(.1)" fill="#fff" textLength="530">coverage</text>
-              <text aria-hidden="true" x="845" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="350">$root_pct</text>
-              <text x="845" y="140" transform="scale(.1)" fill="#fff" textLength="350">$root_pct</text>
-            </g>
-          </svg>
-          EOF
-
-          cat > public/coverage/index.html <<EOF
-          <!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>clientip coverage</title>
-            </head>
-            <body>
-              <h1>clientip coverage</h1>
-              <p><img src="../coverage.svg" alt="coverage: $root_pct"></p>
-              <ul>
-                <li>Root module: <strong>$root_pct</strong> (<a href="root.html">HTML</a>, <a href="root.txt">text</a>)</li>
-                <li>Prometheus adapter: <strong>$prometheus_pct</strong> (<a href="prometheus.html">HTML</a>, <a href="prometheus.txt">text</a>)</li>
-              </ul>
-            </body>
-          </html>
-          EOF
+          {
+            echo "## Coverage"
+            echo ""
+            echo "| Module | Coverage | Report |"
+            echo "| --- | ---: | --- |"
+            echo "| Root | $root_pct | coverage/root.txt, coverage/root.html |"
+            echo "| Prometheus adapter | $prometheus_pct | coverage/prometheus.txt, coverage/prometheus.html |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: coverage-site
-          path: public/
+          name: coverage-reports
+          path: coverage/
           retention-days: 14
-
-  deploy:
-    if: github.event_name == 'push'
-    needs: coverage
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: coverage-site
-          path: public/
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
-      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
-        with:
-          path: public/
-      - id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
