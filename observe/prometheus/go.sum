@@ -1,5 +1,5 @@
-github.com/abczzz13/clientip v0.0.8 h1:FJICPra9Cbigq0iG93EA9uaCZzIZKHiCyoskTNdclZs=
-github.com/abczzz13/clientip v0.0.8/go.mod h1:WRyghNIxRPXMph5JTMmn0wt/HwLxE+gvD3IaYbtEjxY=
+github.com/abczzz13/clientip v0.1.0 h1:slujfJKIh8/29uSRD7Hu9jFZP96YR8SQ39fZ35G3lmo=
+github.com/abczzz13/clientip v0.1.0/go.mod h1:WRyghNIxRPXMph5JTMmn0wt/HwLxE+gvD3IaYbtEjxY=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
