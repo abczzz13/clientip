@@ -145,6 +145,31 @@ func TestSingleHeaderExtractor_TrustedProxy(t *testing.T) {
 	}
 }
 
+func TestSingleHeaderExtractor_ZonedRemoteAddrTrustedProxy(t *testing.T) {
+	trustedCIDR := netip.MustParsePrefix("2001:db8::/32")
+	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
+		headerName: "X-Real-Ip",
+		trustedProxy: proxyPolicy{
+			TrustedProxyCIDRs: []netip.Prefix{trustedCIDR},
+			TrustedProxyMatch: newPrefixMatcher([]netip.Prefix{trustedCIDR}),
+		},
+	}}
+	req := requestView{
+		remoteAddrValue: "[2001:db8::1%eth0]:4567",
+		headerMap: map[string][]string{
+			"X-Real-Ip": {"9.9.9.9"},
+		},
+	}
+
+	result, failure := ext.extract(req, SourceXRealIP)
+	if failure != nil {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	if want := netip.MustParseAddr("9.9.9.9"); result.IP != want {
+		t.Fatalf("IP = %v, want %v", result.IP, want)
+	}
+}
+
 func TestSingleHeaderExtractor_InvalidClientIP(t *testing.T) {
 	ext := singleHeaderExtractor{policy: singleHeaderPolicy{
 		headerName: "X-Real-Ip",

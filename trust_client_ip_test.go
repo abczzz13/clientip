@@ -114,6 +114,34 @@ func TestEvaluateClientIPReservedRanges(t *testing.T) {
 	}
 }
 
+// TestEvaluateClientIPZoneDoesNotChangeClassification feeds zoned addresses
+// directly rather than through parseIP, so it covers the normalization inside
+// isReservedIP that callers constructing a netip.Addr themselves depend on.
+// netip.Prefix.Contains reports false for zoned addresses, so without it a
+// zone would silently downgrade a reserved address to a valid client IP.
+func TestEvaluateClientIPZoneDoesNotChangeClassification(t *testing.T) {
+	policy := clientIPPolicy{}
+	for _, ip := range []netip.Addr{
+		netip.MustParseAddr("2001:db8::1"),
+		netip.MustParseAddr("2001:db8::1%eth0"),
+	} {
+		if got := evaluateClientIP(ip, policy); got != clientIPReserved {
+			t.Fatalf("evaluateClientIP(%v) = %v, want %v", ip, got, clientIPReserved)
+		}
+	}
+}
+
+// TestEvaluateClientIPZonedAllowlist covers the same normalization in
+// isAllowlistedReservedClientIP.
+func TestEvaluateClientIPZonedAllowlist(t *testing.T) {
+	policy := clientIPPolicy{AllowReservedClientPrefixes: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}}
+	ip := netip.MustParseAddr("2001:db8::1%eth0")
+
+	if got := evaluateClientIP(ip, policy); got != clientIPValid {
+		t.Fatalf("evaluateClientIP(%v) = %v, want %v", ip, got, clientIPValid)
+	}
+}
+
 func TestEvaluateClientIPWithAllowedReservedClientPrefixes(t *testing.T) {
 	policy := clientIPPolicy{AllowReservedClientPrefixes: []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("2001:db8::/32")}}
 

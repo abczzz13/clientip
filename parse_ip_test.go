@@ -24,8 +24,10 @@ func TestParseIP(t *testing.T) {
 		{name: "valid IPv6", input: "2001:db8::1", want: netip.MustParseAddr("2001:db8::1")},
 		{name: "valid IPv6 with brackets", input: "[2001:db8::1]", want: netip.MustParseAddr("2001:db8::1")},
 		{name: "valid IPv6 with brackets and port", input: "[2001:db8::1]:8080", want: netip.MustParseAddr("2001:db8::1")},
-		{name: "IPv6 zone identifier preserved while parsing", input: "fe80::1%eth0", want: netip.MustParseAddr("fe80::1%eth0")},
-		{name: "bracketed IPv6 zone with port", input: "[fe80::1%eth0]:8080", want: netip.MustParseAddr("fe80::1%eth0")},
+		{name: "IPv6 zone identifier removed while parsing", input: "fe80::1%eth0", want: netip.MustParseAddr("fe80::1")},
+		{name: "bracketed IPv6 zone with port", input: "[fe80::1%eth0]:8080", want: netip.MustParseAddr("fe80::1")},
+		{name: "global IPv6 zone identifier removed", input: "2606:4700:4700::1111%eth0", want: netip.MustParseAddr("2606:4700:4700::1111")},
+		{name: "zoned IPv4-mapped IPv6 unmapped and unzoned", input: "::ffff:192.0.2.10%eth0", want: netip.MustParseAddr("192.0.2.10")},
 		{name: "valid IPv6 with whitespace and brackets", input: "  [2001:db8::1]  ", want: netip.MustParseAddr("2001:db8::1")},
 		{name: "localhost IPv4", input: "127.0.0.1", want: netip.MustParseAddr("127.0.0.1")},
 		{name: "localhost IPv4 with port", input: "127.0.0.1:8080", want: netip.MustParseAddr("127.0.0.1")},
@@ -63,7 +65,31 @@ func TestParseIP(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("parseIP(%q) = %v, want %v", tt.input, got, tt.want)
 			}
+			if got.Zone() != "" {
+				t.Errorf("parseIP(%q) zone = %q, want empty", tt.input, got.Zone())
+			}
 		})
+	}
+}
+
+// TestParseIPZonedRoundTrip guards a round-trip bug found by fuzzing: a zone
+// may be any string, including whitespace. Retaining the zone of `"::% "` made
+// parseIP return an address whose String() is "::% ", and re-parsing that
+// stripped the trailing space to leave the unparsable "::%". Normalizing the
+// zone away makes every parseIP result re-parse to itself.
+func TestParseIPZonedRoundTrip(t *testing.T) {
+	for _, input := range []string{`"::% "`, "fe80::1%eth0", "[::ffff:192.0.2.10%eth0]:443"} {
+		got := parseIP(input)
+		if !got.IsValid() {
+			t.Fatalf("parseIP(%q) = invalid", input)
+		}
+		if got.Zone() != "" {
+			t.Fatalf("parseIP(%q) zone = %q, want empty", input, got.Zone())
+		}
+
+		if roundTrip := parseIP(got.String()); roundTrip != got {
+			t.Fatalf("parseIP(%q) round trip = %v, want %v", input, roundTrip, got)
+		}
 	}
 }
 
@@ -76,7 +102,7 @@ func Test_parseRemoteAddr(t *testing.T) {
 	}{
 		{name: "ipv4 host:port", input: "203.0.113.1:8080", want: netip.MustParseAddr("203.0.113.1")},
 		{name: "ipv6 host:port", input: "[2001:db8::1]:443", want: netip.MustParseAddr("2001:db8::1")},
-		{name: "ipv6 zone host:port", input: "[fe80::1%eth0]:443", want: netip.MustParseAddr("fe80::1%eth0")},
+		{name: "ipv6 zone host:port", input: "[fe80::1%eth0]:443", want: netip.MustParseAddr("fe80::1")},
 		{name: "bare ipv4 fallback", input: "203.0.113.1", want: netip.MustParseAddr("203.0.113.1")},
 		{name: "bare ipv6 fallback", input: "2001:db8::1", want: netip.MustParseAddr("2001:db8::1")},
 		{name: "bracketed ipv6 fallback", input: "[2001:db8::1]", want: netip.MustParseAddr("2001:db8::1")},
@@ -104,6 +130,9 @@ func Test_parseRemoteAddr(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("parseRemoteAddr(%q) = %v, want %v", tt.input, got, tt.want)
 			}
+			if got.Zone() != "" {
+				t.Errorf("parseRemoteAddr(%q) zone = %q, want empty", tt.input, got.Zone())
+			}
 		})
 	}
 }
@@ -118,12 +147,17 @@ func TestParseChainIP(t *testing.T) {
 		{name: "bare ipv4", input: "203.0.113.1", want: netip.MustParseAddr("203.0.113.1")},
 		{name: "bracketed ipv6", input: "[2001:db8::1]", want: netip.MustParseAddr("2001:db8::1")},
 		{name: "bracketed ipv6 with port", input: "[2001:db8::1]:443", want: netip.MustParseAddr("2001:db8::1")},
-		{name: "bracketed ipv6 zone with port", input: "[fe80::1%eth0]:443", want: netip.MustParseAddr("fe80::1%eth0")},
+		{name: "bare ipv6 zone", input: "fe80::1%eth0", want: netip.MustParseAddr("fe80::1")},
+		{name: "bracketed ipv6 zone with port", input: "[fe80::1%eth0]:443", want: netip.MustParseAddr("fe80::1")},
 		{name: "xff style host port rejected", input: "203.0.113.1:443", wantErr: true},
 		{name: "quoted value rejected", input: `"203.0.113.1"`, wantErr: true},
 		{name: "trailing junk rejected", input: "[2001:db8::1]junk", wantErr: true},
 		{name: "non numeric port rejected", input: "[2001:db8::1]:https", wantErr: true},
 		{name: "missing port digits rejected", input: "[2001:db8::1]:", wantErr: true},
+		{name: "empty brackets rejected", input: "[]", wantErr: true},
+		{name: "double brackets rejected", input: "[[2001:db8::1]]", wantErr: true},
+		{name: "unclosed bracket rejected", input: "[2001:db8::1", wantErr: true},
+		{name: "zoned ipv4-mapped ipv6 unmapped", input: "::ffff:192.0.2.10%eth0", want: netip.MustParseAddr("192.0.2.10")},
 	}
 
 	for _, tt := range tests {
@@ -143,6 +177,9 @@ func TestParseChainIP(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("parseChainIP(%q) = %v, want %v", tt.input, got, tt.want)
 			}
+			if got.Zone() != "" {
+				t.Errorf("parseChainIP(%q) zone = %q, want empty", tt.input, got.Zone())
+			}
 		})
 	}
 }
@@ -155,7 +192,10 @@ func TestNormalizeIP(t *testing.T) {
 	}{
 		{name: "IPv4 - no change", input: netip.MustParseAddr("203.0.113.1"), want: netip.MustParseAddr("203.0.113.1")},
 		{name: "IPv6 - no change", input: netip.MustParseAddr("2001:db8::1"), want: netip.MustParseAddr("2001:db8::1")},
+		{name: "IPv6 zone - removed", input: netip.MustParseAddr("fe80::1%eth0"), want: netip.MustParseAddr("fe80::1")},
 		{name: "IPv4-mapped IPv6 - unmapped", input: netip.AddrFrom16([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 203, 0, 113, 1}), want: netip.MustParseAddr("203.0.113.1")},
+		{name: "zoned IPv4-mapped IPv6 - unmapped and unzoned", input: netip.MustParseAddr("::ffff:203.0.113.1%eth0"), want: netip.MustParseAddr("203.0.113.1")},
+		{name: "invalid - no change", input: netip.Addr{}, want: netip.Addr{}},
 	}
 
 	for _, tt := range tests {

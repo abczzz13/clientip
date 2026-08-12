@@ -185,7 +185,10 @@ type ChainDebugInfo struct {
 // For additional diagnostics (such as chain details or trusted-proxy counts),
 // inspect typed errors like ProxyValidationError and InvalidIPError.
 type Extraction struct {
-	// IP is the normalized client IP when extraction succeeds.
+	// IP is the normalized client IP when extraction succeeds. Normalized
+	// means any IPv6 zone is removed and IPv4-mapped IPv6 addresses are
+	// unmapped to their IPv4 form, so equal addresses compare equal
+	// regardless of the notation a proxy used.
 	IP netip.Addr
 
 	// Source identifies where IP came from. On error it may identify the source

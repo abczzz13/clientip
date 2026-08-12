@@ -12,6 +12,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - CI uses `actions/setup-go` with `check-latest: true` so builds and `govulncheck` run on the latest Go patch release.
 - `CONTRIBUTING.md` now pins `govulncheck` to `v1.3.0`, matching CI.
 
+### Security
+
+- IPv6 zone identifiers are now removed during parsing, so `Result.IP`, `Extraction.IP`, `ParseRemoteAddr`, `StaticFallback`, and `ProxyPrefixesFromAddrs` never return a zoned address. Previously a zone in a trusted forwarding header (for example `2606:4700:4700::1111%a`) was kept in `Result.IP`. Because `netip.Addr` equality includes the zone, a client behind a trusted proxy could vary the zone to produce distinct `Result.IP` values for one address, evading rate limits or ban lists keyed on it, and could inject arbitrary zone text into logs. A zone also made reserved ranges such as `2001:db8::/32` fail classification, so a zoned reserved address was accepted as a valid client IP. See `docs/trusted-proxies.md` for the interface-scope trade-off.
+
 ## [0.1.0] - 2026-05-29
 
 ### Added

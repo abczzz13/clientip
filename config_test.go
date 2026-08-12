@@ -431,12 +431,13 @@ func TestProxyPrefixesFromAddrs(t *testing.T) {
 		prefixes, err := ProxyPrefixesFromAddrs(
 			netip.MustParseAddr("1.1.1.1"),
 			netip.MustParseAddr("2001:db8::1"),
+			netip.MustParseAddr("2001:db8::2%eth0"),
 		)
 		if err != nil {
 			t.Fatalf("ProxyPrefixesFromAddrs() error = %v", err)
 		}
 
-		want := []string{"1.1.1.1/32", "2001:db8::1/128"}
+		want := []string{"1.1.1.1/32", "2001:db8::1/128", "2001:db8::2/128"}
 		if diff := cmp.Diff(want, cidrStrings(prefixes)); diff != "" {
 			t.Fatalf("prefixes mismatch (-want +got):\n%s", diff)
 		}
