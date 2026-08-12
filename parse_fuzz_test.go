@@ -38,7 +38,7 @@ func skipOversizedFuzzInput(t *testing.T, raw string) {
 }
 
 func FuzzParseIP_RoundTripNormalization(f *testing.F) {
-	for _, seed := range []string{"1.1.1.1", "  1.1.1.1  ", "1.1.1.1:443", "[2606:4700:4700::1]:443", `"1.1.1.1"`, `'1.1.1.1'`, "not-an-ip", ""} {
+	for _, seed := range []string{"1.1.1.1", "  1.1.1.1  ", "1.1.1.1:443", "[2606:4700:4700::1]:443", "fe80::1%eth0", `"::% "`, `"1.1.1.1"`, `'1.1.1.1'`, "not-an-ip", ""} {
 		f.Add(seed)
 	}
 
@@ -48,6 +48,9 @@ func FuzzParseIP_RoundTripNormalization(f *testing.F) {
 		parsed := parseIP(raw)
 		if !parsed.IsValid() {
 			return
+		}
+		if parsed.Zone() != "" {
+			t.Fatalf("parsed address retained zone %q for %q", parsed.Zone(), raw)
 		}
 
 		roundTrip := parseIP(parsed.String())
@@ -62,7 +65,7 @@ func FuzzParseIP_RoundTripNormalization(f *testing.F) {
 }
 
 func FuzzParseRemoteAddr_RoundTripNormalization(f *testing.F) {
-	for _, seed := range []string{"1.1.1.1:443", "[2606:4700:4700::1]:443", "1.1.1.1", "2606:4700:4700::1", "example.com:443", ""} {
+	for _, seed := range []string{"1.1.1.1:443", "[2606:4700:4700::1]:443", "[fe80::1%eth0]:443", "1.1.1.1", "2606:4700:4700::1", "example.com:443", ""} {
 		f.Add(seed)
 	}
 
@@ -72,6 +75,9 @@ func FuzzParseRemoteAddr_RoundTripNormalization(f *testing.F) {
 		parsed := parseRemoteAddr(raw)
 		if !parsed.IsValid() {
 			return
+		}
+		if parsed.Zone() != "" {
+			t.Fatalf("parsed remote address retained zone %q for %q", parsed.Zone(), raw)
 		}
 
 		roundTrip := parseIP(parsed.String())

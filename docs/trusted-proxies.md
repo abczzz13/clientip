@@ -74,6 +74,12 @@ resolver, err := clientip.New(
 
 Published cloud public-service ranges are usually not the right trust boundary for private load-balancer-to-target traffic.
 
+## IPv6 Zones
+
+Addresses are normalized before any trust or plausibility check: IPv6 zone identifiers are removed and IPv4-mapped IPv6 addresses are unmapped. A `RemoteAddr` of `[fe80::1%eth0]:4567` is matched, reported, and compared as `fe80::1`.
+
+The zone is a local interface scope, not part of the peer's identity, and `netip.Prefix` carries no zone, so keeping it would make scoped addresses fail every prefix match. The trade-off is that `fe80::1%eth0` and `fe80::1%eth1` are indistinguishable to this package. That does not affect client IPs, which reject link-local addresses as implausible, but if you trust a link-local range as a proxy prefix it cannot separate peers by interface. Trust routable proxy addresses when per-interface distinction matters.
+
 ## Count-Only Trust
 
 `clientip` intentionally does not support count-only proxy trust. `WithMinTrustedProxies` and `WithMaxTrustedProxies` validate how many CIDR-trusted hops were observed; they do not make a header source trusted without `WithTrustedProxies` and a trusted immediate peer.
