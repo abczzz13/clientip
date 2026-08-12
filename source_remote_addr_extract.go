@@ -23,7 +23,7 @@ func (e remoteAddrExtractor) extract(remoteAddr string, source Source) (Extracti
 	}
 
 	return Extraction{
-		IP:     normalizeIP(ip),
+		IP:     ip,
 		Source: source,
 	}, nil
 }

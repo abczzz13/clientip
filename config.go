@@ -258,8 +258,9 @@ func LocalProxyPrefixes() []netip.Prefix {
 // ProxyPrefixesFromAddrs converts individual proxy addresses into host-sized
 // trusted prefixes.
 //
-// IPv4 addresses become /32 prefixes, IPv6 addresses become /128 prefixes, and
-// IPv4-mapped IPv6 addresses are normalized to IPv4 before conversion.
+// IPv4 addresses become /32 prefixes, IPv6 addresses become /128 prefixes,
+// IPv6 zones are removed, and IPv4-mapped IPv6 addresses are normalized to
+// IPv4 before conversion.
 func ProxyPrefixesFromAddrs(addrs ...netip.Addr) ([]netip.Prefix, error) {
 	prefixes := make([]netip.Prefix, 0, len(addrs))
 	for _, addr := range addrs {

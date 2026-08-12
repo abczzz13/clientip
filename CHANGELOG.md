@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- IPv6 zone identifiers are now removed during parsing, so `Result.IP`, `Extraction.IP`, `ParseRemoteAddr`, `StaticFallback`, and `ProxyPrefixesFromAddrs` never return a zoned address. A `RemoteAddr` such as `[fe80::1%eth0]:4567` now resolves and matches trusted-proxy prefixes as `fe80::1` instead of failing every prefix comparison. See `docs/trusted-proxies.md` for the interface-scope trade-off.
+
 ## [0.1.0] - 2026-05-29
 
 ### Added

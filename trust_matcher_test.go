@@ -50,24 +50,38 @@ func TestMatcherZeroPrefix(t *testing.T) {
 }
 
 func TestIsTrustedProxyUsesMatcher(t *testing.T) {
-	matcher := newPrefixMatcher([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
+	prefixes := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("2001:db8::/32"),
+	}
+	matcher := newPrefixMatcher(prefixes)
 	if !matcher.initialized {
 		t.Fatal("expected matcher to be initialized")
 	}
 
-	if !isTrustedProxy(netip.MustParseAddr("10.12.1.3"), matcher, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) {
+	if !isTrustedProxy(netip.MustParseAddr("10.12.1.3"), matcher, prefixes) {
 		t.Fatal("expected address to be trusted")
 	}
-	if isTrustedProxy(netip.MustParseAddr("8.8.8.8"), matcher, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) {
+	if !isTrustedProxy(netip.MustParseAddr("2001:db8::1%eth0"), matcher, prefixes) {
+		t.Fatal("expected zoned address to be trusted")
+	}
+	if isTrustedProxy(netip.MustParseAddr("8.8.8.8"), matcher, prefixes) {
 		t.Fatal("expected address to be untrusted")
 	}
 }
 
 func TestIsTrustedProxyLinearFallbackWhenMatcherMissing(t *testing.T) {
-	if !isTrustedProxy(netip.MustParseAddr("10.12.1.3"), prefixMatcher{}, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) {
+	prefixes := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("2001:db8::/32"),
+	}
+	if !isTrustedProxy(netip.MustParseAddr("10.12.1.3"), prefixMatcher{}, prefixes) {
 		t.Fatal("expected address to be trusted via linear fallback")
 	}
-	if isTrustedProxy(netip.MustParseAddr("8.8.8.8"), prefixMatcher{}, []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}) {
+	if !isTrustedProxy(netip.MustParseAddr("2001:db8::1%eth0"), prefixMatcher{}, prefixes) {
+		t.Fatal("expected zoned address to be trusted via linear fallback")
+	}
+	if isTrustedProxy(netip.MustParseAddr("8.8.8.8"), prefixMatcher{}, prefixes) {
 		t.Fatal("expected address to be untrusted via linear fallback")
 	}
 }
