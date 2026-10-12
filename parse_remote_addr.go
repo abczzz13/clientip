@@ -6,9 +6,11 @@ import "net/netip"
 // applying extractor plausibility policy.
 //
 // It accepts host:port values, bracketed IPv6 host:port values, and bare IP
-// literals. IPv6 zones are removed, and IPv4-mapped IPv6 addresses are
-// normalized to IPv4. Empty input returns ErrSourceUnavailable; unparsable
-// input returns ErrInvalidIP wrapped in RemoteAddrError.
+// literals. IPv6 zones are discarded rather than validated, and IPv4-mapped
+// IPv6 addresses are normalized to IPv4. Callers that need the interface scope
+// of a link-local peer should parse Request.RemoteAddr themselves. Empty input
+// returns ErrSourceUnavailable; unparsable input returns ErrInvalidIP wrapped
+// in RemoteAddrError.
 func ParseRemoteAddr(remoteAddr string) (netip.Addr, error) {
 	if remoteAddr == "" {
 		return netip.Addr{}, &ExtractionError{Err: ErrSourceUnavailable, Source: SourceRemoteAddr}

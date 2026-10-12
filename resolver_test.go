@@ -366,3 +366,35 @@ func TestResolveInputOperational_RemoteAddrFallback(t *testing.T) {
 		t.Fatalf("Classify() = %v, want %v", got, want)
 	}
 }
+
+func TestResolve_ZonedForwardedClientIP(t *testing.T) {
+	resolver, err := New(
+		WithTrustedProxies(netip.MustParsePrefix("127.0.0.0/8")),
+		WithSources(SourceXForwardedFor),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	t.Run("zone variants resolve to one address", func(t *testing.T) {
+		want := netip.MustParseAddr("2606:4700:4700::1111")
+		for _, xff := range []string{"2606:4700:4700::1111", "2606:4700:4700::1111%a", "2606:4700:4700::1111%b"} {
+			headers := http.Header{"X-Forwarded-For": {xff}}
+			result := resolver.ResolveHeaders(context.Background(), "127.0.0.1:12345", headers)
+			if result.Err != nil {
+				t.Fatalf("ResolveHeaders(%q) error = %v", xff, result.Err)
+			}
+			if result.IP != want {
+				t.Fatalf("ResolveHeaders(%q) IP = %v, want %v", xff, result.IP, want)
+			}
+		}
+	})
+
+	t.Run("zoned reserved address rejected", func(t *testing.T) {
+		headers := http.Header{"X-Forwarded-For": {"2001:db8::1%a"}}
+		result := resolver.ResolveHeaders(context.Background(), "127.0.0.1:12345", headers)
+		if result.Err == nil {
+			t.Fatalf("ResolveHeaders() IP = %v, want reserved-address error", result.IP)
+		}
+	})
+}

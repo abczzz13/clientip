@@ -30,10 +30,12 @@ func normalizeIP(ip netip.Addr) netip.Addr {
 // This is intentionally stricter than parseIP: it accepts bare IPs,
 // bracketed IPs, and bracketed IPs with a numeric port suffix only.
 func parseChainIP(s string) netip.Addr {
+	// Bare and bracketed literals; parseNormalizedIP trims one bracket pair.
 	if ip, ok := parseNormalizedIP(s); ok {
 		return ip
 	}
 
+	// The only remaining accepted form is [ip]:port with a numeric port.
 	if len(s) < 2 || s[0] != '[' {
 		return netip.Addr{}
 	}
@@ -43,15 +45,13 @@ func parseChainIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	rest := s[end+1:]
-	if len(rest) > 0 {
-		if rest[0] != ':' || len(rest) == 1 {
+	port := s[end+1:]
+	if len(port) < 2 || port[0] != ':' {
+		return netip.Addr{}
+	}
+	for i := 1; i < len(port); i++ {
+		if port[i] < '0' || port[i] > '9' {
 			return netip.Addr{}
-		}
-		for i := 1; i < len(rest); i++ {
-			if rest[i] < '0' || rest[i] > '9' {
-				return netip.Addr{}
-			}
 		}
 	}
 
@@ -151,11 +151,13 @@ func splitHostPortHost(s string) (string, bool) {
 }
 
 // parseNormalizedIP parses an IP literal that may carry one matched pair of
-// brackets. Trimming is safe for bare literals too: no address netip accepts
-// both starts with '[' and ends with ']'.
+// brackets. Trimming is safe for bare literals too: netip never accepts a
+// literal that both starts with '[' and ends with ']'.
 //
 // This is the only place in the package that calls netip.ParseAddr, so every
-// address the package hands back is normalized by construction.
+// parsed address is normalized by construction. Addresses supplied by callers
+// as netip.Addr, such as in StaticFallback and ProxyPrefixesFromAddrs, are
+// normalized at those entry points instead.
 func parseNormalizedIP(s string) (netip.Addr, bool) {
 	s = trimMatchedPair(s, '[', ']')
 	if s == "" {

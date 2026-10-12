@@ -15,6 +15,7 @@ linters:
     - ineffassign
     - errcheck
     - errorlint
+    - forbidigo
     - unused
     - misspell
     - nolintlint
@@ -22,6 +23,10 @@ linters:
     - testableexamples
     - thelper
   settings:
+    forbidigo:
+      forbid:
+        - pattern: ^netip\.ParseAddr$
+          msg: use parseNormalizedIP so parsed addresses are normalized
     revive:
       severity: warning
       confidence: 0.8
@@ -73,6 +78,11 @@ linters:
         - name: var-declaration
         - name: var-naming
         - name: waitgroup-by-value
+  exclusions:
+    rules:
+      - path: (parse_ip\.go|_test\.go)$
+        linters:
+          - forbidigo
 
 formatters:
   enable:

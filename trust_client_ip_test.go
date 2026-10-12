@@ -115,10 +115,10 @@ func TestEvaluateClientIPReservedRanges(t *testing.T) {
 }
 
 // TestEvaluateClientIPZoneDoesNotChangeClassification feeds zoned addresses
-// directly rather than through parseIP, so it covers the normalization inside
-// isReservedIP that callers constructing a netip.Addr themselves depend on.
-// netip.Prefix.Contains reports false for zoned addresses, so without it a
-// zone would silently downgrade a reserved address to a valid client IP.
+// directly rather than through parseIP, so it covers the defense-in-depth
+// normalization inside isReservedIP. netip.Prefix.Contains reports false for
+// zoned addresses, so without it a zone would silently downgrade a reserved
+// address to a valid client IP.
 func TestEvaluateClientIPZoneDoesNotChangeClassification(t *testing.T) {
 	policy := clientIPPolicy{}
 	for _, ip := range []netip.Addr{
@@ -131,14 +131,15 @@ func TestEvaluateClientIPZoneDoesNotChangeClassification(t *testing.T) {
 	}
 }
 
-// TestEvaluateClientIPZonedAllowlist covers the same normalization in
-// isAllowlistedReservedClientIP.
-func TestEvaluateClientIPZonedAllowlist(t *testing.T) {
-	policy := clientIPPolicy{AllowReservedClientPrefixes: []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}}
+// TestIsAllowlistedReservedClientIPZoned covers the same normalization in
+// isAllowlistedReservedClientIP. It calls the helper directly because through
+// evaluateClientIP a zoned address was already "valid" without normalization.
+func TestIsAllowlistedReservedClientIPZoned(t *testing.T) {
+	allowlist := []netip.Prefix{netip.MustParsePrefix("2001:db8::/32")}
 	ip := netip.MustParseAddr("2001:db8::1%eth0")
 
-	if got := evaluateClientIP(ip, policy); got != clientIPValid {
-		t.Fatalf("evaluateClientIP(%v) = %v, want %v", ip, got, clientIPValid)
+	if !isAllowlistedReservedClientIP(ip, allowlist) {
+		t.Fatalf("isAllowlistedReservedClientIP(%v) = false, want true", ip)
 	}
 }
 
