@@ -2,8 +2,27 @@
 
 ## Supported Versions
 
-This project is pre-`v0.1.0`. Security fixes are expected to target the latest
-published version and the `main` branch unless a maintainer announces otherwise.
+Security fixes target the `main` branch and the latest published release of
+each current module:
+
+- `github.com/abczzz13/clientip`
+- `github.com/abczzz13/clientip/observe/prometheus`
+
+Older releases and the legacy `github.com/abczzz13/clientip/prometheus` module
+are not maintained for security fixes unless a maintainer announces otherwise.
+Use the latest release of the module you depend on.
+
+## Go Toolchain Security
+
+The minimum Go version in `go.mod` describes source compatibility, not security
+support. Build and deploy applications with a patched, supported Go toolchain.
+For Go 1.26, use at least 1.26.9, which fixes the `net/http` vulnerabilities
+reported in the October 2026 security scan. Updating this library alone does not
+update the standard library linked into your application; rebuild and redeploy
+with the patched toolchain.
+
+CI selects the latest patch of its configured Go release lines using
+`actions/setup-go` with `check-latest: true` to avoid stale runner toolchains.
 
 ## Scope
 
@@ -23,9 +42,10 @@ If you believe you have found a security vulnerability, please report it using
 GitHub's private vulnerability reporting:
 https://github.com/abczzz13/clientip/security/advisories/new
 
-Please include the resolver options, proxy topology, relevant `RemoteAddr` and
-header values, expected result, actual result, and whether operational fallback
-was enabled. Avoid publishing exploit details publicly before triage.
+Please include the affected module path and version, Go toolchain version,
+resolver options, proxy topology, relevant `RemoteAddr` and header values,
+expected result, actual result, and whether operational fallback was enabled.
+Avoid publishing exploit details publicly before triage.
 
 ## Response Timeline
 
