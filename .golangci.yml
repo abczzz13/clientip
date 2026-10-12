@@ -30,8 +30,6 @@ linters:
     revive:
       severity: warning
       confidence: 0.8
-      error-code: 1
-      warning-code: 1
       rules:
         - name: blank-imports
         - name: bool-literal-in-expr
