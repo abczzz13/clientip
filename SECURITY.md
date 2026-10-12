@@ -2,24 +2,26 @@
 
 ## Supported Versions
 
-Security fixes target the `main` branch and the latest published release of
-each current module:
+Security fixes are applied to the `main` branch and released as a new version
+of each current module:
 
 - `github.com/abczzz13/clientip`
 - `github.com/abczzz13/clientip/observe/prometheus`
 
-Older releases and the legacy `github.com/abczzz13/clientip/prometheus` module
-are not maintained for security fixes unless a maintainer announces otherwise.
-Use the latest release of the module you depend on.
+Only the latest release of each current module is supported. Older releases are
+not maintained for security fixes unless a maintainer announces otherwise.
+
+The legacy `github.com/abczzz13/clientip/prometheus` module is no longer
+maintained. Migrate to `github.com/abczzz13/clientip/observe/prometheus`.
 
 ## Go Toolchain Security
 
 The minimum Go version in `go.mod` describes source compatibility, not security
-support. Build and deploy applications with a patched, supported Go toolchain.
-For Go 1.26, use at least 1.26.9, which fixes the `net/http` vulnerabilities
-reported in the October 2026 security scan. Updating this library alone does not
-update the standard library linked into your application; rebuild and redeploy
-with the patched toolchain.
+support. Build and deploy applications with the latest patch release of a
+supported Go version; see https://go.dev/doc/devel/release for current releases
+and the security fixes they include. Updating this library alone does not update
+the standard library linked into your application; rebuild and redeploy with
+the patched toolchain.
 
 CI selects the latest patch of its configured Go release lines using
 `actions/setup-go` with `check-latest: true` to avoid stale runner toolchains.
