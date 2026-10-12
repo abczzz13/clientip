@@ -12,6 +12,7 @@ Thanks for taking the time to contribute.
 
 - Minimum supported Go for both modules is `1.21`.
 - CI also runs maintainer tooling on Go `1.26.x` because some pinned tools require a newer toolchain.
+- Run `govulncheck` (`just security`) with the latest Go patch release; it checks standard-library vulnerabilities against the toolchain running it, so an outdated local Go reports findings that CI does not.
 - Keep changes focused and include tests where behavior changes.
 - Public API changes should update godocs, examples, README guidance, and `CHANGELOG.md` when relevant.
 
@@ -22,7 +23,7 @@ These maintainer tools are pinned or used by CI and may require Go `1.26.x`:
 ```bash
 go install github.com/just/just@latest
 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
-go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.10
 go install mvdan.cc/gofumpt@latest
 go install golang.org/x/tools/cmd/goimports@latest

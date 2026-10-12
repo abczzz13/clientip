@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- `SECURITY.md` now defines supported module versions, marks the legacy `github.com/abczzz13/clientip/prometheus` module as unmaintained, and documents Go toolchain patching expectations.
+- CI uses `actions/setup-go` with `check-latest: true` so builds and `govulncheck` run on the latest Go patch release.
+- `CONTRIBUTING.md` now pins `govulncheck` to `v1.3.0`, matching CI.
+
 ## [0.1.0] - 2026-05-29
 
 ### Added
