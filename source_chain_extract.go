@@ -81,7 +81,7 @@ func (e chainExtractor) extract(req requestView, source Source) (Extraction, *ex
 	}
 
 	result := Extraction{
-		IP:                normalizeIP(clientIP),
+		IP:                clientIP,
 		TrustedProxyCount: analysis.TrustedCount,
 		Source:            source,
 	}

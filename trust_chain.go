@@ -21,7 +21,9 @@ type chainAnalysis struct {
 
 // isTrustedProxy checks whether ip is inside the configured trusted proxy set.
 // The precomputed matcher is the hot path; cidrs is retained as a linear
-// fallback for zero-value or manually assembled policy values in tests.
+// fallback for zero-value or manually assembled policy values in tests. Like
+// the matcher, the fallback ignores IPv6 zones; netip.Prefix.Contains rejects
+// zoned addresses, so it strips them first.
 func isTrustedProxy(ip netip.Addr, matcher prefixMatcher, cidrs []netip.Prefix) bool {
 	if !ip.IsValid() {
 		return false
@@ -31,6 +33,7 @@ func isTrustedProxy(ip netip.Addr, matcher prefixMatcher, cidrs []netip.Prefix) 
 		return matcher.contains(ip)
 	}
 
+	ip = ip.WithZone("")
 	for _, cidr := range cidrs {
 		if cidr.Contains(ip) {
 			return true

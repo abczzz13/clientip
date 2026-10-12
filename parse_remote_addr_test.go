@@ -15,6 +15,7 @@ func TestParseRemoteAddr(t *testing.T) {
 	}{
 		{name: "host port", remoteAddr: "8.8.8.8:443", wantIP: "8.8.8.8"},
 		{name: "bracketed ipv6 host port", remoteAddr: "[2001:db8::1]:443", wantIP: "2001:db8::1"},
+		{name: "scoped ipv6 host port", remoteAddr: "[fe80::1%eth0]:443", wantIP: "fe80::1"},
 		{name: "bare ip", remoteAddr: "2001:db8::1", wantIP: "2001:db8::1"},
 		{name: "mapped ipv4 normalized", remoteAddr: "[::ffff:192.0.2.10]:443", wantIP: "192.0.2.10"},
 		{name: "empty", wantErr: ErrSourceUnavailable, wantErrType: &ExtractionError{}},
@@ -39,6 +40,9 @@ func TestParseRemoteAddr(t *testing.T) {
 			}
 			if got.String() != tt.wantIP {
 				t.Fatalf("IP = %q, want %q", got, tt.wantIP)
+			}
+			if got.Zone() != "" {
+				t.Fatalf("IP zone = %q, want empty", got.Zone())
 			}
 		})
 	}

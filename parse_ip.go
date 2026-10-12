@@ -6,8 +6,16 @@ import (
 	"strings"
 )
 
-// normalizeIP unmaps IPv4-in-IPv6 addresses to their IPv4 form.
+// normalizeIP puts an address in the canonical form used throughout the
+// package: IPv6 zones removed and IPv4-in-IPv6 addresses unmapped.
+//
+// The zone is stripped first so a zoned IPv4-mapped address such as
+// ::ffff:192.0.2.10%eth0 does not depend on Unmap discarding the zone.
 func normalizeIP(ip netip.Addr) netip.Addr {
+	if ip.Zone() != "" {
+		ip = ip.WithZone("")
+	}
+
 	if ip.Is4In6() {
 		return ip.Unmap()
 	}
@@ -16,16 +24,18 @@ func normalizeIP(ip netip.Addr) netip.Addr {
 }
 
 // parseChainIP parses an IP from a chain value that has already been
-// extracted and trimmed by a header parser.
+// extracted and trimmed by a header parser. The returned address is
+// normalized; see normalizeIP.
 //
 // This is intentionally stricter than parseIP: it accepts bare IPs,
 // bracketed IPs, and bracketed IPs with a numeric port suffix only.
 func parseChainIP(s string) netip.Addr {
-	ip, err := netip.ParseAddr(s)
-	if err == nil {
+	// Bare and bracketed literals; parseNormalizedIP trims one bracket pair.
+	if ip, ok := parseNormalizedIP(s); ok {
 		return ip
 	}
 
+	// The only remaining accepted form is [ip]:port with a numeric port.
 	if len(s) < 2 || s[0] != '[' {
 		return netip.Addr{}
 	}
@@ -35,27 +45,25 @@ func parseChainIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	rest := s[end+1:]
-	if len(rest) > 0 {
-		if rest[0] != ':' || len(rest) == 1 {
+	port := s[end+1:]
+	if len(port) < 2 || port[0] != ':' {
+		return netip.Addr{}
+	}
+	for i := 1; i < len(port); i++ {
+		if port[i] < '0' || port[i] > '9' {
 			return netip.Addr{}
-		}
-		for i := 1; i < len(rest); i++ {
-			if rest[i] < '0' || rest[i] > '9' {
-				return netip.Addr{}
-			}
 		}
 	}
 
-	ip, err = netip.ParseAddr(s[1:end])
-	if err == nil {
+	if ip, ok := parseNormalizedIP(s[1:end]); ok {
 		return ip
 	}
 
 	return netip.Addr{}
 }
 
-// parseIP extracts an IP address from the formats commonly found in proxy headers.
+// parseIP extracts an IP address from the formats commonly found in proxy
+// headers. The returned address is normalized; see normalizeIP.
 func parseIP(s string) netip.Addr {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -74,7 +82,7 @@ func parseIP(s string) netip.Addr {
 			return netip.Addr{}
 		}
 
-		ip, ok := parseHostIP(host)
+		ip, ok := parseNormalizedIP(host)
 		if !ok {
 			return netip.Addr{}
 		}
@@ -91,7 +99,7 @@ func parseIP(s string) netip.Addr {
 		return netip.Addr{}
 	}
 
-	ip, ok := parseHostIP(host)
+	ip, ok := parseNormalizedIP(host)
 	if !ok {
 		return netip.Addr{}
 	}
@@ -100,27 +108,19 @@ func parseIP(s string) netip.Addr {
 }
 
 // parseRemoteAddr extracts an IP address from Request.RemoteAddr-like input.
+// The returned address is normalized; see normalizeIP.
 func parseRemoteAddr(s string) netip.Addr {
 	host, ok := splitHostPortHost(s)
 	if !ok {
 		return parseIP(s)
 	}
 
-	ip, ok := parseHostIP(host)
+	ip, ok := parseNormalizedIP(host)
 	if !ok {
 		return netip.Addr{}
 	}
 
 	return ip
-}
-
-func parseHostIP(host string) (netip.Addr, bool) {
-	ip, err := netip.ParseAddr(host)
-	if err == nil {
-		return ip, true
-	}
-
-	return parseNormalizedIP(host)
 }
 
 func looksLikeHostPort(s string) bool {
@@ -150,6 +150,14 @@ func splitHostPortHost(s string) (string, bool) {
 	return host, true
 }
 
+// parseNormalizedIP parses an IP literal that may carry one matched pair of
+// brackets. Trimming is safe for bare literals too: netip never accepts a
+// literal that both starts with '[' and ends with ']'.
+//
+// This is the only place in the package that calls netip.ParseAddr, so every
+// parsed address is normalized by construction. Addresses supplied by callers
+// as netip.Addr, such as in StaticFallback and ProxyPrefixesFromAddrs, are
+// normalized at those entry points instead.
 func parseNormalizedIP(s string) (netip.Addr, bool) {
 	s = trimMatchedPair(s, '[', ']')
 	if s == "" {
@@ -161,7 +169,7 @@ func parseNormalizedIP(s string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 
-	return ip, true
+	return normalizeIP(ip), true
 }
 
 func trimMatchedPair(s string, start, end byte) string {
